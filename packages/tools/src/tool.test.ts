@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { z } from 'zod';
-import { createTool } from './tool.js';
+import { createTool, setGlobalCwd, type ToolContext } from './tool.js';
 
 describe('createTool', () => {
   it('filters out null values from input before validation', async () => {
@@ -103,5 +103,52 @@ describe('createTool', () => {
     );
     expect(result.error).toBeUndefined();
     expect(result.output).toEqual({ file: '/test.txt', old: 'hello', new: 'world' });
+  });
+
+  afterEach(() => {
+    setGlobalCwd('');
+  });
+
+  it('passes cwd to tool context via createTool param', async () => {
+    const schema = z.object({ file_path: z.string() });
+    const tool = createTool(
+      'TestTool7',
+      'A test tool',
+      schema,
+      async (input, ctx: ToolContext) => ({ output: { cwd: ctx.cwd, path: input.file_path } }),
+      '/my/project',
+    );
+    const result = await tool.execute({ file_path: 'test.txt' }, {} as any);
+    expect(result.error).toBeUndefined();
+    expect(result.output).toEqual({ cwd: '/my/project', path: 'test.txt' });
+  });
+
+  it('passes cwd to tool context via setGlobalCwd', async () => {
+    const schema = z.object({ file_path: z.string() });
+    const tool = createTool(
+      'TestTool8',
+      'A test tool',
+      schema,
+      async (input, ctx: ToolContext) => ({ output: { cwd: ctx.cwd, path: input.file_path } }),
+    );
+    setGlobalCwd('/global/project');
+    const result = await tool.execute({ file_path: 'test.txt' }, {} as any);
+    expect(result.error).toBeUndefined();
+    expect(result.output).toEqual({ cwd: '/global/project', path: 'test.txt' });
+  });
+
+  it('call-time cwd overrides global cwd', async () => {
+    const schema = z.object({ file_path: z.string() });
+    const tool = createTool(
+      'TestTool9',
+      'A test tool',
+      schema,
+      async (input, ctx: ToolContext) => ({ output: { cwd: ctx.cwd, path: input.file_path } }),
+      '/default/project',
+    );
+    setGlobalCwd('/global/project');
+    const result = await tool.execute({ file_path: 'test.txt' }, {} as any, '/override/project');
+    expect(result.error).toBeUndefined();
+    expect(result.output).toEqual({ cwd: '/override/project', path: 'test.txt' });
   });
 });

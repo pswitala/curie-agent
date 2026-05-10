@@ -1,7 +1,13 @@
 {
-  "extends": "./tsconfig.base.json",
-  "compilerOptions": {
-    "noEmit": true
-  },
-  "exclude": ["dist", "node_modules", "packages"]
+  "files": [],
+  "references": [
+    { "path": "packages/protocol" },
+    { "path": "packages/render" },
+    { "path": "packages/core" },
+    { "path": "packages/providers" },
+    { "path": "packages/tools" },
+    { "path": "packages/mcp" },
+    { "path": "packages/tui" },
+    { "path": "packages/cli" }
+  ]
 }

@@ -1,10 +1,10 @@
-import type { HopperSettings } from '../../core/src/settings.js';
+import type { CurieSettings } from '../../core/src/settings.js';
 import type { Message } from '../../core/src/turn-loop.js';
 import type { TabId } from './tab-bar.js';
 import { CronManager, pickNextSchedule, scheduleLabel } from '@curie-agent/core';
 
 export interface SlashCommandContext {
-  settings: HopperSettings;
+  settings: CurieSettings;
   version: string;
   model: string;
   provider: string;
@@ -285,7 +285,7 @@ function handleTheme(args: string): SlashCommandResult {
   return { type: 'update_theme', theme, message: `Theme changed to: ${theme}` };
 }
 
-function handleModel(args: string, settings?: HopperSettings): SlashCommandResult {
+function handleModel(args: string, settings?: CurieSettings): SlashCommandResult {
   const MODEL_COST_DEFAULT = '(not set)';
   const WINDOW_DEFAULT = 200_000;
 
@@ -465,7 +465,7 @@ function handleRemind(args: string, ctx: SlashCommandContext): SlashCommandResul
   const timeStr = new Date(task.scheduledAt).toLocaleString();
   return {
     type: 'message',
-    message: `Hopper reminder:\nDate: ${timeStr}\n${parsed.message}\nID: ${task.id}`,
+    message: `Curie reminder:\nDate: ${timeStr}\n${parsed.message}\nID: ${task.id}`,
   };
 }
 
@@ -744,7 +744,7 @@ function handleMcp(args: string, ctx: SlashCommandContext): SlashCommandResult {
   }
 }
 
-function handleTools(args: string, settings: HopperSettings): SlashCommandResult {
+function handleTools(args: string, settings: CurieSettings): SlashCommandResult {
   const toolsPerCall = settings.TOOLS_PER_CALL ?? 10;
   const websearchPerCall = settings.WEBSEARCH_PER_CALL ?? 5;
 
@@ -778,7 +778,7 @@ function handleTools(args: string, settings: HopperSettings): SlashCommandResult
   return result;
 }
 
-function handleWebsearch(args: string, settings: HopperSettings): SlashCommandResult {
+function handleWebsearch(args: string, settings: CurieSettings): SlashCommandResult {
   const websearchPerCall = settings.WEBSEARCH_PER_CALL ?? 5;
 
   if (!args.trim()) {

@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import { z } from 'zod';
 import { createTool, type ToolContext } from './tool.js';
+import { isPathAllowed, parseAllowlist } from '@curie-agent/core/safety/path-guard.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -23,6 +24,12 @@ export const bashTool = createTool(
   'Executes a bash command and returns its output. For shell-only operations.',
   BashSchema,
   async (input, ctx: ToolContext) => {
+    if (ctx.settings.SAFETY_PATH_GUARD !== 'off') {
+      if (!isPathAllowed(ctx.cwd, ctx.cwd, parseAllowlist(ctx.settings.SAFETY_PATH_ALLOWLIST ?? ''))) {
+        return { output: null, error: 'Bash: session cwd is outside allowed directories' };
+      }
+    }
+
     const shell = SHELLS[process.platform] || '/bin/sh';
     const timeout = Math.min(input.timeout || 120000, 600000);
 

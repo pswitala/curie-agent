@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { homedir } from 'node:os';
-import type { HopperSettings } from '@curie-agent/core';
+import type { CurieSettings } from '@curie-agent/core';
 
 export interface ToolDef {
   name: string;
@@ -14,7 +14,7 @@ export interface ToolDef {
 
 export interface Tool {
   definition: ToolDef;
-  execute: (input: Record<string, unknown>, settings: HopperSettings) => Promise<ToolResult>;
+  execute: (input: Record<string, unknown>, settings: CurieSettings, cwd?: string) => Promise<ToolResult>;
 }
 
 export interface ToolResult {
@@ -24,7 +24,7 @@ export interface ToolResult {
 
 export interface ToolContext {
   cwd: string;
-  settings: HopperSettings;
+  settings: CurieSettings;
 }
 
 export function expandPath(p: string): string {
@@ -32,6 +32,13 @@ export function expandPath(p: string): string {
     return homedir() + p.slice(1);
   }
   return p;
+}
+
+let _globalCwd = '';
+
+/** Set the global cwd used by all tools when not provided at call time. */
+export function setGlobalCwd(cwd: string): void {
+  _globalCwd = cwd;
 }
 
 function zodToJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
@@ -67,6 +74,7 @@ export function createTool<Schema extends z.ZodObject<z.ZodRawShape>>(
   description: string,
   schema: Schema,
   execute: (input: z.infer<Schema>, ctx: ToolContext) => Promise<ToolResult>,
+  cwd?: string,
 ): Tool & { validate: (raw: Record<string, unknown>) => z.infer<Schema> } {
   const jsonSchema = zodToJsonSchema(schema);
 
@@ -79,7 +87,7 @@ export function createTool<Schema extends z.ZodObject<z.ZodRawShape>>(
   return {
     definition: def,
     validate: (raw) => schema.parse(raw),
-    async execute(input: Record<string, unknown>, settings: HopperSettings) {
+    async execute(input: Record<string, unknown>, settings: CurieSettings, toolCwd?: string) {
       // Normalize input: strip null/undefined values and map camelCase
       // key aliases to their snake_case equivalents. LLMs (especially local
       // models) frequently normalize snake_case schema keys to camelCase.
@@ -94,7 +102,7 @@ export function createTool<Schema extends z.ZodObject<z.ZodRawShape>>(
       }
       try {
         const parsed = schema.parse(normalized) as z.infer<Schema>;
-        return execute(parsed, { cwd: '', settings });
+        return execute(parsed, { cwd: toolCwd ?? cwd ?? _globalCwd ?? '', settings });
       } catch (err) {
         if (err instanceof z.ZodError) {
           const details = err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');

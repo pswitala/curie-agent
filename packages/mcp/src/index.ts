@@ -11,7 +11,7 @@ export {
 } from './errors.js';
 export { createTransport } from './transport.js';
 
-import type { Tool as HopperTool } from '@curie-agent/tools';
+import type { Tool as CurieTool } from '@curie-agent/tools';
 import { MCPClient } from './client.js';
 import { MCPToolAdapter } from './tool-adapter.js';
 import type { MCPConfig } from './types.js';
@@ -22,22 +22,22 @@ export interface CreateMcpToolsOptions {
   /** Server configurations to connect to. */
   configs: MCPConfig[];
   /** Called when tools change on a server (via `notifications/tools/list_changed`). */
-  onToolsChanged?: (serverId: string, tools: HopperTool[]) => void;
+  onToolsChanged?: (serverId: string, tools: CurieTool[]) => void;
   /** Whether to continue connecting other servers even if one fails. Default: true. */
   failFast?: boolean;
 }
 
 /** Result of creating MCP tools from server configs. */
 export interface CreateMcpToolsResult {
-  /** All discovered tools wrapped as `HopperTool` instances. */
-  tools: HopperTool[];
+  /** All discovered tools wrapped as `CurieTool` instances. */
+  tools: CurieTool[];
   /** The active MCP clients — caller should dispose them on shutdown. */
   clients: MCPClient[];
 }
 
 /**
  * Connect to all configured MCP servers and return their tools wrapped
- * as `HopperTool` instances, plus the client handles for lifecycle management.
+ * as `CurieTool` instances, plus the client handles for lifecycle management.
  *
  * Servers that fail to connect are logged and skipped (unless `failFast: true`).
  */
@@ -48,7 +48,7 @@ export async function createMcpTools(
   const onToolsChanged = 'onToolsChanged' in options ? options.onToolsChanged : undefined;
   const failFast = 'failFast' in options ? options.failFast : false;
 
-  const allTools: HopperTool[] = [];
+  const allTools: CurieTool[] = [];
   const clients: MCPClient[] = [];
 
   for (const config of configs) {
@@ -72,7 +72,7 @@ export async function createMcpTools(
       continue;
     }
 
-    // Wrap each MCP tool from this server as a HopperTool
+    // Wrap each MCP tool from this server as a CurieTool
     const adapters = client.tools.map((mcpTool) =>
       new MCPToolAdapter(client, mcpTool, config.id),
     );

@@ -7,7 +7,7 @@ export type { ApprovalMode, PermissionRule, PermissionResult, PermissionDecision
 export { TurnLoop } from './turn-loop.js';
 export type { TurnLoopConfig, TurnLoopResult, ReasoningEffort, Message, AssistantBlock } from './turn-loop.js';
 export { SettingsManager } from './settings.js';
-export type { HopperSettings } from './settings.js';
+export type { CurieSettings } from './settings.js';
 export { DEFAULT_SETTINGS } from './settings.js';
 export { CronManager } from './cron-manager.js';
 export { parseReminderTime } from './reminder-parser.js';

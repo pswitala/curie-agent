@@ -1,7 +1,7 @@
 import { EventBus, type Event } from './event-bus.js';
 import { SessionStore, type SessionInfo } from './session-store.js';
 import { PermissionEngine, type ApprovalMode } from './permission.js';
-import type { HopperSettings } from './settings.js';
+import type { CurieSettings } from './settings.js';
 
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'max' | 'auto';
 
@@ -26,7 +26,7 @@ export interface ProviderStream {
 
 export interface Tool {
   definition: { name: string; description: string; inputSchema: unknown };
-  execute: (input: Record<string, unknown>, settings: any) => Promise<{ output: unknown; error?: string }>;
+  execute: (input: Record<string, unknown>, settings: any, cwd?: string) => Promise<{ output: unknown; error?: string }>;
 }
 
 export type ProviderEvent =
@@ -42,7 +42,7 @@ export interface TurnLoopConfig {
   model: string;
   tools: Tool[];
   cwd: string;
-  settings: HopperSettings;
+  settings: CurieSettings;
   approvalMode?: ApprovalMode;
   permissions?: Record<string, string[]>;
   maxTurns?: number;
@@ -489,7 +489,7 @@ export class TurnLoop {
           }
 
           try {
-            const result = await tool.execute(tc.input, this.config.settings);
+            const result = await tool.execute(tc.input, this.config.settings, this.config.cwd);
             emit({ type: 'tool-result', id: session.id, toolCallId: tc.id, output: result.output, error: result.error, timestamp: Date.now() });
             const outputStr = result.error ? `Error: ${result.error}` : JSON.stringify(result.output);
             const decisionLabel = toolDecisionBy === 'llm' ? 'LLM-approved' : toolDecisionBy === 'user' ? 'Approved by user' : 'Auto Approved';

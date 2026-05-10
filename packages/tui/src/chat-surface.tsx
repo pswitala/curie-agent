@@ -545,7 +545,7 @@ export function ChatSurface({
       );
     }
     if (msg.role === 'system') {
-      const isReminder = msg.content.startsWith('Hopper reminder:');
+      const isReminder = msg.content.startsWith('Curie reminder:');
       if (isReminder) {
         return (
           <Box key={String(key)} flexDirection="column" borderStyle="single" borderColor={warning} borderTop={false} borderRight={false} borderBottom={false} marginLeft={1} marginTop={1} marginBottom={1} paddingX={1}>

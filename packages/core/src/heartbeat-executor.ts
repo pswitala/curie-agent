@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
 import { EventBus } from './event-bus.js';
 import { TurnLoop, type ReasoningEffort, type ProviderStream, type Tool } from './turn-loop.js';
-import type { HopperSettings } from './settings.js';
+import type { CurieSettings } from './settings.js';
 import type { ScheduleType } from './cron-manager.js';
 
 export interface HeartbeatExecutorConfig {
@@ -11,7 +11,7 @@ export interface HeartbeatExecutorConfig {
   model: string;
   tools: Tool[];
   cwd: string;
-  settings: HopperSettings;
+  settings: CurieSettings;
   effort?: ReasoningEffort;
   /** Max turns for the tool-use loop (default 30). */
   maxTurns?: number;
@@ -50,7 +50,7 @@ class BatchTurnLoop {
     model: string;
     tools: Tool[];
     cwd: string;
-    settings: HopperSettings;
+    settings: CurieSettings;
     effort?: ReasoningEffort;
     maxTurns?: number;
     system?: string;

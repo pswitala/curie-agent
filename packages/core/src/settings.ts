@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-export interface HopperSettings {
+export interface CurieSettings {
   model: string;
   effort: 'low' | 'medium' | 'high' | 'max' | 'auto';
   mode: 'plan' | 'edit' | 'auto' | 'yolo';
@@ -49,13 +49,17 @@ export interface HopperSettings {
   MODEL_COST?: string;
   // Model context window in tokens
   MODEL_CONTEXT_WINDOW?: number;
+  // Safety: path guard — reject Write/Edit/Bash outside cwd + allowlist
+  SAFETY_PATH_GUARD?: 'on' | 'off';
+  // Safety: comma-separated absolute paths allowed in addition to cwd
+  SAFETY_PATH_ALLOWLIST?: string;
 }
 
-export const DEFAULT_SETTINGS: HopperSettings = {
+export const DEFAULT_SETTINGS: CurieSettings = {
   model: 'claude-sonnet-4-6',
   effort: 'auto',
   mode: 'auto',
-  theme: 'tokyo-night',
+  theme: 'nerd',
   statusline: true,
   debug: false,
   BRAVE_SEARCH_API_KEY: '',
@@ -71,9 +75,11 @@ export const DEFAULT_SETTINGS: HopperSettings = {
   HEARTBEAT_DAILY: '6:00',
   HEARTBEAT_WEEKLY: 'monday@6:00',
   HEARTBEAT_MONTHLY: '1@6:00',
+  SAFETY_PATH_GUARD: 'on',
+  SAFETY_PATH_ALLOWLIST: '',
 };
 
-function migrateMode(raw: unknown): HopperSettings['mode'] {
+function migrateMode(raw: unknown): CurieSettings['mode'] {
   if (typeof raw !== 'string') return DEFAULT_SETTINGS.mode;
   switch (raw) {
     case 'plan': case 'edit': case 'auto': case 'yolo': return raw;
@@ -88,13 +94,13 @@ const CONFIG_DIR = join(homedir(), '.curie-agent');
 const SETTINGS_FILE = join(CONFIG_DIR, 'settings.json');
 
 export class SettingsManager {
-  private settings: HopperSettings;
+  private settings: CurieSettings;
 
   constructor() {
     this.settings = { ...DEFAULT_SETTINGS };
   }
 
-  load(): HopperSettings {
+  load(): CurieSettings {
     this.settings = { ...DEFAULT_SETTINGS };
     if (existsSync(SETTINGS_FILE)) {
       try {
@@ -117,9 +123,9 @@ export class SettingsManager {
             return undefined;
           };
 
-          const merged: HopperSettings = {
+          const merged: CurieSettings = {
             model: (parsed.model as string) ?? DEFAULT_SETTINGS.model,
-            effort: (parsed.effort as HopperSettings['effort']) ?? DEFAULT_SETTINGS.effort,
+            effort: (parsed.effort as CurieSettings['effort']) ?? DEFAULT_SETTINGS.effort,
             mode: migrateMode(parsed.mode),
             theme: (parsed.theme as string) ?? DEFAULT_SETTINGS.theme,
             statusline: (parsed.statusline as boolean) ?? DEFAULT_SETTINGS.statusline,
@@ -154,6 +160,8 @@ export class SettingsManager {
             MODEL_COST: (parsed.MODEL_COST as string) ?? (parsed.model_cost as string),
             MODEL_CONTEXT_WINDOW: (typeof parsed.MODEL_CONTEXT_WINDOW === 'number' && parsed.MODEL_CONTEXT_WINDOW > 0)
               ? parsed.MODEL_CONTEXT_WINDOW : undefined,
+            SAFETY_PATH_GUARD: (parsed.SAFETY_PATH_GUARD as 'on' | 'off') ?? DEFAULT_SETTINGS.SAFETY_PATH_GUARD,
+            SAFETY_PATH_ALLOWLIST: (parsed.SAFETY_PATH_ALLOWLIST as string) ?? '',
           };
           this.settings = merged;
         }
@@ -171,13 +179,13 @@ export class SettingsManager {
     writeFileSync(SETTINGS_FILE, JSON.stringify(this.settings, null, 2) + '\n');
   }
 
-  update(partial: Partial<HopperSettings>): HopperSettings {
+  update(partial: Partial<CurieSettings>): CurieSettings {
     this.settings = { ...this.settings, ...partial };
     this.save();
     return this.settings;
   }
 
-  get(): HopperSettings {
+  get(): CurieSettings {
     return { ...this.settings };
   }
 }

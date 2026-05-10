@@ -1,9 +1,9 @@
-import type { Tool as HopperTool, ToolDef, ToolResult } from '@curie-agent/tools';
+import type { Tool as CurieTool, ToolDef, ToolResult } from '@curie-agent/tools';
 import type { MCPClient } from './client.js';
 import type { Tool as MCPTool } from '@modelcontextprotocol/sdk/types.js';
-import type { HopperSettings } from '@curie-agent/core';
+import type { CurieSettings } from '@curie-agent/core';
 
-export class MCPToolAdapter implements HopperTool {
+export class MCPToolAdapter implements CurieTool {
   readonly definition: ToolDef;
   private client: MCPClient;
   private readonly mcpToolName: string;
@@ -22,7 +22,7 @@ export class MCPToolAdapter implements HopperTool {
     };
   }
 
-  async execute(input: Record<string, unknown>, _settings: HopperSettings): Promise<ToolResult> {
+  async execute(input: Record<string, unknown>, _settings: CurieSettings): Promise<ToolResult> {
     const result = await this.client.callTool(this.mcpToolName, input);
 
     // Convert MCP CallToolResult content array -> string

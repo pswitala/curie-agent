@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ChannelRegistry } from './channel-registry.js';
 import { ChannelRouter } from './channel-router.js';
-import type { HopperSettings } from './settings.js';
+import type { CurieSettings } from './settings.js';
 
 describe('ChannelRouter', () => {
   let registry: ChannelRegistry;
-  let settings: HopperSettings;
+  let settings: CurieSettings;
   let router: ChannelRouter;
   let sentMessages: Array<{ chatId: string; text: string }>;
 

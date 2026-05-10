@@ -4,6 +4,16 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@curie-agent/core': workspace:^0.1.2
+  '@curie-agent/protocol': workspace:^0.1.2
+  '@curie-agent/providers': workspace:^0.1.2
+  '@curie-agent/render': workspace:^0.1.2
+  '@curie-agent/tools': workspace:^0.1.2
+  '@curie-agent/mcp': workspace:^0.1.2
+  '@curie-agent/tui': workspace:^0.1.2
+  '@curie-agent/cli': workspace:^0.1.2
+
 importers:
 
   .:
@@ -54,25 +64,25 @@ importers:
   packages/cli:
     dependencies:
       '@curie-agent/core':
-        specifier: workspace:^0.2.4
+        specifier: workspace:^0.1.2
         version: link:../core
       '@curie-agent/mcp':
-        specifier: workspace:^0.2.4
+        specifier: workspace:^0.1.2
         version: link:../mcp
       '@curie-agent/protocol':
-        specifier: workspace:^0.2.4
+        specifier: workspace:^0.1.2
         version: link:../protocol
       '@curie-agent/providers':
-        specifier: workspace:^0.2.4
+        specifier: workspace:^0.1.2
         version: link:../providers
       '@curie-agent/render':
-        specifier: workspace:^0.2.4
+        specifier: workspace:^0.1.2
         version: link:../render
       '@curie-agent/tools':
-        specifier: workspace:^0.2.4
+        specifier: workspace:^0.1.2
         version: link:../tools
       '@curie-agent/tui':
-        specifier: workspace:^0.2.4
+        specifier: workspace:^0.1.2
         version: link:../tui
       '@types/react':
         specifier: ^19.0.0
@@ -110,10 +120,10 @@ importers:
   packages/mcp:
     dependencies:
       '@curie-agent/core':
-        specifier: workspace:^0.2.4
+        specifier: workspace:^0.1.2
         version: link:../core
       '@curie-agent/tools':
-        specifier: workspace:^0.2.4
+        specifier: workspace:^0.1.2
         version: link:../tools
       '@modelcontextprotocol/sdk':
         specifier: ^1.12.0
@@ -195,7 +205,7 @@ importers:
   packages/tools:
     dependencies:
       '@curie-agent/core':
-        specifier: workspace:^0.2.4
+        specifier: workspace:^0.1.2
         version: link:../core
       zod:
         specifier: ^4.4.3
@@ -211,13 +221,13 @@ importers:
   packages/tui:
     dependencies:
       '@curie-agent/core':
-        specifier: workspace:^0.2.4
+        specifier: workspace:^0.1.2
         version: link:../core
       '@curie-agent/protocol':
-        specifier: workspace:^0.2.4
+        specifier: workspace:^0.1.2
         version: link:../protocol
       '@curie-agent/render':
-        specifier: workspace:^0.2.4
+        specifier: workspace:^0.1.2
         version: link:../render
       '@types/react':
         specifier: ^19.0.0

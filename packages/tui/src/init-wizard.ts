@@ -1,4 +1,4 @@
-import { HopperSettings } from '../../core/src/settings.js';
+import { CurieSettings } from '../../core/src/settings.js';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -77,16 +77,16 @@ function homeDir(): string {
   return os.homedir();
 }
 
-function hopperDir(): string {
+function CurieDir(): string {
   return path.join(homeDir(), '.curie-agent');
 }
 
 function filePath(name: string): string {
-  return path.join(hopperDir(), name);
+  return path.join(CurieDir(), name);
 }
 
-function writeHopperFile(name: string, content: string): void {
-  const dir = hopperDir();
+function writeCurieFile(name: string, content: string): void {
+  const dir = CurieDir();
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
@@ -150,7 +150,7 @@ function getAskName(question: string, defaultVal: string): string {
 function getIdentityQuestion(step: string, data: InitData): string {
   switch (step) {
     case 'soul-name':
-      return getAskName('What should your AI assistant\'s name be?', 'Hopper');
+      return getAskName('What should your AI assistant\'s name be?', 'Curie');
     case 'soul-vibe':
       return getAskName('Describe your assistant\'s vibe/personality (1 sentence).', 'AI coding assistant — sharp, resourceful, gets things done');
     case 'user-name':
@@ -196,7 +196,7 @@ function getSubStep(data: InitData, group: 'soul' | 'user'): string {
   return '';
 }
 
-export function advanceStep(state: InitWizardState, answer: string, _settings: HopperSettings): InitWizardState | null {
+export function advanceStep(state: InitWizardState, answer: string, _settings: CurieSettings): InitWizardState | null {
   const { step, data } = state;
   const nextData = { ...data };
 
@@ -242,7 +242,7 @@ export function advanceStep(state: InitWizardState, answer: string, _settings: H
     case 'soul': {
       const sub = getSubStep(data, 'soul');
       if (sub === 'soul-name') {
-        nextData.soul = { ...data.soul, name: answer.trim() || 'Hopper' };
+        nextData.soul = { ...data.soul, name: answer.trim() || 'Curie' };
         return {
           step: 'soul',
           data: nextData,
@@ -331,7 +331,7 @@ function createIdentityFiles(data: InitData): void {
   const timestamp = new Date().toISOString();
 
   // SOUL.md
-  writeHopperFile('SOUL.md', [
+  writeCurieFile('SOUL.md', [
     `# SOUL.md - Who You Are`,
     '',
     `_You're not a chatbot. You're becoming someone._`,
@@ -372,7 +372,7 @@ function createIdentityFiles(data: InitData): void {
   ].join('\n'));
 
   // USER.md
-  writeHopperFile('USER.md', [
+  writeCurieFile('USER.md', [
     `# USER.md - About Your Human`,
     '',
     `_Learn about the person you're helping. Update this as you go._`,
@@ -462,10 +462,10 @@ function createIdentityFiles(data: InitData): void {
     '_This is a starting point. Add your own conventions as you figure out what works._',
     '',
   ].join('\n');
-  writeHopperFile('AGENTS.md', agentsContent);
+  writeCurieFile('AGENTS.md', agentsContent);
 
   // MEMORY.md
-  writeHopperFile('MEMORY.md', [
+  writeCurieFile('MEMORY.md', [
     '# MEMORY.md - Long-Term Memory',
     '',
     `## Identity`,
@@ -485,7 +485,7 @@ function createIdentityFiles(data: InitData): void {
   ].join('\n'));
 
   // TOOLS.md
-  writeHopperFile('TOOLS.md', [
+  writeCurieFile('TOOLS.md', [
     '# TOOLS.md - Tool Notes',
     '',
     'Keep local notes here: camera names, SSH details, voice preferences, etc.',
@@ -499,7 +499,7 @@ function createIdentityFiles(data: InitData): void {
   ].join('\n'));
 
   // HEARTBEAT.md
-  writeHopperFile('HEARTBEAT.md', [
+  writeCurieFile('HEARTBEAT.md', [
     '# HEARTBEAT.md - Workspace Context',
     '',
     'Use this file to track what needs attention. The agent should check this on heartbeat.',
@@ -543,7 +543,7 @@ export function isAlreadyInitialized(): boolean {
   return fs.existsSync(soulPath) && fs.existsSync(settingsPath);
 }
 
-export function getExistingProvider(settings: HopperSettings): ProviderName | undefined {
+export function getExistingProvider(settings: CurieSettings): ProviderName | undefined {
   const provider = settings.MODEL_PROVIDER?.toLowerCase();
   if (provider && PROVIDER_INFO[provider as ProviderName]) {
     return provider as ProviderName;
@@ -551,7 +551,7 @@ export function getExistingProvider(settings: HopperSettings): ProviderName | un
   return undefined;
 }
 
-export function getInitialWizardState(settings: HopperSettings): InitWizardState {
+export function getInitialWizardState(settings: CurieSettings): InitWizardState {
   const existingProvider = getExistingProvider(settings);
   return {
     step: 'provider',

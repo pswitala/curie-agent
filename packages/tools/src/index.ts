@@ -1,4 +1,4 @@
-export { type Tool, type ToolResult, type ToolContext, type ToolDef, createTool } from './tool.js';
+export { type Tool, type ToolResult, type ToolContext, type ToolDef, createTool, setGlobalCwd } from './tool.js';
 export { readTool } from './read.js';
 export { editTool } from './edit.js';
 export { writeTool } from './write.js';

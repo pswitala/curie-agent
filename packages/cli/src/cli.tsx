@@ -14,9 +14,9 @@ const __filename = fileURLToPath(import.meta.url);
 
 import { ChatSurface, handleSlashCommand, COLD_START_BANNER } from '@curie-agent/tui';
 import { getTheme } from '@curie-agent/render';
-import { TurnLoop, SettingsManager, DEFAULT_SETTINGS, CronManager, TelegramGateway, ChannelRegistry, ChannelRouter, HeartbeatExecutor, HeartbeatDelivery, pickNextSchedule, scheduleLabel, type HopperSettings, type ScheduleType, type Message } from '@curie-agent/core';
+import { TurnLoop, SettingsManager, DEFAULT_SETTINGS, CronManager, TelegramGateway, ChannelRegistry, ChannelRouter, HeartbeatExecutor, HeartbeatDelivery, pickNextSchedule, scheduleLabel, type CurieSettings, type ScheduleType, type Message } from '@curie-agent/core';
 import { AnthropicProvider, OpenAIProvider, OllamaProvider, GoogleGeminiProvider, OpenRouterProvider } from '@curie-agent/providers';
-import { allTools } from '@curie-agent/tools';
+import { allTools, setGlobalCwd } from '@curie-agent/tools';
 import { createMcpTools, MCPClient, type MCPConfig } from '@curie-agent/mcp';
 import type { Event, CronTask } from '@curie-agent/core';
 import type { SlashCommandInput, SlashCommandResult, SlashCommandContext, ProjectEntry } from '@curie-agent/tui';
@@ -32,7 +32,7 @@ const TEMPLATES_DIR = existsSync(join(__dir, '..', '..', 'templates'))
   ? join(__dir, '..', '..', 'templates')   // prod: dist/src/
   : join(__dir, '..', 'templates');         // dev: src/
 
-type HopperMode = 'plan' | 'edit' | 'auto' | 'yolo';
+type CurieMode = 'plan' | 'edit' | 'auto' | 'yolo';
 
 interface AgentEntry {
   id: string;
@@ -621,7 +621,7 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
     const briefTask = task as CronTask & { heartbeatBrief?: string };
     const msg = briefTask.heartbeatBrief
       ? { role: 'heartbeat' as const, title: task.schedule ? scheduleLabel(task.schedule.type) : 'MANUAL', content: briefTask.heartbeatBrief }
-      : { role: 'system' as const, content: `Hopper reminder:\nDate: ${timeStr}\n${task.message}` };
+      : { role: 'system' as const, content: `Curie reminder:\nDate: ${timeStr}\n${task.message}` };
 
     if (busyRef.current) {
       // Queue the message — don't displace the streaming assistant response
@@ -855,7 +855,7 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
         {
           const sysMsg = {
             role: 'system' as const,
-            content: `Hopper reminder:\nDate: ${note.scheduledAt}\n${note.message}`,
+            content: `Curie reminder:\nDate: ${note.scheduledAt}\n${note.message}`,
           };
           setChannelMessages((prev) => {
             const ch = prev[activeChannelId] || [];
@@ -1302,11 +1302,11 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
         // Copy template files as-is to ~/.curie-agent/
         (async () => {
           try {
-            const hopperDir = join(homedir(), '.curie-agent');
-            if (!existsSync(hopperDir)) {
-              mkdirSync(hopperDir, { recursive: true });
+            const CurieDir = join(homedir(), '.curie-agent');
+            if (!existsSync(CurieDir)) {
+              mkdirSync(CurieDir, { recursive: true });
             }
-            const memoryDir = join(hopperDir, 'memory');
+            const memoryDir = join(CurieDir, 'memory');
             if (!existsSync(memoryDir)) {
               mkdirSync(memoryDir, { recursive: true });
             }
@@ -1317,7 +1317,7 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
                 continue;
               }
               const content = readFileSync(templatePath, 'utf-8');
-              writeFileSync(join(hopperDir, filename), content, 'utf-8');
+              writeFileSync(join(CurieDir, filename), content, 'utf-8');
               pushToChannel(targetChannel, `  Wrote ${filename}`);
             }
             pushToChannel(targetChannel, '\nReady! Type a message to get started.');
@@ -1352,6 +1352,7 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
       }
       // Try to resume an existing session for this channel
       const channel = channelRegistry.get(targetChannel);
+      setGlobalCwd(currentCwd);
       loop = new TurnLoop({
         provider: streamProviderHolder.current,
         model: currentModel,
@@ -1454,7 +1455,7 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
       loop.eventBus.subscribe('session-start', (e: Event) => {
         if (e.type === 'session-start') {
           sessionIdRef.current = e.id;
-          (globalThis as { __hopperSessionId?: string }).__hopperSessionId = e.id;
+          (globalThis as { __CurieSessionId?: string }).__CurieSessionId = e.id;
         }
       }),
       loop.eventBus.subscribe('session-resumed', (e: Event) => {
@@ -1696,7 +1697,7 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
 
   const onModeChange = useCallback((mode: string) => {
     setCurrentMode(mode);
-    settingsMgr.current!.update({ mode: mode as HopperMode });
+    settingsMgr.current!.update({ mode: mode as CurieMode });
     // Rebuild the TurnLoop on next turn so the permission engine picks up
     // the new approval mode.
     loopRef.current = null;
@@ -1813,7 +1814,7 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function createProvider(settings: HopperSettings): any | null {
+function createProvider(settings: CurieSettings): any | null {
   const providerName =
     typeof settings.MODEL_PROVIDER === 'string'
       ? settings.MODEL_PROVIDER.trim().toLowerCase()
@@ -2147,6 +2148,7 @@ async function main() {
   const mergedTools = [...allTools, ...mcpToolsRef.current];
 
   if (args.prompt && args.headless) {
+    setGlobalCwd(cwd);
     const loop = new TurnLoop({
       provider: streamProviderHolder.current,
       model,
@@ -2183,7 +2185,7 @@ async function main() {
       client.disconnect().catch(() => {});
     }
     process.stdout.write(RESET_BG);
-    const id = (globalThis as { __hopperSessionId?: string }).__hopperSessionId;
+    const id = (globalThis as { __CurieSessionId?: string }).__CurieSessionId;
     if (id) {
       process.stdout.write(`\nSession saved. Resume with: curie-agent resume ${id}\n`);
     }
@@ -2278,7 +2280,7 @@ async function main() {
     const chatId = settings.TELEGRAM_CHAT_ID ?? telegramChatIdRef.current;
     if (chatId && telegramGateway) {
       const timeStr = new Date(task.scheduledAt).toLocaleString();
-      telegramGateway.sendMessage(chatId, `Hopper reminder:\nDate: ${timeStr}\n${task.message}`).catch(() => {});
+      telegramGateway.sendMessage(chatId, `Curie reminder:\nDate: ${timeStr}\n${task.message}`).catch(() => {});
     }
   });
 

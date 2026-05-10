@@ -24,7 +24,7 @@ export const webFetchTool = createTool(
     const response = await fetch(url.toString(), {
       headers: {
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'User-Agent': 'Mozilla/5.0 (compatible; HopperBot/1.0)',
+        'User-Agent': 'Mozilla/5.0 (compatible; CurieBot/1.0)',
       },
     });
 
