@@ -15,7 +15,7 @@ const __filename = fileURLToPath(import.meta.url);
 import { ChatSurface, handleSlashCommand, COLD_START_BANNER } from '@curie-agent/tui';
 import { getTheme } from '@curie-agent/render';
 import { TurnLoop, SettingsManager, DEFAULT_SETTINGS, CronManager, TelegramGateway, ChannelRegistry, ChannelRouter, HeartbeatExecutor, HeartbeatDelivery, pickNextSchedule, scheduleLabel, type HopperSettings, type ScheduleType, type Message } from '@curie-agent/core';
-import { AnthropicProvider, OpenAIProvider, OllamaProvider, GoogleGeminiProvider } from '@curie-agent/providers';
+import { AnthropicProvider, OpenAIProvider, OllamaProvider, GoogleGeminiProvider, OpenRouterProvider } from '@curie-agent/providers';
 import { allTools } from '@curie-agent/tools';
 import { createMcpTools, MCPClient, type MCPConfig } from '@curie-agent/mcp';
 import type { Event, CronTask } from '@curie-agent/core';
@@ -1237,7 +1237,7 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
         }
         const updates: Record<string, string> = { MODEL_PROVIDER: entry.name };
         updates[entry.key] = '';
-        updates[entry.url] = entry.name === 'openrouter' ? 'https://openrouter.ai/api'
+        updates[entry.url] = entry.name === 'openrouter' ? 'https://openrouter.ai/api/v1'
           : entry.name === 'anthropic' ? 'https://api.anthropic.com'
           : entry.name === 'google' ? 'https://generativelanguage.googleapis.com/v1beta'
           : `https://api.${entry.name}.com/v1`;
@@ -1269,7 +1269,7 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
           pushToChannel(targetChannel, `URL configured: http://localhost:11434/v1\nWhich model do you want to use?\n  Examples: llama3.3, mistral, phi3, qwen2.5\n  Enter model name:`);
         } else if (wizard.provider === 'google') {
           wizardRef.current = { phase: 'model', provider: wizard.provider };
-          pushToChannel(targetChannel, `API key configured.\nWhich model do you want to use?\n  Examples: gemini-2.5-flash, gemini-2.5-pro, gemini-2.0-flash\n  Enter model name:`);
+          pushToChannel(targetChannel, `API key configured.\nWhich model do you want to use?\n  Examples: gemini-3-flash-latest, gemini-3.1-pro\n  Enter model name:`);
         } else {
           wizardRef.current = { phase: 'model', provider: wizard.provider };
           pushToChannel(targetChannel, `API key configured.\nWhich model do you want to use?\n  Examples: claude-sonnet-4-6, gpt-4o, o1, llama-3.1-405b\n  Enter model name:`);
@@ -1282,7 +1282,7 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
         const url = input || defaultUrl;
         settingsMgr.current!.update({ MODEL_URL: url });
         const modelExamples = wizard.provider === 'ollama'
-          ? 'llama3.3, mistral, phi3, qwen2.5'
+          ? 'llama3.3, mistral, gemma-4, qwen3.6'
           : 'claude-sonnet-4-6, gpt-4o, o1, llama-3.1-405b';
         wizardRef.current = { phase: 'model', provider: wizard.provider };
         pushToChannel(targetChannel, `URL configured: ${url}\nWhich model do you want to use?\n  Examples: ${modelExamples}\n  Enter model name:`);
@@ -1855,8 +1855,8 @@ function createProvider(settings: HopperSettings): any | null {
       );
       return null;
     }
-    const p = new AnthropicProvider(orKey, orUrl);
-    return { name: 'openrouter', stream: p.stream.bind(p), check: p.check.bind(p) };
+    const p = new OpenRouterProvider(orKey, orUrl);
+    return { name: 'openrouter', stream: p.stream.bind(p), check: p.check.bind(p), complete: p.complete.bind(p) };
   }
 
   if (providerName === 'ollama' || providerName === 'local') {

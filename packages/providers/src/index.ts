@@ -12,3 +12,4 @@ export { AnthropicProvider } from './anthropic.js';
 export { OpenAIProvider } from './openai.js';
 export { OllamaProvider } from './ollama.js';
 export { GoogleGeminiProvider } from './google.js';
+export { OpenRouterProvider } from './openrouter.js';
