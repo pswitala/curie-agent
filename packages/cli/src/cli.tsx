@@ -1923,7 +1923,7 @@ function createProvider(settings: CurieSettings): any | null {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const cwd = args.cwd || process.cwd();
+  const cwd = args.cwd || join(homedir(), '.curie-agent');
 
   if (args.version) {
     console.log(`curie-agent ${VERSION}`);
