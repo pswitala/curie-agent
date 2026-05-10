@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Box, Text, Static, useInput, useApp, useStdout } from 'ink';
+import { Box, Text, Static, useInput, usePaste, useApp, useStdout } from 'ink';
 import { TAB_IDS, type TabId } from './tab-bar.js';
 import { Footer } from './footer.js';
 import { EffortPicker, EFFORT_LEVELS, type EffortLevel } from './effort-picker.js';
@@ -339,10 +339,10 @@ export function ChatSurface({
     }
 
     if (key.return) {
-      // Shift+Enter or Alt+Enter insert a newline. Works only when the
-      // terminal emits a distinct sequence for the modifier (most modern
-      // terminals do; see the raw stdin listener below for CSI-u fallback).
-      if (key.shift || key.meta) {
+      // Ctrl+Enter inserts a newline. In raw mode, Shift/Alt are not
+      // detected for Enter by Ink's keypress parser — only Ctrl+Enter
+      // produces a detectable Ctrl modifier in practice.
+      if (key.ctrl) {
         const c = cursorPos;
         setInputText(prev => prev.slice(0, c) + '\n' + prev.slice(c));
         setCursorPos(c + 1);
@@ -410,10 +410,24 @@ export function ChatSurface({
       if (historyIndex !== null) setHistoryIndex(null);
       const c = cursorPos;
       setInputText(prev => prev.slice(0, c) + char + prev.slice(c));
-      setCursorPos(c + 1);
+      setCursorPos(c + char.length);
       return;
     }
   });
+
+  // Bracketed paste handler: receives pasted text as a single complete string.
+  // Gated by the same modal state conditions as useInput.
+  const pasteIsActive = !pendingApproval && !effortPickerOpen && !modePickerOpen;
+  usePaste(
+    (text) => {
+      if (!text) return;
+      const c = cursorPos;
+      setInputText((prev) => prev.slice(0, c) + text + prev.slice(c));
+      setCursorPos(c + text.length);
+      if (historyIndex !== null) setHistoryIndex(null);
+    },
+    { isActive: pasteIsActive },
+  );
 
   const muted = theme?.muted || '#565f89';
   const primary = theme?.primary || '#7aa2f7';
@@ -604,7 +618,7 @@ export function ChatSurface({
         )}
         {inputText.startsWith('!') && (
           <Box>
-            <Text color={warning}>(shell mode — Enter to run, Shift/Alt+Enter for newline)</Text>
+            <Text color={warning}>(shell mode — Enter to run, Ctrl+Enter for newline)</Text>
           </Box>
         )}
         {(() => {
@@ -612,16 +626,18 @@ export function ChatSurface({
           const isShell = inputText.startsWith('!');
           const promptColor = isShell ? warning : primary;
           const promptGlyph = isShell ? '$' : '>';
+          const prefix = `curie-agent${promptGlyph} `;
           return lines.map((line, li) => {
             const isFirst = li === 0;
             const isLast = li === lines.length - 1;
-            const cursorOnThisLine = isLast ? cursorPos - inputText.split('\n').slice(0, li).join('\n').length : 0;
+            const charsBefore = inputText.split('\n').slice(0, li).join('\n').length;
+            const cursorOnThisLine = isLast ? cursorPos - charsBefore : 0;
             return (
               <Box key={li}>
                 <Text color={promptColor}>
-                  {isFirst ? `curie-agent${promptGlyph} ` : '          '}
+                  {isFirst ? `curie-agent${promptGlyph} ` : '             '}
                 </Text>
- {isLast ? (
+                {isLast ? (
                   <>
                     <Text color={fg}>{line.slice(0, cursorOnThisLine)}</Text>
                     <Text color={fg} inverse bold>{line[cursorOnThisLine] ?? ' '}</Text>

@@ -37,6 +37,16 @@
   },
   "packageManager": "pnpm@10.12.0",
   "pnpm": {
+    "overrides": {
+      "@curie-agent/core": "workspace:^0.1.2",
+      "@curie-agent/protocol": "workspace:^0.1.2",
+      "@curie-agent/providers": "workspace:^0.1.2",
+      "@curie-agent/render": "workspace:^0.1.2",
+      "@curie-agent/tools": "workspace:^0.1.2",
+      "@curie-agent/mcp": "workspace:^0.1.2",
+      "@curie-agent/tui": "workspace:^0.1.2",
+      "@curie-agent/cli": "workspace:^0.1.2"
+    },
     "onlyBuiltDependencies": [
       "better-sqlite3",
       "esbuild",

@@ -22,7 +22,7 @@ import type { Event, CronTask } from '@curie-agent/core';
 import type { SlashCommandInput, SlashCommandResult, SlashCommandContext, ProjectEntry } from '@curie-agent/tui';
 import type { ChannelTabEntry } from '@curie-agent/tui';
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.2';
 
 // Resolve templates directory — included in package via "files" in package.json
 // Prod: packages/cli/dist/src/cli.js  → ../../templates
