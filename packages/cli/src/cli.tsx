@@ -1793,7 +1793,6 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
       onModeChange={onModeChange}
       onCancel={() => process.exit(0)}
       theme={theme}
-      debug={currentDebug}
       projects={projects}
       agents={agents}
       channels={channelTabEntries}

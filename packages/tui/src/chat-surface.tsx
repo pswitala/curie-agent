@@ -68,8 +68,7 @@ interface ChatSurfaceProps {
   onSelectProject?: (project: ProjectEntry) => void;
   channels?: ChannelTabEntry[];
   onChannelSelect?: (channelId: string) => void;
-  debug?: boolean;
-}
+ }
 
 // Fixed row counts for chrome layout.
 const INPUT_BASE_ROWS = 1;
@@ -104,8 +103,7 @@ export function ChatSurface({
   onSelectProject,
   channels,
   onChannelSelect,
-  debug,
-}: ChatSurfaceProps) {
+ }: ChatSurfaceProps) {
   const [inputText, setInputText] = useState('');
   const [currentTab, setCurrentTab] = useState<TabId>(activeTab);
   React.useEffect(() => { setCurrentTab(activeTab); }, [activeTab]);
@@ -493,26 +491,19 @@ export function ChatSurface({
       );
     }
     if (msg.role === 'tool-group') {
-      if (debug) {
-        const tools = msg.content.split(' · ').map(s => s.trim()).filter(Boolean);
-        const lines = tools.map((t) => {
-          const colonIdx = t.indexOf(':');
-          if (colonIdx > 0) {
-            return `   ⎿  ${t.slice(0, colonIdx)}: ${t.slice(colonIdx + 1)}`;
-          }
-          return `   ⎿  ${t}`;
-        });
-        return (
-          <Box key={String(key)} flexDirection="column">
-            {lines.map((line, ti) => (
-              <Text key={ti} color={muted}>{line}</Text>
-            ))}
-          </Box>
-        );
-      }
+      const tools = msg.content.split(' · ').map(s => s.trim()).filter(Boolean);
+      const lines = tools.map((t) => {
+        const colonIdx = t.indexOf(':');
+        if (colonIdx > 0) {
+          return `   ⎿  ${t.slice(0, colonIdx)}: ${t.slice(colonIdx + 1)}`;
+        }
+        return `   ⎿  ${t}`;
+      });
       return (
-        <Box key={String(key)} marginTop={1}>
-          <Text color={muted}>{msg.content}</Text>
+        <Box key={String(key)} flexDirection="column">
+          {lines.map((line, ti) => (
+            <Text key={ti} color={muted}>{line}</Text>
+          ))}
         </Box>
       );
     }

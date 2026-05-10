@@ -59,7 +59,7 @@ export const DEFAULT_SETTINGS: CurieSettings = {
   model: 'claude-sonnet-4-6',
   effort: 'auto',
   mode: 'auto',
-  theme: 'nerd',
+  theme: 'nord',
   statusline: true,
   debug: false,
   BRAVE_SEARCH_API_KEY: '',

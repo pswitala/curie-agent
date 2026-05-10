@@ -15,7 +15,7 @@ describe('DEFAULT_SETTINGS', () => {
   });
 
   it('should have correct default theme', () => {
-    expect(DEFAULT_SETTINGS.theme).toBe('tokyo-night');
+    expect(DEFAULT_SETTINGS.theme).toBe('nord');
   });
 
   it('should have statusline enabled by default', () => {
