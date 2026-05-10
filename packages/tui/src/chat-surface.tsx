@@ -339,10 +339,9 @@ export function ChatSurface({
     }
 
     if (key.return) {
-      // Ctrl+Enter inserts a newline. In raw mode, Shift/Alt are not
-      // detected for Enter by Ink's keypress parser — only Ctrl+Enter
-      // produces a detectable Ctrl modifier in practice.
-      if (key.ctrl) {
+      // Shift+Enter, Alt+Enter, or Ctrl+Enter inserts a newline.
+      // Requires Kitty keyboard protocol enabled (kittyKeyboard: 'auto' in render options).
+      if (key.shift || key.meta || key.ctrl) {
         const c = cursorPos;
         setInputText(prev => prev.slice(0, c) + '\n' + prev.slice(c));
         setCursorPos(c + 1);
@@ -618,7 +617,7 @@ export function ChatSurface({
         )}
         {inputText.startsWith('!') && (
           <Box>
-            <Text color={warning}>(shell mode — Enter to run, Ctrl+Enter for newline)</Text>
+            <Text color={warning}>(shell mode — Enter to run, Shift/Ctrl+Enter for newline)</Text>
           </Box>
         )}
         {(() => {

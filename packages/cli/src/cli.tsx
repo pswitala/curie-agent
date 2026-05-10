@@ -2310,6 +2310,7 @@ async function main() {
     />,
     {
       exitOnCtrlC: false,
+      kittyKeyboard: { mode: 'auto' },
     },
   );
 }
