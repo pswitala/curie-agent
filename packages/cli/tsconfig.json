@@ -1,0 +1,38 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "composite": true
+  },
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ],
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../mcp"
+    },
+    {
+      "path": "../render"
+    },
+    {
+      "path": "../providers"
+    },
+    {
+      "path": "../tools"
+    },
+    {
+      "path": "../tui"
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { SessionStore, ulid } from './session-store.js';
+import type { Event } from './event-bus.js';
+
+let tmpDir: string;
+
+function randomDir(): string {
+  return path.join(os.tmpdir(), 'curie-agent-test', crypto.randomUUID());
+}
+
+beforeEach(() => {
+  tmpDir = randomDir();
+});
+
+afterEach(() => {
+  if (fs.existsSync(tmpDir)) {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+describe('ulid', () => {
+  it('generates unique IDs', () => {
+    const ids = new Set<string>();
+    for (let i = 0; i < 100; i++) {
+      ids.add(ulid());
+    }
+    expect(ids.size).toBe(100);
+  });
+
+  it('generates 26 character strings', () => {
+    expect(ulid().length).toBe(26);
+  });
+});
+
+describe('SessionStore', () => {
+  let store: SessionStore;
+
+  beforeEach(() => {
+    store = new SessionStore(tmpDir);
+  });
+
+  it('creates a session with directory and files', () => {
+    const info = store.create('/cwd', 'model', 'provider');
+    expect(info.id).toHaveLength(26);
+    expect(info.cwd).toBe('/cwd');
+    expect(fs.existsSync(store.sessionPath(info.id))).toBe(true);
+    expect(fs.existsSync(store.eventsPath(info.id))).toBe(true);
+    expect(fs.existsSync(store.metadataPath(info.id))).toBe(true);
+  });
+
+  it('loads session metadata', () => {
+    const created = store.create('/cwd', 'm', 'p');
+    const loaded = store.load(created.id);
+    expect(loaded).toEqual(created);
+  });
+
+  it('returns undefined for non-existent session', () => {
+    expect(store.load('nonexistent')).toBeUndefined();
+  });
+
+  it('appends and loads events', () => {
+    const info = store.create('/cwd', 'm', 'p');
+    const event: Event = { type: 'status', id: '1', message: 'test', timestamp: Date.now() };
+    store.appendEvent(info.id, event);
+    const events = store.loadEvents(info.id);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual(event);
+  });
+
+  it('appends multiple events', () => {
+    const info = store.create('/cwd', 'm', 'p');
+    const events: Event[] = [
+      { type: 'status', id: '1', message: 'a', timestamp: 1 },
+      { type: 'error', id: '2', message: 'b', timestamp: 2 },
+    ];
+    store.appendEvents(info.id, events);
+    expect(store.loadEvents(info.id)).toHaveLength(2);
+  });
+
+  it('lists sessions sorted by updatedAt', async () => {
+    const s1 = store.create('/a', 'm', 'p');
+    await new Promise((r) => setTimeout(r, 10));
+    const s2 = store.create('/b', 'm', 'p');
+    const sessions = store.list();
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0]!.id).toBe(s2.id);
+  });
+
+  it('removes session directory', () => {
+    const info = store.create('/cwd', 'm', 'p');
+    store.remove(info.id);
+    expect(fs.existsSync(store.sessionPath(info.id))).toBe(false);
+  });
+
+  it('returns empty list when no sessions', () => {
+    expect(store.list()).toHaveLength(0);
+  });
+});

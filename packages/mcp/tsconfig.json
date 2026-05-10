@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
+    "outDir": "./dist"
+  },
+  "include": ["src"],
+  "exclude": ["**/*.test.ts",
+    "**/*.test.tsx", "dist"],
+  "references": [
+    { "path": "../tools" },
+    { "path": "../core" }
+  ]
+}

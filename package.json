@@ -1,0 +1,51 @@
+{
+  "name": "curie-agent",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "the successor to claude-code",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "typecheck": "turbo typecheck",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "clean": "turbo clean",
+    "version": "changeset version && pnpm install --no-frozen-lockfile",
+    "release": "turbo build --filter=@curie-agent/*... && node scripts/patch-spawndamnit.mjs && changeset publish",
+    "postinstall": "node scripts/patch-spawndamnit.mjs"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.95.1",
+    "@changesets/changelog-github": "0.7.0",
+    "@changesets/cli": "2.31.0",
+    "@changesets/git": "^3.0.4",
+    "@eslint/js": "^10.0.1",
+    "esbuild": "0.28.0",
+    "eslint": "^10.3.0",
+    "prettier": "^3.6.0",
+    "rimraf": "^6.1.3",
+    "turbo": "^2.9.10",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.2",
+    "vitest": "^4.1.5",
+    "zod": "^4.4.3"
+  },
+  "packageManager": "pnpm@10.12.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
+      "sharp"
+    ],
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "zod": "4"
+      }
+    }
+  }
+}

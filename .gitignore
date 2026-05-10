@@ -1,0 +1,52 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+*.tsbuildinfo
+
+# Turborepo cache
+.turbo
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+credentials*
+
+# Test
+coverage
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+
+# ESLint cache
+.eslintcache
+
+# Vitest
+vitest.results.*
+
+# Changesets (commit before publish)
+# .changeset/*.md  — tracked manually, cleaned up after publish
+
+# Release
+*.tgz
+
+# Prevent leaked build artifacts in src/
+src/**/*.js
+src/**/*.js.map
+src/**/*.d.ts
+src/**/*.d.ts.map
+
+#prevent publish plans
+plans/
