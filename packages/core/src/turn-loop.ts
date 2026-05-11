@@ -2,6 +2,7 @@ import { EventBus, type Event } from './event-bus.js';
 import { SessionStore, type SessionInfo } from './session-store.js';
 import { PermissionEngine, type ApprovalMode } from './permission.js';
 import type { CurieSettings } from './settings.js';
+import { createSnapshot } from './safety/snapshot.js';
 
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'max' | 'auto';
 
@@ -85,6 +86,7 @@ export class TurnLoop {
   private store: SessionStore;
   private permission: PermissionEngine;
   private config: TurnLoopConfig;
+  private _cwd: string;
   private abort = false;
   private abortController: AbortController | null = null;
   private messages: Message[] = [];
@@ -93,6 +95,7 @@ export class TurnLoop {
 
   constructor(config: TurnLoopConfig, store?: SessionStore) {
     this.config = config;
+    this._cwd = config.cwd;
     this.bus = new EventBus();
     this.store = store ?? new SessionStore();
     this.permission = new PermissionEngine(config.permissions, config.approvalMode ?? 'auto');
@@ -117,6 +120,10 @@ export class TurnLoop {
   cancel(): void {
     this.abort = true;
     this.abortController?.abort();
+  }
+
+  setCwd(newCwd: string): void {
+    this._cwd = newCwd;
   }
 
   private async evaluateHarm(toolName: string, input: Record<string, unknown>): Promise<{ approved: boolean; reason: string }> {
@@ -267,6 +274,13 @@ export class TurnLoop {
     try {
       while (turn < maxTurns && !this.abort) {
         turn++;
+
+        // Create git snapshot before each turn (best-effort).
+        if (this.config.settings.SAFETY_SNAPSHOTS !== 'off') {
+          await createSnapshot(this._cwd, prompt).catch(() => {
+            // Silently ignore — snapshots are recovery, not enforcement
+          });
+        }
 
         let fullText = '';
         const toolCalls: Array<{ id: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }> = [];

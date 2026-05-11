@@ -15,6 +15,7 @@ const __filename = fileURLToPath(import.meta.url);
 import { ChatSurface, handleSlashCommand, COLD_START_BANNER } from '@curie-agent/tui';
 import { getTheme } from '@curie-agent/render';
 import { TurnLoop, SettingsManager, DEFAULT_SETTINGS, CronManager, TelegramGateway, ChannelRegistry, ChannelRouter, HeartbeatExecutor, HeartbeatDelivery, pickNextSchedule, scheduleLabel, type CurieSettings, type ScheduleType, type Message } from '@curie-agent/core';
+import { listSnapshots, revertTo } from '@curie-agent/core/safety/snapshot.js';
 import { AnthropicProvider, OpenAIProvider, OllamaProvider, GoogleGeminiProvider, OpenRouterProvider } from '@curie-agent/providers';
 import { allTools, setGlobalCwd } from '@curie-agent/tools';
 import { createMcpTools, MCPClient, type MCPConfig } from '@curie-agent/mcp';
@@ -256,8 +257,7 @@ interface MainManifest {
 }
 
 const FILE_DESCRIPTIONS: Record<string, { bucket: keyof Omit<MainManifest, 'agentsMd'>; description: string }> = {
-  'IDENTITY.md': { bucket: 'identity', description: 'Core identity — who you are, your name, your persona' },
-  'SOUL.md':     { bucket: 'identity', description: 'Behavioural principles and personality' },
+  'SOUL.md':     { bucket: 'identity', description: 'who you are, your name, your persona , your behavioural principles and personality' },
   'USER.md':     { bucket: 'user',     description: 'Static profile of the human you help (name, timezone, skills, hardware)' },
   'MEMORY.md':   { bucket: 'memory',   description: 'Curated long-term memory. Read when the user references past context; write here when asked to remember something' },
   'TOOLS.md':    { bucket: 'tools',    description: 'Your local tool conventions and notes' },
@@ -915,7 +915,7 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
         if (mem.operation === 'status') {
           // Read key memory files and compute approximate tokens (~4 chars ≈ 1 token for English markdown)
           const memDir = join(home, '.curie-agent');
-          const files = ['AGENTS.md', 'MEMORY.md', 'USER.md', 'SOUL.md', 'IDENTITY.md', 'TOOLS.md', 'HEARTBEAT.md'];
+          const files = ['AGENTS.md', 'MEMORY.md', 'USER.md', 'SOUL.md', 'TOOLS.md', 'HEARTBEAT.md'];
           const lines = ['Memory System Status:'];
           let totalChars = 0;
           for (const f of files) {
@@ -1105,8 +1105,10 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
       mcpClients: mcpClientsRef.current,
       contextWindowSize: contextWindowSize ?? 200_000,
       thinkingBudget: ({ low: 2000, medium: 6000, high: 16000, max: 32000, auto: 0 })[currentEffort ?? 'auto'] ?? 0,
+      listSnapshots: (cwd: string) => listSnapshots(cwd),
+      revertTo: (cwd: string, sha: string) => revertTo(cwd, sha),
     };
-    const result = handleSlashCommand(input.command, input.args, ctx);
+    const result = await handleSlashCommand(input.command, input.args, ctx);
     await applySlashResult(result, input.args);
 
     // Spawn external agent subprocess after the slash command result is applied.
@@ -1638,6 +1640,7 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
         content = `$ ${command}\ncd: not a directory: ${target}\n[exit 1]`;
       } else {
         shellCwdRef.current = target;
+        loopRef.current?.setCwd(target);
         content = `$ ${command}\n${target}\n[exit 0]`;
       }
       setMessages(prev => [...prev, { role: 'tool', content }]);
@@ -1922,7 +1925,7 @@ function createProvider(settings: CurieSettings): any | null {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const cwd = args.cwd || join(homedir(), '.curie-agent');
+  const cwd = args.cwd || join(homedir(), '.curie-agent'); 
 
   if (args.version) {
     console.log(`curie-agent ${VERSION}`);

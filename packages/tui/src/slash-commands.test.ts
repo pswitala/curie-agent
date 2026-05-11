@@ -3,32 +3,32 @@ import { parseSlashCommand, handleSlashCommand, SLASH_COMMANDS } from './slash-c
 import type { SlashCommandContext } from './slash-commands.js';
 
 describe('parseSlashCommand', () => {
-  it('returns null for non-slash input', () => {
+  it('returns null for non-slash input', async () => {
     expect(parseSlashCommand('hello')).toBeNull();
     expect(parseSlashCommand('   hello')).toBeNull();
   });
 
-  it('parses command without args', () => {
+  it('parses command without args', async () => {
     const result = parseSlashCommand('/help');
     expect(result).toEqual({ command: 'help', args: '' });
   });
 
-  it('parses command with args', () => {
+  it('parses command with args', async () => {
     const result = parseSlashCommand('/model claude-opus-4-7');
     expect(result).toEqual({ command: 'model', args: 'claude-opus-4-7' });
   });
 
-  it('parses command with multiple word args', () => {
+  it('parses command with multiple word args', async () => {
     const result = parseSlashCommand('/theme tokyo-night');
     expect(result).toEqual({ command: 'theme', args: 'tokyo-night' });
   });
 
-  it('lowercases command name', () => {
+  it('lowercases command name', async () => {
     const result = parseSlashCommand('/MODEL Opus');
     expect(result).toEqual({ command: 'model', args: 'Opus' });
   });
 
-  it('handles extra whitespace', () => {
+  it('handles extra whitespace', async () => {
     const result = parseSlashCommand('  /help  ');
     expect(result).toEqual({ command: 'help', args: '' });
   });
@@ -56,203 +56,203 @@ const mockContext: SlashCommandContext = {
 };
 
 describe('handleSlashCommand', () => {
-  it('returns help message with all commands', () => {
-    const result = handleSlashCommand('help', '', mockContext);
+  it('returns help message with all commands', async () => {
+    const result = await handleSlashCommand('help', '', mockContext);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Slash commands:');
     expect(result.message).toContain('/model');
     expect(result.message).toContain('/theme');
   });
 
-  it('returns status info', () => {
-    const result = handleSlashCommand('status', '', mockContext);
+  it('returns status info', async () => {
+    const result = await handleSlashCommand('status', '', mockContext);
     expect(result.type).toBe('message');
     expect(result.message).toContain('curie-agent v0.1.0');
     expect(result.message).toContain('Model: claude-sonnet-4-6');
   });
 
-  it('handles /model with full name', () => {
-    const result = handleSlashCommand('model', 'claude-opus-4-7', mockContext);
+  it('handles /model with full name', async () => {
+    const result = await handleSlashCommand('model', 'claude-opus-4-7', mockContext);
     expect(result.type).toBe('update_model');
     expect(result.model).toBe('claude-opus-4-7');
   });
 
-  it('handles /model with alias', () => {
-    const result = handleSlashCommand('model', 'opus', mockContext);
+  it('handles /model with alias', async () => {
+    const result = await handleSlashCommand('model', 'opus', mockContext);
     expect(result.type).toBe('update_model');
     expect(result.model).toBe('claude-opus-4-7');
   });
 
-  it('handles /model with no args', () => {
-    const result = handleSlashCommand('model', '', mockContext);
+  it('handles /model with no args', async () => {
+    const result = await handleSlashCommand('model', '', mockContext);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Usage:');
   });
 
-  it('handles /theme with valid theme', () => {
-    const result = handleSlashCommand('theme', 'dracula', mockContext);
+  it('handles /theme with valid theme', async () => {
+    const result = await handleSlashCommand('theme', 'dracula', mockContext);
     expect(result.type).toBe('update_theme');
     expect(result.theme).toBe('dracula');
   });
 
-  it('handles /theme with invalid theme', () => {
-    const result = handleSlashCommand('theme', 'nonexistent', mockContext);
+  it('handles /theme with invalid theme', async () => {
+    const result = await handleSlashCommand('theme', 'nonexistent', mockContext);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Unknown theme');
   });
 
-  it('handles /effort with valid level', () => {
-    const result = handleSlashCommand('effort', 'high', mockContext);
+  it('handles /effort with valid level', async () => {
+    const result = await handleSlashCommand('effort', 'high', mockContext);
     expect(result.type).toBe('update_effort');
     expect(result.effort).toBe('high');
   });
 
-  it('handles /effort with invalid level', () => {
-    const result = handleSlashCommand('effort', 'extreme', mockContext);
+  it('handles /effort with invalid level', async () => {
+    const result = await handleSlashCommand('effort', 'extreme', mockContext);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Invalid effort level');
   });
 
-  it('handles /mode with valid mode', () => {
-    const result = handleSlashCommand('mode', 'yolo', mockContext);
+  it('handles /mode with valid mode', async () => {
+    const result = await handleSlashCommand('mode', 'yolo', mockContext);
     expect(result.type).toBe('update_mode');
     expect(result.mode).toBe('yolo');
   });
 
-  it('handles /mode with invalid mode', () => {
-    const result = handleSlashCommand('mode', 'unknown', mockContext);
+  it('handles /mode with invalid mode', async () => {
+    const result = await handleSlashCommand('mode', 'unknown', mockContext);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Invalid mode');
   });
 
-  it('handles /agents with prompt', () => {
-    const result = handleSlashCommand('agent', 'check codebase', mockContext);
+  it('handles /agents with prompt', async () => {
+    const result = await handleSlashCommand('agent', 'check codebase', mockContext);
     expect(result.type).toBe('start_agent');
     expect(result.agentId).toBeTruthy();
     expect(result.message).toContain('Agent started: "check codebase"');
   });
 
-  it('handles /agents with no args', () => {
-    const result = handleSlashCommand('agent', '', mockContext);
+  it('handles /agents with no args', async () => {
+    const result = await handleSlashCommand('agent', '', mockContext);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Usage');
   });
 
-  it('handles /agent with --mode flag', () => {
-    const result = handleSlashCommand('agent', '--mode auto check codebase', mockContext);
+  it('handles /agent with --mode flag', async () => {
+    const result = await handleSlashCommand('agent', '--mode auto check codebase', mockContext);
     expect(result.type).toBe('start_agent');
     expect(result.agentMode).toBe('auto');
     expect(result.message).toContain('check codebase');
   });
 
-  it('handles /agent with --effort flag', () => {
-    const result = handleSlashCommand('agent', '--effort medium review the code', mockContext);
+  it('handles /agent with --effort flag', async () => {
+    const result = await handleSlashCommand('agent', '--effort medium review the code', mockContext);
     expect(result.type).toBe('start_agent');
     expect(result.agentEffort).toBe('medium');
     expect(result.message).toContain('review the code');
   });
 
-  it('handles /agent with both --mode and --effort flags', () => {
-    const result = handleSlashCommand('agent', '--mode auto --effort medium check codebase', mockContext);
+  it('handles /agent with both --mode and --effort flags', async () => {
+    const result = await handleSlashCommand('agent', '--mode auto --effort medium check codebase', mockContext);
     expect(result.type).toBe('start_agent');
     expect(result.agentMode).toBe('auto');
     expect(result.agentEffort).toBe('medium');
     expect(result.message).toContain('check codebase');
   });
 
-  it('handles /agent with --effort before --mode', () => {
-    const result = handleSlashCommand('agent', '--effort high --mode yolo fix everything', mockContext);
+  it('handles /agent with --effort before --mode', async () => {
+    const result = await handleSlashCommand('agent', '--effort high --mode yolo fix everything', mockContext);
     expect(result.type).toBe('start_agent');
     expect(result.agentEffort).toBe('high');
     expect(result.agentMode).toBe('yolo');
     expect(result.message).toContain('fix everything');
   });
 
-  it('ignores invalid --mode value and stops parsing', () => {
-    const result = handleSlashCommand('agent', '--mode invalid check this', mockContext);
+  it('ignores invalid --mode value and stops parsing', async () => {
+    const result = await handleSlashCommand('agent', '--mode invalid check this', mockContext);
     // Invalid mode → stops parsing, rest becomes prompt
     expect(result.type).toBe('start_agent');
     expect(result.agentMode).toBeUndefined();
   });
 
-  it('ignores invalid --effort value and stops parsing', () => {
-    const result = handleSlashCommand('agent', '--effort extreme go do stuff', mockContext);
+  it('ignores invalid --effort value and stops parsing', async () => {
+    const result = await handleSlashCommand('agent', '--effort extreme go do stuff', mockContext);
     expect(result.type).toBe('start_agent');
     expect(result.agentEffort).toBeUndefined();
   });
 
-  it('handles /agent with no flags (plain prompt)', () => {
-    const result = handleSlashCommand('agent', 'just do it', mockContext);
+  it('handles /agent with no flags (plain prompt)', async () => {
+    const result = await handleSlashCommand('agent', 'just do it', mockContext);
     expect(result.type).toBe('start_agent');
     expect(result.agentMode).toBeUndefined();
     expect(result.agentEffort).toBeUndefined();
     expect(result.message).toContain('just do it');
   });
 
-  it('toggles /debug', () => {
-    const result = handleSlashCommand('debug', '', mockContext);
+  it('toggles /debug', async () => {
+    const result = await handleSlashCommand('debug', '', mockContext);
     expect(result.type).toBe('update_debug');
     expect(result.debug).toBe(true);
   });
 
-  it('sets /debug on', () => {
+  it('sets /debug on', async () => {
     const ctx = { ...mockContext, settings: { ...mockContext.settings, debug: false } };
-    const result = handleSlashCommand('debug', 'on', ctx);
+    const result = await handleSlashCommand('debug', 'on', ctx);
     expect(result.debug).toBe(true);
   });
 
-  it('sets /debug off', () => {
+  it('sets /debug off', async () => {
     const ctx = { ...mockContext, settings: { ...mockContext.settings, debug: true } };
-    const result = handleSlashCommand('debug', 'off', ctx);
+    const result = await handleSlashCommand('debug', 'off', ctx);
     expect(result.debug).toBe(false);
   });
 
-  it('toggles /statusline', () => {
-    const result = handleSlashCommand('statusline', '', mockContext);
+  it('toggles /statusline', async () => {
+    const result = await handleSlashCommand('statusline', '', mockContext);
     expect(result.type).toBe('update_statusline');
     expect(result.statusline).toBe(false);
   });
 
-  it('handles unknown command', () => {
-    const result = handleSlashCommand('foo', '', mockContext);
+  it('handles unknown command', async () => {
+    const result = await handleSlashCommand('foo', '', mockContext);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Unknown command');
   });
 
-  it('returns help for bare /memory', () => {
-    const result = handleSlashCommand('memory', '', mockContext);
+  it('returns help for bare /memory', async () => {
+    const result = await handleSlashCommand('memory', '', mockContext);
     expect(result.type).toBe('message');
     expect(result.message).toContain('/memory status');
   });
 
-  it('returns status operation for /memory status', () => {
-    const result = handleSlashCommand('memory', 'status', mockContext);
+  it('returns status operation for /memory status', async () => {
+    const result = await handleSlashCommand('memory', 'status', mockContext);
     expect(result.type).toBe('update_memory');
     expect(result.memory!.operation).toBe('status');
   });
 
-  it('appends entry for /memory add', () => {
-    const result = handleSlashCommand('memory', 'add user prefers TypeScript', mockContext);
+  it('appends entry for /memory add', async () => {
+    const result = await handleSlashCommand('memory', 'add user prefers TypeScript', mockContext);
     expect(result.type).toBe('update_memory');
     expect(result.memory!.operation).toBe('add');
     expect(result.memory!.content).toContain('user prefers TypeScript');
     expect(result.memory!.content).toMatch(/\d{4}-\d{2}-\d{2}/);
   });
 
-  it('returns usage for /memory add with no text', () => {
-    const result = handleSlashCommand('memory', 'add', mockContext);
+  it('returns usage for /memory add with no text', async () => {
+    const result = await handleSlashCommand('memory', 'add', mockContext);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Usage');
   });
 
-  it('returns switch_tab for /stats', () => {
-    const result = handleSlashCommand('stats', '', mockContext);
+  it('returns switch_tab for /stats', async () => {
+    const result = await handleSlashCommand('stats', '', mockContext);
     expect(result.type).toBe('switch_tab');
     expect(result.tab).toBe('stats');
   });
 
-  it('returns message for /context with tokens', () => {
-    const result = handleSlashCommand('context', '', {
+  it('returns message for /context with tokens', async () => {
+    const result = await handleSlashCommand('context', '', {
       ...mockContext,
       model: 'claude-sonnet-4-6',
       inputTokens: 108000,
@@ -267,14 +267,14 @@ describe('handleSlashCommand', () => {
     expect(result.message).toContain('░');
   });
 
-  it('returns message for /context with no tokens', () => {
-    const result = handleSlashCommand('context', '', mockContext);
+  it('returns message for /context with no tokens', async () => {
+    const result = await handleSlashCommand('context', '', mockContext);
     expect(result.type).toBe('message');
     expect(result.message).toContain('No token data yet');
   });
 
-  it('returns message for /context with output but no input', () => {
-    const result = handleSlashCommand('context', '', {
+  it('returns message for /context with output but no input', async () => {
+    const result = await handleSlashCommand('context', '', {
       ...mockContext,
       inputTokens: 0,
       outputTokens: 5000,
@@ -284,8 +284,8 @@ describe('handleSlashCommand', () => {
     expect(result.message).not.toContain(' in /');
   });
 
-  it('shows 100% when input equals context window size', () => {
-    const result = handleSlashCommand('context', '', {
+  it('shows 100% when input equals context window size', async () => {
+    const result = await handleSlashCommand('context', '', {
       ...mockContext,
       inputTokens: 200_000,
       outputTokens: 1000,
@@ -295,14 +295,14 @@ describe('handleSlashCommand', () => {
     expect(result.message).toContain('200k/200k');
   });
 
-  it('/context messages with no messages returns empty', () => {
-    const result = handleSlashCommand('context', 'messages', mockContext);
+  it('/context messages with no messages returns empty', async () => {
+    const result = await handleSlashCommand('context', 'messages', mockContext);
     expect(result.type).toBe('message');
     expect(result.message).toContain('No messages yet');
   });
 
-  it('/context messages prefers TurnLoop messages over channelMessages', () => {
-    const result = handleSlashCommand('context', 'messages', {
+  it('/context messages prefers TurnLoop messages over channelMessages', async () => {
+    const result = await handleSlashCommand('context', 'messages', {
       ...mockContext,
       messages: [
         { role: 'user', content: 'TurnLoop msg' },
@@ -318,8 +318,8 @@ describe('handleSlashCommand', () => {
     expect(result.message).not.toContain('Channel msg');
   });
 
-  it('/context messages uses channelMessages as fallback when no TurnLoop messages', () => {
-    const result = handleSlashCommand('context', 'messages', {
+  it('/context messages uses channelMessages as fallback when no TurnLoop messages', async () => {
+    const result = await handleSlashCommand('context', 'messages', {
       ...mockContext,
       channelMessages: [
         { role: 'assistant', content: '█  █ ███ ████' },
@@ -333,8 +333,8 @@ describe('handleSlashCommand', () => {
     expect(result.message).toContain('Assistant: Hi there!');
   });
 
-  it('/context messages filters cold-start banner from channelMessages', () => {
-    const result = handleSlashCommand('context', 'messages', {
+  it('/context messages filters cold-start banner from channelMessages', async () => {
+    const result = await handleSlashCommand('context', 'messages', {
       ...mockContext,
       channelMessages: [
         { role: 'assistant', content: '█  █ ███ ████' },
@@ -346,8 +346,8 @@ describe('handleSlashCommand', () => {
     expect(result.message).not.toContain('█');
   });
 
-  it('/context messages uses TurnLoop messages as primary source', () => {
-    const result = handleSlashCommand('context', 'messages', {
+  it('/context messages uses TurnLoop messages as primary source', async () => {
+    const result = await handleSlashCommand('context', 'messages', {
       ...mockContext,
       messages: [
         { role: 'user', content: 'Hello, can you help me?' },
@@ -358,8 +358,8 @@ describe('handleSlashCommand', () => {
     expect(result.message).toContain('User: Hello, can you help me?');
   });
 
-  it('/context messages shows assistant text and tool calls (TurnLoop)', () => {
-    const result = handleSlashCommand('context', 'messages', {
+  it('/context messages shows assistant text and tool calls (TurnLoop)', async () => {
+    const result = await handleSlashCommand('context', 'messages', {
       ...mockContext,
       messages: [
         { role: 'user', content: 'Read my file' },
@@ -382,8 +382,8 @@ describe('handleSlashCommand', () => {
     expect(result.message).toContain('Tool Result');
   });
 
-  it('/context messages shows thinking blocks (TurnLoop)', () => {
-    const result = handleSlashCommand('context', 'messages', {
+  it('/context messages shows thinking blocks (TurnLoop)', async () => {
+    const result = await handleSlashCommand('context', 'messages', {
       ...mockContext,
       messages: [
         {
@@ -401,8 +401,8 @@ describe('handleSlashCommand', () => {
     expect(result.message).toContain('Here is my answer.');
   });
 
-  it('/context messages with channelMessages (fallback) shows all role types', () => {
-    const result = handleSlashCommand('context', 'messages', {
+  it('/context messages with channelMessages (fallback) shows all role types', async () => {
+    const result = await handleSlashCommand('context', 'messages', {
       ...mockContext,
       channelMessages: [
         { role: 'user', content: 'Run the tests' },
@@ -421,7 +421,7 @@ describe('handleSlashCommand', () => {
 });
 
 describe('SLASH_COMMANDS', () => {
-  it('lists all commands', () => {
+  it('lists all commands', async () => {
     const names = SLASH_COMMANDS.map(c => c.name);
     expect(names).toContain('status');
     expect(names).toContain('help');
@@ -438,7 +438,7 @@ describe('SLASH_COMMANDS', () => {
     expect(names).toContain('heartbeat');
   });
 
-  it('each command has a description and usage', () => {
+  it('each command has a description and usage', async () => {
     for (const cmd of SLASH_COMMANDS) {
       expect(cmd.name).toBeTruthy();
       expect(cmd.description).toBeTruthy();
@@ -464,13 +464,13 @@ describe('/channels', () => {
     },
   } as unknown as SlashCommandContext;
 
-  it('list with no config shows not set', () => {
-    const result = handleSlashCommand('channels', 'list', baseCtx);
+  it('list with no config shows not set', async () => {
+    const result = await handleSlashCommand('channels', 'list', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('(not set)');
   });
 
-  it('list with config shows masked token', () => {
+  it('list with config shows masked token', async () => {
     const ctx = {
       ...baseCtx,
       settings: {
@@ -479,46 +479,46 @@ describe('/channels', () => {
         TELEGRAM_USER_ID: '42',
       },
     } as unknown as SlashCommandContext;
-    const result = handleSlashCommand('channels', 'list', ctx);
+    const result = await handleSlashCommand('channels', 'list', ctx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('123456:A...');
     expect(result.message).toContain('42');
   });
 
-  it('set-bot-token with no arg returns usage', () => {
-    const result = handleSlashCommand('channels', 'set-bot-token', baseCtx);
+  it('set-bot-token with no arg returns usage', async () => {
+    const result = await handleSlashCommand('channels', 'set-bot-token', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Usage');
   });
 
-  it('set-bot-token returns external type', () => {
-    const result = handleSlashCommand('channels', 'set-bot-token abc-123', baseCtx);
+  it('set-bot-token returns external type', async () => {
+    const result = await handleSlashCommand('channels', 'set-bot-token abc-123', baseCtx);
     expect(result.type).toBe('external');
     expect(result.external).toBe('channels.set-bot-token');
     expect(result.message).toBe('abc-123');
   });
 
-  it('set-user-id with no arg returns usage', () => {
-    const result = handleSlashCommand('channels', 'set-user-id', baseCtx);
+  it('set-user-id with no arg returns usage', async () => {
+    const result = await handleSlashCommand('channels', 'set-user-id', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Usage');
   });
 
-  it('set-user-id returns external type', () => {
-    const result = handleSlashCommand('channels', 'set-user-id 42', baseCtx);
+  it('set-user-id returns external type', async () => {
+    const result = await handleSlashCommand('channels', 'set-user-id 42', baseCtx);
     expect(result.type).toBe('external');
     expect(result.external).toBe('channels.set-user-id');
     expect(result.message).toBe('42');
   });
 
-  it('disconnect returns external type', () => {
-    const result = handleSlashCommand('channels', 'disconnect', baseCtx);
+  it('disconnect returns external type', async () => {
+    const result = await handleSlashCommand('channels', 'disconnect', baseCtx);
     expect(result.type).toBe('external');
     expect(result.external).toBe('channels.disconnect');
   });
 
-  it('unknown subcommand returns error', () => {
-    const result = handleSlashCommand('channels', 'foobar', baseCtx);
+  it('unknown subcommand returns error', async () => {
+    const result = await handleSlashCommand('channels', 'foobar', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Unknown channel action');
   });
@@ -542,8 +542,8 @@ describe('/heartbeat', () => {
     },
   };
 
-  it('shows status when no subcommand', () => {
-    const result = handleSlashCommand('heartbeat', '', baseCtx);
+  it('shows status when no subcommand', async () => {
+    const result = await handleSlashCommand('heartbeat', '', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Heartbeat cycle');
     expect(result.message).toContain('Enabled: no');
@@ -551,21 +551,21 @@ describe('/heartbeat', () => {
     expect(result.message).toContain('Daily:');
   });
 
-  it('enable returns notification type', () => {
-    const result = handleSlashCommand('heartbeat', 'enable', baseCtx);
+  it('enable returns notification type', async () => {
+    const result = await handleSlashCommand('heartbeat', 'enable', baseCtx);
     expect(result.type).toBe('notification');
     expect(result.notification!.type).toBe('heartbeat');
     expect(result.notification!.enabled).toBe(true);
   });
 
-  it('disable returns notification type', () => {
-    const result = handleSlashCommand('heartbeat', 'disable', baseCtx);
+  it('disable returns notification type', async () => {
+    const result = await handleSlashCommand('heartbeat', 'disable', baseCtx);
     expect(result.type).toBe('notification');
     expect(result.notification!.type).toBe('heartbeat');
     expect(result.notification!.enabled).toBe(false);
   });
 
-it('status with enabled settings shows yes and active schedule', () => {
+it('status with enabled settings shows yes and active schedule', async () => {
     const ctx = {
       ...baseCtx,
       settings: {
@@ -575,21 +575,21 @@ it('status with enabled settings shows yes and active schedule', () => {
         HEARTBEAT_DAILY: '6:00',
       },
     } as SlashCommandContext;
-    const result = handleSlashCommand('heartbeat', 'status', ctx);
+    const result = await handleSlashCommand('heartbeat', 'status', ctx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Enabled: yes');
     expect(result.message).toContain('Active schedule:');
     expect(result.message).toContain('Daily:');
   });
 
-  it('times with no arg returns usage', () => {
-    const result = handleSlashCommand('heartbeat', 'times', baseCtx);
+  it('times with no arg returns usage', async () => {
+    const result = await handleSlashCommand('heartbeat', 'times', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Usage');
   });
 
-  it('times with valid times returns notification', () => {
-    const result = handleSlashCommand('heartbeat', 'times 8:10,10:10,14:20', baseCtx);
+  it('times with valid times returns notification', async () => {
+    const result = await handleSlashCommand('heartbeat', 'times 8:10,10:10,14:20', baseCtx);
     expect(result.type).toBe('notification');
     expect(result.notification!.type).toBe('heartbeat-set');
     const hb = result.notification as { type: 'heartbeat-set'; key: string };
@@ -597,20 +597,20 @@ it('status with enabled settings shows yes and active schedule', () => {
     expect(hb.value).toBe('8:10,10:10,14:20');
   });
 
-  it('times with invalid time returns error', () => {
-    const result = handleSlashCommand('heartbeat', 'times 25:99', baseCtx);
+  it('times with invalid time returns error', async () => {
+    const result = await handleSlashCommand('heartbeat', 'times 25:99', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Invalid time');
   });
 
-  it('daily with no arg returns usage', () => {
-    const result = handleSlashCommand('heartbeat', 'daily', baseCtx);
+  it('daily with no arg returns usage', async () => {
+    const result = await handleSlashCommand('heartbeat', 'daily', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Usage');
   });
 
-  it('daily with valid time returns notification', () => {
-    const result = handleSlashCommand('heartbeat', 'daily 7:30', baseCtx);
+  it('daily with valid time returns notification', async () => {
+    const result = await handleSlashCommand('heartbeat', 'daily 7:30', baseCtx);
     expect(result.type).toBe('notification');
     expect(result.notification!.type).toBe('heartbeat-set');
     const hbDaily = result.notification as { type: 'heartbeat-set'; key: string };
@@ -618,14 +618,14 @@ it('status with enabled settings shows yes and active schedule', () => {
     expect(hbDaily.value).toBe('7:30');
   });
 
-  it('daily with invalid time returns error', () => {
-    const result = handleSlashCommand('heartbeat', 'daily 25:00', baseCtx);
+  it('daily with invalid time returns error', async () => {
+    const result = await handleSlashCommand('heartbeat', 'daily 25:00', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Invalid time');
   });
 
-  it('weekly with valid day@time returns notification', () => {
-    const result = handleSlashCommand('heartbeat', 'weekly monday@9:00', baseCtx);
+  it('weekly with valid day@time returns notification', async () => {
+    const result = await handleSlashCommand('heartbeat', 'weekly monday@9:00', baseCtx);
     expect(result.type).toBe('notification');
     expect(result.notification!.type).toBe('heartbeat-set');
     const hbWeekly = result.notification as { type: 'heartbeat-set'; key: string };
@@ -633,14 +633,14 @@ it('status with enabled settings shows yes and active schedule', () => {
     expect(hbWeekly.value).toBe('monday@9:00');
   });
 
-  it('weekly with invalid day returns error', () => {
-    const result = handleSlashCommand('heartbeat', 'weekly funday@9:00', baseCtx);
+  it('weekly with invalid day returns error', async () => {
+    const result = await handleSlashCommand('heartbeat', 'weekly funday@9:00', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Invalid day');
   });
 
-  it('monthly with valid day@time returns notification', () => {
-    const result = handleSlashCommand('heartbeat', 'monthly 15@6:00', baseCtx);
+  it('monthly with valid day@time returns notification', async () => {
+    const result = await handleSlashCommand('heartbeat', 'monthly 15@6:00', baseCtx);
     expect(result.type).toBe('notification');
     expect(result.notification!.type).toBe('heartbeat-set');
     const hbMonthly = result.notification as { type: 'heartbeat-set'; key: string };
@@ -648,20 +648,20 @@ it('status with enabled settings shows yes and active schedule', () => {
     expect(hbMonthly.value).toBe('15@6:00');
   });
 
-  it('monthly with invalid day returns error', () => {
-    const result = handleSlashCommand('heartbeat', 'monthly 32@6:00', baseCtx);
+  it('monthly with invalid day returns error', async () => {
+    const result = await handleSlashCommand('heartbeat', 'monthly 32@6:00', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Invalid day');
   });
 
-  it('now returns heartbeat-now notification', () => {
-    const result = handleSlashCommand('heartbeat', 'now', baseCtx);
+  it('now returns heartbeat-now notification', async () => {
+    const result = await handleSlashCommand('heartbeat', 'now', baseCtx);
     expect(result.type).toBe('notification');
     expect(result.notification!.type).toBe('heartbeat-now');
   });
 
-  it('unknown subcommand returns error', () => {
-    const result = handleSlashCommand('heartbeat', 'foobar', baseCtx);
+  it('unknown subcommand returns error', async () => {
+    const result = await handleSlashCommand('heartbeat', 'foobar', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Unknown heartbeat action');
   });
@@ -689,14 +689,14 @@ describe('/context compact', () => {
     cwd: '/test',
   };
 
-  it('returns message when no messages available', () => {
-    const result = handleSlashCommand('context', 'compact', ctx);
+  it('returns message when no messages available', async () => {
+    const result = await handleSlashCommand('context', 'compact', ctx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Not enough messages');
   });
 
-  it('returns compact result with detailed depth by default', () => {
-    const result = handleSlashCommand('context', 'compact', {
+  it('returns compact result with detailed depth by default', async () => {
+    const result = await handleSlashCommand('context', 'compact', {
       ...ctx,
       messages: [
         { role: 'user', content: 'Hello' },
@@ -708,8 +708,8 @@ describe('/context compact', () => {
     expect(result.compact!.messages).toHaveLength(2);
   });
 
-  it('returns compact result with brief depth when specified', () => {
-    const result = handleSlashCommand('context', 'compact brief', {
+  it('returns compact result with brief depth when specified', async () => {
+    const result = await handleSlashCommand('context', 'compact brief', {
       ...ctx,
       messages: [
         { role: 'user', content: 'Hello' },
@@ -720,8 +720,8 @@ describe('/context compact', () => {
     expect(result.compact!.depth).toBe('brief');
   });
 
-  it('returns error for unknown depth', () => {
-    const result = handleSlashCommand('context', 'compact invalid', {
+  it('returns error for unknown depth', async () => {
+    const result = await handleSlashCommand('context', 'compact invalid', {
       ...ctx,
       messages: [{ role: 'user', content: 'test' }],
     });
@@ -729,8 +729,8 @@ describe('/context compact', () => {
     expect(result.message).toContain('Unknown compact depth');
   });
 
-  it('returns error for strict depth (not supported)', () => {
-    const result = handleSlashCommand('context', 'compact strict', {
+  it('returns error for strict depth (not supported)', async () => {
+    const result = await handleSlashCommand('context', 'compact strict', {
       ...ctx,
       messages: [{ role: 'user', content: 'test' }],
     });
@@ -738,8 +738,8 @@ describe('/context compact', () => {
     expect(result.message).toContain('Unknown compact depth');
   });
 
-  it('requires at least 2 messages', () => {
-    const result = handleSlashCommand('context', 'compact', {
+  it('requires at least 2 messages', async () => {
+    const result = await handleSlashCommand('context', 'compact', {
       ...ctx,
       messages: [{ role: 'user', content: 'only one message' }],
     });

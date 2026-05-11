@@ -20,6 +20,10 @@
     "./safety/command-guard.js": {
       "import": "./dist/src/safety/command-guard.js",
       "types": "./dist/src/safety/command-guard.d.ts"
+    },
+    "./safety/snapshot.js": {
+      "import": "./dist/src/safety/snapshot.js",
+      "types": "./dist/src/safety/snapshot.d.ts"
     }
   },
   "scripts": {

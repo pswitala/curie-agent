@@ -23,6 +23,10 @@ export interface SlashCommandContext {
   contextWindowSize?: number;
   /** Extended thinking token budget (0 if disabled). */
   thinkingBudget?: number;
+  /** List snapshots for a cwd (provided by CLI for /snapshots). */
+  listSnapshots?: (cwd: string) => Array<{ sha: string; timestamp: string; cwd: string; label: string; changedFiles: number }>;
+  /** Revert to a snapshot SHA (provided by CLI for /revert). */
+  revertTo?: (cwd: string, sha: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export interface SlashCommandResult {
@@ -117,6 +121,8 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'provider', description: 'Switch AI provider', usage: '/provider <anthropic|openai|google|local|openrouter>' },
   { name: 'heartbeat', description: 'Manage heartbeat cycle', usage: '/heartbeat <status|enable|disable|times|daily|weekly|monthly|now>' },
   { name: 'init', description: 'Run the setup wizard', usage: '/init' },
+  { name: 'snapshots', description: 'List recent git snapshots for recovery', usage: '/snapshots' },
+  { name: 'revert', description: 'Revert to a git snapshot (index, default: most recent)', usage: '/revert [index]' },
 ];
 
 export function parseSlashCommand(input: string): { command: string; args: string } | null {
@@ -132,11 +138,11 @@ export function parseSlashCommand(input: string): { command: string; args: strin
   };
 }
 
-export function handleSlashCommand(
+export async function handleSlashCommand(
   cmd: string,
   args: string,
   ctx: SlashCommandContext,
-): SlashCommandResult {
+): Promise<SlashCommandResult> {
   switch (cmd) {
     case 'status':
       return handleStatus(ctx);
@@ -211,6 +217,12 @@ export function handleSlashCommand(
       // Treat as direct API key (legacy behavior)
       return { type: 'update_init', message: `API key configured: ${args.trim()}`, apiKey: args.trim() };
     }
+
+    case 'snapshots':
+      return handleSnapshots(ctx);
+
+    case 'revert':
+      return handleRevert(args, ctx);
 
     default:
       return {
@@ -1169,4 +1181,50 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
         message: `Unknown heartbeat action: "${sub}". Use: status, enable, disable, times, daily, weekly, monthly, now`,
       };
   }
+}
+
+function handleSnapshots(ctx: SlashCommandContext): SlashCommandResult {
+  const list = ctx.listSnapshots?.(ctx.cwd);
+  if (!list || list.length === 0) {
+    return { type: 'message', message: 'No snapshots found for this directory.' };
+  }
+  const lines = [`Git Snapshots (${list.length}):`];
+  list.forEach((s, i) => {
+    const dt = new Date(s.timestamp);
+    const timeStr = dt.toLocaleString();
+    lines.push(`  ${i}) ${timeStr} — ${s.sha.slice(0, 7)} (${s.label}, ${s.changedFiles} file${s.changedFiles === 1 ? '' : 's'})`);
+  });
+  lines.push('\nUse /revert <index> to restore a snapshot.');
+  return { type: 'message', message: lines.join('\n') };
+}
+
+async function handleRevert(args: string, ctx: SlashCommandContext): Promise<SlashCommandResult> {
+  if (!ctx.revertTo) {
+    return { type: 'message', message: 'Snapshot revert is not available in this context.' };
+  }
+
+  const snapshots = ctx.listSnapshots?.(ctx.cwd) ?? [];
+  if (snapshots.length === 0) {
+    return { type: 'message', message: 'No snapshots found. Snapshots are created automatically in yolo mode.' };
+  }
+
+  // Parse index from args (default: 0 = most recent)
+  const idx = args ? parseInt(args.trim(), 10) : 0;
+  if (isNaN(idx) || idx < 0 || idx >= snapshots.length) {
+    return {
+      type: 'message',
+      message: `Invalid index: ${args || '0'}. Choose 0-${snapshots.length - 1} (0 = most recent).\n${snapshots.map((s, i) => `  ${i}) ${s.sha.slice(0, 7)} — ${new Date(s.timestamp).toLocaleString()}`).join('\n')}`,
+    };
+  }
+
+  const target = snapshots[idx];
+  if (!target) {
+    return { type: 'message', message: 'Snapshot not found.' };
+  }
+  const result = await ctx.revertTo(ctx.cwd, target.sha);
+  if (result.success) {
+    const files = target.changedFiles != null ? `${target.changedFiles} file${target.changedFiles === 1 ? '' : 's'} restored` : '';
+    return { type: 'message', message: files ? `Reverted to snapshot ${target.sha.slice(0, 7)} (${target.label}) — ${files}` : `Reverted to snapshot ${target.sha.slice(0, 7)} (${target.label}).` };
+  }
+  return { type: 'message', message: result.error ?? 'Revert failed.' };
 }

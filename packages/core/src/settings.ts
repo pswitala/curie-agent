@@ -55,6 +55,8 @@ export interface CurieSettings {
   SAFETY_PATH_ALLOWLIST?: string;
   // Safety: command guard — reject/ask on dangerous shell patterns
   SAFETY_COMMAND_GUARD?: 'on' | 'off';
+  // Safety: git snapshot before each yolo-mode turn
+  SAFETY_SNAPSHOTS?: 'on' | 'off';
 }
 
 export const DEFAULT_SETTINGS: CurieSettings = {
@@ -80,6 +82,7 @@ export const DEFAULT_SETTINGS: CurieSettings = {
   SAFETY_PATH_GUARD: 'on',
   SAFETY_PATH_ALLOWLIST: '',
   SAFETY_COMMAND_GUARD: 'on',
+  SAFETY_SNAPSHOTS: 'on',
 };
 
 function migrateMode(raw: unknown): CurieSettings['mode'] {
@@ -166,6 +169,7 @@ export class SettingsManager {
             SAFETY_PATH_GUARD: (parsed.SAFETY_PATH_GUARD as 'on' | 'off') ?? DEFAULT_SETTINGS.SAFETY_PATH_GUARD,
             SAFETY_PATH_ALLOWLIST: (parsed.SAFETY_PATH_ALLOWLIST as string) ?? '',
             SAFETY_COMMAND_GUARD: (parsed.SAFETY_COMMAND_GUARD as 'on' | 'off') ?? DEFAULT_SETTINGS.SAFETY_COMMAND_GUARD,
+            SAFETY_SNAPSHOTS: (parsed.SAFETY_SNAPSHOTS as 'on' | 'off') ?? DEFAULT_SETTINGS.SAFETY_SNAPSHOTS,
           };
           this.settings = merged;
         }
