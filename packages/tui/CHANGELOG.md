@@ -1,5 +1,16 @@
 # @curie-agent/tui
 
+## 0.2.1
+
+### Patch Changes
+
+- Patch release to 0.2.1
+
+- Updated dependencies []:
+  - @curie-agent/core@0.2.1
+  - @curie-agent/protocol@0.2.1
+  - @curie-agent/render@0.2.1
+
 ## 0.2.0
 
 ### Minor Changes

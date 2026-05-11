@@ -1,6 +1,6 @@
 {
   "name": "@curie-agent/tui",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "files": [
     "dist"
   ],
@@ -23,9 +23,9 @@
     "clean": "npx rimraf dist"
   },
   "dependencies": {
-    "@curie-agent/core": "^0.2.0",
-    "@curie-agent/protocol": "^0.2.0",
-    "@curie-agent/render": "^0.2.0",
+    "@curie-agent/core": "^0.2.1",
+    "@curie-agent/protocol": "^0.2.1",
+    "@curie-agent/render": "^0.2.1",
     "@types/react": "^19.0.0",
     "ink": "^7.0.1",
     "react": "^19.2.5",
