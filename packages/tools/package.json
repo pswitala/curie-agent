@@ -1,6 +1,6 @@
 {
   "name": "@curie-agent/tools",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "publish": true,
   "type": "module",
   "files": [
@@ -23,7 +23,7 @@
     "clean": "npx rimraf dist"
   },
   "dependencies": {
-    "@curie-agent/core": "^0.1.2",
+    "@curie-agent/core": "^0.2.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

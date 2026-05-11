@@ -1,5 +1,11 @@
 # @curie-agent/providers
 
+## 0.2.0
+
+### Minor Changes
+
+- Feature release: v0.2.0
+
 ## 0.2.4
 
 ### Patch Changes

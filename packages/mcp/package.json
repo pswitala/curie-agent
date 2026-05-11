@@ -1,6 +1,6 @@
 {
   "name": "@curie-agent/mcp",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "publish": true,
   "type": "module",
   "files": [
@@ -24,8 +24,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
-    "@curie-agent/core": "^0.1.2",
-    "@curie-agent/tools": "^0.1.2"
+    "@curie-agent/core": "^0.2.0",
+    "@curie-agent/tools": "^0.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

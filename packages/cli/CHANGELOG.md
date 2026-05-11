@@ -1,5 +1,22 @@
 # @curie-agent/cli
 
+## 0.2.0
+
+### Minor Changes
+
+- Feature release: v0.2.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @curie-agent/core@0.2.0
+  - @curie-agent/mcp@0.2.0
+  - @curie-agent/protocol@0.2.0
+  - @curie-agent/providers@0.2.0
+  - @curie-agent/render@0.2.0
+  - @curie-agent/tools@0.2.0
+  - @curie-agent/tui@0.2.0
+
 ## 0.2.4
 
 ### Patch Changes
