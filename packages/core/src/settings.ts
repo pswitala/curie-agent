@@ -53,6 +53,8 @@ export interface CurieSettings {
   SAFETY_PATH_GUARD?: 'on' | 'off';
   // Safety: comma-separated absolute paths allowed in addition to cwd
   SAFETY_PATH_ALLOWLIST?: string;
+  // Safety: command guard — reject/ask on dangerous shell patterns
+  SAFETY_COMMAND_GUARD?: 'on' | 'off';
 }
 
 export const DEFAULT_SETTINGS: CurieSettings = {
@@ -77,6 +79,7 @@ export const DEFAULT_SETTINGS: CurieSettings = {
   HEARTBEAT_MONTHLY: '1@6:00',
   SAFETY_PATH_GUARD: 'on',
   SAFETY_PATH_ALLOWLIST: '',
+  SAFETY_COMMAND_GUARD: 'on',
 };
 
 function migrateMode(raw: unknown): CurieSettings['mode'] {
@@ -162,6 +165,7 @@ export class SettingsManager {
               ? parsed.MODEL_CONTEXT_WINDOW : undefined,
             SAFETY_PATH_GUARD: (parsed.SAFETY_PATH_GUARD as 'on' | 'off') ?? DEFAULT_SETTINGS.SAFETY_PATH_GUARD,
             SAFETY_PATH_ALLOWLIST: (parsed.SAFETY_PATH_ALLOWLIST as string) ?? '',
+            SAFETY_COMMAND_GUARD: (parsed.SAFETY_COMMAND_GUARD as 'on' | 'off') ?? DEFAULT_SETTINGS.SAFETY_COMMAND_GUARD,
           };
           this.settings = merged;
         }

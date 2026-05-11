@@ -165,7 +165,7 @@ function parseArgs(argv: string[]): Args {
 
 function printHelp() {
   console.log(`
-curie-agent - the successor to claude-code
+curie-agent - Local-first, self learner - AI Agent.
 
 Usage:
   curie-agent                              Interactive TUI

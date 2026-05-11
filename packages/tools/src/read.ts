@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { isPathAllowed, parseAllowlist } from '@curie-agent/core/safety/path-guard.js';
 import { createTool, expandPath, type ToolContext } from './tool.js';
 
 const ReadSchema = z.object({
@@ -16,6 +17,20 @@ export const readTool = createTool(
   ReadSchema,
   async (input, ctx: ToolContext) => {
     const filePath = path.resolve(ctx.cwd, expandPath(input.file_path));
+
+    // Safety: refuse reads outside allowed directories (project cwd + user allowlist).
+    if (ctx.settings.SAFETY_PATH_GUARD !== 'off') {
+      const allowlist = parseAllowlist(ctx.settings.SAFETY_PATH_ALLOWLIST ?? '');
+      if (!isPathAllowed(filePath, ctx.cwd, allowlist)) {
+        return { output: null, error: 'PathGuard: read blocked — path is outside allowed directories' };
+      }
+    }
+
+    // Safety: always block reading curie-agent settings (contains API keys).
+    const settingsPath = path.join(expandPath('~/.curie-agent'), 'settings.json');
+    if (filePath === settingsPath || filePath.toLowerCase() === settingsPath.toLowerCase()) {
+      return { output: null, error: 'PathGuard: reading settings.json is blocked — file contains API keys and secrets' };
+    }
 
     if (!fs.existsSync(filePath)) {
       return { output: null, error: `File not found: ${filePath}` };

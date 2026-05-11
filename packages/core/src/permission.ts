@@ -1,3 +1,5 @@
+import { classifyCommand } from './safety/command-guard.js';
+
 export type ApprovalMode = 'plan' | 'edit' | 'auto' | 'yolo';
 
 // Tools that only inspect state; safe to allow in plan mode.
@@ -48,6 +50,19 @@ export class PermissionEngine {
 
     if (this.rules.ask?.some((p) => globMatch(p, toolPattern))) {
       return { decision: 'ask', reason: `Ask by rule: ${this.rules.ask.find((p) => globMatch(p, toolPattern))}` };
+    }
+
+    // Layer 2: Command Guard — inspect Bash command content for known-dangerous patterns.
+    // Runs after explicit rules (so user allowlist overrides still work) but before
+    // mode-based defaults (so it catches yolo-mode bypasses).
+    if (toolName === 'Bash' && typeof input?.command === 'string') {
+      const classified = classifyCommand(input.command);
+      if (classified.decision === 'deny') {
+        return { decision: 'deny', reason: `Command guard: ${classified.reason}` };
+      }
+      if (classified.decision === 'ask' && this._mode === 'yolo') {
+        return { decision: 'ask', reason: `Command guard: ${classified.reason}` };
+      }
     }
 
     switch (this.mode) {

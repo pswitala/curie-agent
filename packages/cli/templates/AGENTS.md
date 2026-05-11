@@ -96,7 +96,7 @@ If missing `/root/.curie-agent/TODO.md` create it.
   `Glob` (gitignore-aware), 
   `Grep` (ripgrep-backed),
   `Bash` (sandboxed, foreground/background).
-- **Approval tiers**: `manual` (ask everything), `edit` (edits OK, shell asks), `auto` (allowlisted shell), `yolo` (no prompts, sandbox only).
+- **Approval tiers**: `plan` (ask everything and think step by step), `edit` (edits OK, shell asks), `auto` (allowlisted shell), `yolo` (no prompts, sandbox only).
 - **Plan mode**: structured planning before implementation, user sign-off required.
 - **Subagents**: delegate to isolated agents with worktree isolation and background execution. Each subagent gets its own context window and tool allowlist.
 - **Skills**: on-demand loading from `/root/.curie-agent/skills/<name>/SKILL.md` when trigger descriptions match user intent.

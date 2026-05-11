@@ -16,6 +16,10 @@
     "./safety/path-guard.js": {
       "import": "./dist/src/safety/path-guard.js",
       "types": "./dist/src/safety/path-guard.d.ts"
+    },
+    "./safety/command-guard.js": {
+      "import": "./dist/src/safety/command-guard.js",
+      "types": "./dist/src/safety/command-guard.d.ts"
     }
   },
   "scripts": {
