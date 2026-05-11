@@ -25,6 +25,13 @@ import type { ChannelTabEntry } from '@curie-agent/tui';
 
 const VERSION = '0.1.2';
 
+// Module-level user input history — survives App remounts by Ink.
+// A single mutable object that's never recreated, so ALL closures see the same data.
+const userInputHistory: string[] = [];
+// Stable ref object — never recreated, so Ink sees the same ref and doesn't remount ChatSurface.
+const userInputHistoryIndexObj = { current: -1 }; // -1 = not browsing; 0 = most recent
+const setUserInputHistoryIndex = (idx: number) => { userInputHistoryIndexObj.current = idx; };
+
 // Resolve templates directory — included in package via "files" in package.json
 // Prod: packages/cli/dist/src/cli.js  → ../../templates
 // Dev:  packages/cli/src/cli.tsx       → ../templates
@@ -664,11 +671,13 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
             'Welcome to curie-agent! Let\'s configure your AI provider.\n' +
             '\n' +
             'Which provider do you want to use?\n' +
-            '  1) local\n' +
-            '  2) openrouter\n' +
-            '  3) openai\n' +
-            '  4) anthropic\n' +
-            '\nType 1, 2, 3, or 4:',
+            '  1)local eg llama_cpp\n' +
+            '  2)openrouter\n' +
+            '  3)openai\n' +
+            '  4)anthropic\n' +
+            '  5)google\n' +
+            '  6)ollama\n' +
+            '\nType 1, 2, 3, 4, 5, or 6:',
           );
           wizardRef.current = { phase: 'provider' };
           return;
@@ -1811,6 +1820,9 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
       } : null}
       onApprovalDecision={onApprovalDecision}
       onSelectProject={onSelectProject}
+      historyArray={userInputHistory}
+      historyIndexRef={userInputHistoryIndexObj}
+      setHistoryIndexFn={setUserInputHistoryIndex}
     />
   );
 }

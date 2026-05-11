@@ -118,7 +118,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'websearch', description: 'View/set web search+fetch limit per turn', usage: '/websearch [count]' },
   { name: 'mcp', description: 'Manage MCP server connections', usage: '/mcp <list|add|remove|reload>' },
   { name: 'exit', description: 'Exit curie-agent', usage: '/exit' },
-  { name: 'provider', description: 'Switch AI provider', usage: '/provider <anthropic|openai|google|local|openrouter>' },
+  { name: 'provider', description: 'Switch AI provider', usage: '/provider <anthropic|openai|google|local|ollama|openrouter>' },
   { name: 'heartbeat', description: 'Manage heartbeat cycle', usage: '/heartbeat <status|enable|disable|intraday|daily|weekly|monthly|now>' },
   { name: 'init', description: 'Run the setup wizard', usage: '/init' },
   { name: 'snapshots', description: 'List recent git snapshots for recovery', usage: '/snapshots' },

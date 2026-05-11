@@ -68,6 +68,12 @@ interface ChatSurfaceProps {
   onSelectProject?: (project: ProjectEntry) => void;
   channels?: ChannelTabEntry[];
   onChannelSelect?: (channelId: string) => void;
+  // User input history — stable refs passed separately to prevent Ink remounts.
+// If we pass these as a single object literal, Ink sees a new ref each render
+// and remounts ChatSurface, destroying the useInput handler.
+  historyArray?: string[];
+  historyIndexRef?: { current: number };
+  setHistoryIndexFn?: (idx: number) => void;
  }
 
 // Fixed row counts for chrome layout.
@@ -103,14 +109,18 @@ export function ChatSurface({
   onSelectProject,
   channels,
   onChannelSelect,
+  historyArray,
+  historyIndexRef,
+  setHistoryIndexFn,
  }: ChatSurfaceProps) {
   const [inputText, setInputText] = useState('');
   const [currentTab, setCurrentTab] = useState<TabId>(activeTab);
   React.useEffect(() => { setCurrentTab(activeTab); }, [activeTab]);
-  const [history, setHistory] = useState<string[]>([]);
-  // historyIndex: null = not browsing (showing live draft); otherwise index
-  // into `history` from the end (0 = most recent).
-  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+ // -1 = not browsing (showing live draft); otherwise index
+  // into history from the end (0 = most recent).
+  // historyIndex — read directly from ref so closure stays fresh between keypresses
+  // without needing re-renders (setHistoryIndexFn doesn't trigger re-renders).
+  const getHistoryIndex = () => (historyIndexRef != null ? historyIndexRef.current : -1);
   const draftRef = React.useRef('');
   // Cursor position for left/right arrow navigation in the text input.
   const [cursorPos, setCursorPos] = useState(0);
@@ -290,40 +300,44 @@ export function ChatSurface({
       return;
     }
     if (key.upArrow) {
-      // History navigation (only on assistant tab, only when not browsing history).
+      // History navigation (only on assistant tab).
+      // Index: 0=oldest, length-1=newest. Up walks toward older (decrement).
       if (currentTab !== 'assistant') return;
-      if (historyIndex !== null) return;
-      if (history.length === 0) return;
-      setHistoryIndex(prev => {
-        if (prev === null) {
-          draftRef.current = inputText;
-          const next = history.length - 1;
-          setInputText(history[next] ?? '');
-          setCursorPos(history[next]?.length ?? 0);
-          return next;
-        }
-        const next = Math.max(0, prev - 1);
-        setInputText(history[next] ?? '');
-        setCursorPos(history[next]?.length ?? 0);
-        return next;
-      });
+      const src = historyArray ?? [];
+      if (src.length === 0) return;
+      const cur = getHistoryIndex();
+      if (cur < 0) {
+        // First press: save draft, jump to most recent entry.
+        draftRef.current = inputText;
+        const idx = src.length - 1;
+        setInputText(src[idx] ?? '');
+        setCursorPos((src[idx]?.length) ?? 0);
+        if (setHistoryIndexFn) setHistoryIndexFn(idx);
+      } else if (cur > 0) {
+        // Subsequent presses: walk toward older entries.
+        const prev = cur - 1;
+        setInputText(src[prev] ?? '');
+        setCursorPos((src[prev]?.length) ?? 0);
+        if (setHistoryIndexFn) setHistoryIndexFn(prev);
+      }
       return;
     }
     if (key.downArrow) {
       if (currentTab !== 'assistant') return;
-      if (historyIndex === null) return;
-      setHistoryIndex(prev => {
-        if (prev === null) return null;
-        const next = prev + 1;
-        if (next >= history.length) {
-          setInputText(draftRef.current);
-          setCursorPos(draftRef.current.length);
-          return null;
-        }
-        setInputText(history[next] ?? '');
-        setCursorPos(history[next]?.length ?? 0);
-        return next;
-      });
+      const cur = getHistoryIndex();
+      if (cur < 0) return;
+      const src = historyArray ?? [];
+      if (cur >= src.length - 1) {
+        // Past most recent: restore draft.
+        setInputText(draftRef.current);
+        setCursorPos(draftRef.current.length);
+        if (setHistoryIndexFn) setHistoryIndexFn(-1);
+      } else {
+        const next = cur + 1;
+        setInputText(src[next] ?? '');
+        setCursorPos((src[next]?.length) ?? 0);
+        if (setHistoryIndexFn) setHistoryIndexFn(next);
+      }
       return;
     }
     // Left/right arrow — cursor movement (only in assistant tab text input).
@@ -350,8 +364,12 @@ export function ChatSurface({
         setInputText('');
         setCursorPos(0);
         // Record in history, deduping consecutive repeats.
-        setHistory(prev => (prev[prev.length - 1] === text ? prev : [...prev, text]));
-        setHistoryIndex(null);
+        if (historyArray) {
+          if (historyArray[historyArray.length - 1] !== text) {
+            historyArray.push(text);
+          }
+          if (setHistoryIndexFn) setHistoryIndexFn(-1);
+        }
         draftRef.current = '';
         if (text.startsWith('!') && onBashCommand) {
           const cmd = text.slice(1).trim();
@@ -391,7 +409,9 @@ export function ChatSurface({
     }
 
     if (key.backspace || key.delete) {
-      if (historyIndex !== null) setHistoryIndex(null);
+      if (getHistoryIndex() >= 0 && setHistoryIndexFn) {
+        setHistoryIndexFn(-1);
+      }
       const c = cursorPos;
       const newC = key.backspace ? Math.max(0, c - 1) : c;
       setInputText(prev => {
@@ -404,7 +424,9 @@ export function ChatSurface({
     }
 
     if (char && !key.ctrl && !key.meta) {
-      if (historyIndex !== null) setHistoryIndex(null);
+      if (getHistoryIndex() >= 0 && setHistoryIndexFn) {
+        setHistoryIndexFn(-1);
+      }
       const c = cursorPos;
       setInputText(prev => prev.slice(0, c) + char + prev.slice(c));
       setCursorPos(c + char.length);
@@ -421,7 +443,9 @@ export function ChatSurface({
       const c = cursorPos;
       setInputText((prev) => prev.slice(0, c) + text + prev.slice(c));
       setCursorPos(c + text.length);
-      if (historyIndex !== null) setHistoryIndex(null);
+      if (getHistoryIndex() >= 0 && setHistoryIndexFn) {
+        setHistoryIndexFn(-1);
+      }
     },
     { isActive: pasteIsActive },
   );
