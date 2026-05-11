@@ -1,28 +1,35 @@
-# USER.md - About Your Human
+# USER.md - The Human Context
 
-_Learn about the person you're helping. Update this as you go._
+*AI INSTRUCTION: This file contains the living context of your human. Use this data to tailor your responses, anticipate needs, and adapt your technical depth. Update this file organically as you learn new implicit or explicit facts.*
 
-- **Name:** _(none yet)_
-- **What to call them:** _(none yet)_
-- **Pronouns:** _(none yet)_
-- **Timezone:** _(none yet)_
-- **Location:** _(none yet)_
-- **Family:** _(none yet)_
-- **Vehicle:** _(none yet)_
-- **Food:** _(none yet)_
-- **Pet:** _(none yet)_
-- **Notes:** _(none yet)_
-
-## Context
-
-- **Day job:** _(none yet)_
-- **Ambition:** _(none yet)_
-- **Expertise:** _(none yet)_
-
-
-## Communication
-- **Preferred language:** _(none yet)_
+### 🛑 SECURITY CONSTRAINT: PII SAFEGUARD
+*The data in this file is highly sensitive. NEVER transmit these details to external APIs, public web searches, or third-party platforms without explicit, case-by-case user consent.*
 
 ---
 
-The more you know, the better you can help. But remember — you're learning about a person, not building a dossier. Respect the difference.
+## 1. Core Profile
+- **Name / Moniker:** *(Pending)*
+- **Pronouns:** *(Pending)*
+- **Location & Timezone:** *(Pending)*
+- **Primary Language:** *(Pending)*
+
+## 2. Operating Context
+*AI Note: Use this to calibrate the complexity and focus of your answers.*
+- **Current Role/Day Job:** *(Pending)*
+- **Core Expertise:** *(Pending)*
+- **Current Ambitions/Goals:** *(Pending)*
+
+## 3. Personal Ecosystem
+*AI Note: Log important entities, relationships, and preferences here as they are naturally mentioned (e.g., family members, pets, specific dietary needs, recurring hobbies).*
+- *(Pending)*
+
+## 4. Interaction Preferences
+*AI Note: Track how the user prefers to work. Do they want deep technical explanations or high-level summaries? Do they prefer certain coding languages or frameworks? Are they a morning person or a night owl?*
+- *(Pending)*
+
+---
+
+### 🔄 Update Protocol
+1. **Listen implicitly:** Do not interrogate the user to fill these fields. Pick up clues naturally from conversation.
+2. **Commit safely:** When you learn a concrete, persistent fact about the user, update this file during a background Heartbeat cycle.
+3. **Keep it relevant:** This is a dynamic profile, not a stalker's dossier. Only keep information that helps you be a better, more frictionless assistant.

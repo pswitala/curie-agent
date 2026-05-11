@@ -41,7 +41,7 @@ export interface CurieSettings {
   WEBSEARCH_PER_CALL?: number;
   // Heartbeat periodic task — each schedule fires its section of HEARTBEAT.md
   HEARTBEAT?: 'on' | 'off';
-  HEARTBEAT_TIMES?: string;    // comma-separated "H:MM" list, e.g. "8:10,10:10,14:20,16:20"
+  HEARTBEAT_INTRADAY?: string;  // comma-separated "H:MM" list, e.g. "8:10,10:10,14:20,16:20"
   HEARTBEAT_DAILY?: string;   // "H:MM"  (24h)
   HEARTBEAT_WEEKLY?: string;  // "day@H:MM" (monday|tuesday|...|sunday@H:MM)
   HEARTBEAT_MONTHLY?: string; // "D@H:MM" (1-31@H:MM)
@@ -75,7 +75,7 @@ export const DEFAULT_SETTINGS: CurieSettings = {
   TOOLS_PER_CALL: 10,
   WEBSEARCH_PER_CALL: 5,
   HEARTBEAT: 'off',
-  HEARTBEAT_TIMES: '',
+  HEARTBEAT_INTRADAY: '',
   HEARTBEAT_DAILY: '6:00',
   HEARTBEAT_WEEKLY: 'monday@6:00',
   HEARTBEAT_MONTHLY: '1@6:00',
@@ -159,7 +159,7 @@ export class SettingsManager {
             WEBSEARCH_PER_CALL: (typeof parsed.WEBSEARCH_PER_CALL === 'number' && parsed.WEBSEARCH_PER_CALL > 0)
               ? parsed.WEBSEARCH_PER_CALL : DEFAULT_SETTINGS.WEBSEARCH_PER_CALL,
             HEARTBEAT: (parsed.HEARTBEAT as 'on' | 'off') ?? DEFAULT_SETTINGS.HEARTBEAT,
-            HEARTBEAT_TIMES: (parsed.HEARTBEAT_TIMES as string) ?? (parsed.HEARTBEAT_HOURLY as string) ?? DEFAULT_SETTINGS.HEARTBEAT_TIMES,
+            HEARTBEAT_INTRADAY: (parsed.HEARTBEAT_INTRADAY as string) ?? (parsed.HEARTBEAT_TIMES as string) ?? (parsed.HEARTBEAT_HOURLY as string) ?? DEFAULT_SETTINGS.HEARTBEAT_INTRADAY,
             HEARTBEAT_DAILY: (parsed.HEARTBEAT_DAILY as string) ?? DEFAULT_SETTINGS.HEARTBEAT_DAILY,
             HEARTBEAT_WEEKLY: (parsed.HEARTBEAT_WEEKLY as string) ?? DEFAULT_SETTINGS.HEARTBEAT_WEEKLY,
             HEARTBEAT_MONTHLY: (parsed.HEARTBEAT_MONTHLY as string) ?? DEFAULT_SETTINGS.HEARTBEAT_MONTHLY,

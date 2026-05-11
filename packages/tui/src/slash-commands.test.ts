@@ -43,7 +43,7 @@ const mockContext: SlashCommandContext = {
     statusline: true,
     debug: false,
     HEARTBEAT: 'off',
-    HEARTBEAT_TIMES: '',
+    HEARTBEAT_INTRADAY: '',
     HEARTBEAT_DAILY: '6:00',
     HEARTBEAT_WEEKLY: 'monday@6:00',
     HEARTBEAT_MONTHLY: '1@6:00',
@@ -547,7 +547,7 @@ describe('/heartbeat', () => {
     expect(result.type).toBe('message');
     expect(result.message).toContain('Heartbeat cycle');
     expect(result.message).toContain('Enabled: no');
-    expect(result.message).toContain('Times:');
+    expect(result.message).toContain('Intraday:');
     expect(result.message).toContain('Daily:');
   });
 
@@ -571,7 +571,7 @@ it('status with enabled settings shows yes and active schedule', async () => {
       settings: {
         ...baseCtx.settings,
         HEARTBEAT: 'on',
-        HEARTBEAT_TIMES: '8:00,14:00',
+        HEARTBEAT_INTRADAY: '8:00,14:00',
         HEARTBEAT_DAILY: '6:00',
       },
     } as SlashCommandContext;
@@ -582,23 +582,23 @@ it('status with enabled settings shows yes and active schedule', async () => {
     expect(result.message).toContain('Daily:');
   });
 
-  it('times with no arg returns usage', async () => {
-    const result = await handleSlashCommand('heartbeat', 'times', baseCtx);
+  it('intraday with no arg returns usage', async () => {
+    const result = await handleSlashCommand('heartbeat', 'intraday', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Usage');
   });
 
-  it('times with valid times returns notification', async () => {
-    const result = await handleSlashCommand('heartbeat', 'times 8:10,10:10,14:20', baseCtx);
+  it('intraday with valid times returns notification', async () => {
+    const result = await handleSlashCommand('heartbeat', 'intraday 8:10,10:10,14:20', baseCtx);
     expect(result.type).toBe('notification');
     expect(result.notification!.type).toBe('heartbeat-set');
     const hb = result.notification as { type: 'heartbeat-set'; key: string };
-    expect(hb.key).toBe('HEARTBEAT_TIMES');
+    expect(hb.key).toBe('HEARTBEAT_INTRADAY');
     expect(hb.value).toBe('8:10,10:10,14:20');
   });
 
-  it('times with invalid time returns error', async () => {
-    const result = await handleSlashCommand('heartbeat', 'times 25:99', baseCtx);
+  it('intraday with invalid time returns error', async () => {
+    const result = await handleSlashCommand('heartbeat', 'intraday 25:99', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Invalid time');
   });
@@ -677,7 +677,7 @@ describe('/context compact', () => {
       statusline: true,
       debug: false,
       HEARTBEAT: 'off',
-      HEARTBEAT_TIMES: '',
+      HEARTBEAT_INTRADAY: '',
       HEARTBEAT_DAILY: '6:00',
       HEARTBEAT_WEEKLY: 'monday@6:00',
       HEARTBEAT_MONTHLY: '1@6:00',

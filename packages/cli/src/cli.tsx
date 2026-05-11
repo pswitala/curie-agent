@@ -788,13 +788,13 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
           // Re-evaluate all four schedules to pick the next earliest
           const settings = settingsMgr.current!.get();
           cronManagerRef.current?.rescheduleFromSettings({
-            HEARTBEAT_TIMES: settings.HEARTBEAT_TIMES,
+            HEARTBEAT_INTRADAY: settings.HEARTBEAT_INTRADAY,
             HEARTBEAT_DAILY: settings.HEARTBEAT_DAILY,
             HEARTBEAT_WEEKLY: settings.HEARTBEAT_WEEKLY,
             HEARTBEAT_MONTHLY: settings.HEARTBEAT_MONTHLY,
           });
           const scheduleLabel: Record<string, string> = {
-            HEARTBEAT_TIMES: `times: ${note.value}`,
+            HEARTBEAT_INTRADAY: `intraday: ${note.value}`,
             HEARTBEAT_DAILY: `daily at ${note.value}`,
             HEARTBEAT_WEEKLY: `weekly on ${note.value}`,
             HEARTBEAT_MONTHLY: `monthly on day ${note.value}`,
@@ -1960,7 +1960,7 @@ async function main() {
   const s = settingsManager.load();
   if (s.HEARTBEAT === 'on' && !hbSettings.tasks.some((t) => t.type === 'heartbeat')) {
     const picked = pickNextSchedule({
-      HEARTBEAT_TIMES: s.HEARTBEAT_TIMES,
+      HEARTBEAT_INTRADAY: s.HEARTBEAT_INTRADAY,
       HEARTBEAT_DAILY: s.HEARTBEAT_DAILY,
       HEARTBEAT_WEEKLY: s.HEARTBEAT_WEEKLY,
       HEARTBEAT_MONTHLY: s.HEARTBEAT_MONTHLY,
@@ -2257,7 +2257,7 @@ async function main() {
         // Re-evaluate all four schedules and update the task's next fire time
         const currentSettings = settingsManager.load();
         cronManager.rescheduleFromSettings({
-          HEARTBEAT_TIMES: currentSettings.HEARTBEAT_TIMES,
+          HEARTBEAT_INTRADAY: currentSettings.HEARTBEAT_INTRADAY,
           HEARTBEAT_DAILY: currentSettings.HEARTBEAT_DAILY,
           HEARTBEAT_WEEKLY: currentSettings.HEARTBEAT_WEEKLY,
           HEARTBEAT_MONTHLY: currentSettings.HEARTBEAT_MONTHLY,

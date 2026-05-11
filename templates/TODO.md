@@ -2,9 +2,9 @@
 
 ---
 
-### Active Tasks
+## Active Tasks
 _(none yet)_
 
 
-### Completed Tasks
+## Completed Tasks
 _(none yet)_

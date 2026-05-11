@@ -2,11 +2,11 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-export type ScheduleType = 'times' | 'daily' | 'weekly' | 'monthly';
+export type ScheduleType = 'intraday' | 'daily' | 'weekly' | 'monthly';
 
 /** Human-readable label for a schedule type. */
 export function scheduleLabel(type: ScheduleType): string {
-  return type.toUpperCase(); // TIMES, DAILY, WEEKLY, MONTHLY
+  return type.toUpperCase(); // INTRADAY, DAILY, WEEKLY, MONTHLY
 }
 
 export interface CronTask {
@@ -17,7 +17,7 @@ export interface CronTask {
   /** Schedule definition for heartbeat tasks. */
   schedule?: {
     type: ScheduleType;
-    // times: string = comma-separated "H:MM" list, e.g. "8:10,10:10,14:20,16:20"
+    // intraday: string = comma-separated "H:MM" list, e.g. "8:10,10:10,14:20,16:20"
     // daily: string = "H:MM" (24h)
     // weekly: string = "day@H:MM" (monday@6:00)
     // monthly: string = "D@H:MM" (1@6:00)
@@ -101,7 +101,7 @@ export function computeNextFire(schedule: CronTask['schedule'], now: number): nu
   const { type, value } = schedule;
   if (!value) return now;
 
-  if (type === 'times') {
+  if (type === 'intraday') {
     const tokens = value.split(',').map((s) => s.trim()).filter(Boolean);
     const slots: { hour: number; minute: number }[] = [];
     for (const token of tokens) {
@@ -173,18 +173,18 @@ export function computeNextFire(schedule: CronTask['schedule'], now: number): nu
  * with the earliest next fire time. Returns null if all are empty.
  */
 export function pickNextSchedule(settings: {
-  HEARTBEAT_TIMES?: string;
+  HEARTBEAT_INTRADAY?: string;
   HEARTBEAT_DAILY?: string;
   HEARTBEAT_WEEKLY?: string;
   HEARTBEAT_MONTHLY?: string;
 }, now?: number): { type: ScheduleType; value: string } | null {
   const reference = now ?? Date.now();
   const candidates: Array<{ type: ScheduleType; value: string; nextFire: number }> = [];
-  // Tie-break priority: times > daily > weekly > monthly
-  const priority = { times: 0, daily: 1, weekly: 2, monthly: 3 };
+  // Tie-break priority: intraday > daily > weekly > monthly
+  const priority = { intraday: 0, daily: 1, weekly: 2, monthly: 3 };
 
   const schedules: Array<{ type: ScheduleType; value: string }> = [
-    { type: 'times', value: settings.HEARTBEAT_TIMES ?? '' },
+    { type: 'intraday', value: settings.HEARTBEAT_INTRADAY ?? '' },
     { type: 'daily', value: settings.HEARTBEAT_DAILY ?? '' },
     { type: 'weekly', value: settings.HEARTBEAT_WEEKLY ?? '' },
     { type: 'monthly', value: settings.HEARTBEAT_MONTHLY ?? '' },
@@ -316,7 +316,7 @@ export class CronManager {
    * schedule setting changes or after a heartbeat fires.
    */
   rescheduleFromSettings(settings: {
-    HEARTBEAT_TIMES?: string;
+    HEARTBEAT_INTRADAY?: string;
     HEARTBEAT_DAILY?: string;
     HEARTBEAT_WEEKLY?: string;
     HEARTBEAT_MONTHLY?: string;

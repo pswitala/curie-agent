@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { CronManager, computeNextFire, pickNextSchedule } from './cron-manager.js';
 
 describe('computeNextFire', () => {
-  it('times fires at the next upcoming time in the list', () => {
-    const schedule = { type: 'times' as const, value: '8:10,10:10,14:20,16:20' };
+  it('intraday fires at the next upcoming time in the list', () => {
+    const schedule = { type: 'intraday' as const, value: '8:10,10:10,14:20,16:20' };
     // 10:15 local — next slot after now is 10:10 is past, so 14:20
     const now = new Date();
     now.setHours(10, 15, 0, 0);
@@ -12,8 +12,8 @@ describe('computeNextFire', () => {
     expect(d.getHours() * 60 + d.getMinutes()).toBeGreaterThan(10 * 60 + 15);
   });
 
-  it('times rolls over to first slot tomorrow when all slots passed', () => {
-    const schedule = { type: 'times' as const, value: '8:10,10:10' };
+  it('intraday rolls over to first slot tomorrow when all slots passed', () => {
+    const schedule = { type: 'intraday' as const, value: '8:10,10:10' };
     const now = new Date();
     now.setHours(23, 0, 0, 0);
     const next = computeNextFire(schedule, now.getTime());
@@ -25,8 +25,8 @@ describe('computeNextFire', () => {
     expect(d.getMinutes()).toBe(10);
   });
 
-  it('times with single entry fires at that time', () => {
-    const schedule = { type: 'times' as const, value: '9:00' };
+  it('intraday with single entry fires at that time', () => {
+    const schedule = { type: 'intraday' as const, value: '9:00' };
     const now = new Date();
     now.setHours(8, 0, 0, 0);
     const next = computeNextFire(schedule, now.getTime());
@@ -99,7 +99,7 @@ describe('CronManager heartbeat tasks', () => {
 
   it('creates heartbeat and lists alongside reminders', () => {
     manager.createReminder('Test reminder', Date.now() + 60_000);
-    manager.createHeartbeat('Heartbeat', { type: 'times', value: '8:00,12:00' });
+    manager.createHeartbeat('Heartbeat', { type: 'intraday', value: '8:00,12:00' });
     const all = manager.listReminders();
     expect(all).toHaveLength(2);
     expect(all.find((t) => t.type === 'reminder')).toBeDefined();
@@ -130,12 +130,12 @@ describe('CronManager heartbeat tasks', () => {
   });
 
  it('reschedules from settings after a schedule update', () => {
-    manager.createHeartbeat('HB', { type: 'times', value: '23:00' });
+    manager.createHeartbeat('HB', { type: 'intraday', value: '23:00' });
     const initialScheduledAt = manager.listReminders('pending').find((t) => t.id)?.scheduledAt;
 
-    // Use a fixed now (3:00 AM) where daily 6:00 (3h) is sooner than times 23:00 (20h)
+    // Use a fixed now (3:00 AM) where daily 6:00 (3h) is sooner than intraday 23:00 (20h)
     manager.rescheduleFromSettings({
-      HEARTBEAT_TIMES: '23:00',
+      HEARTBEAT_INTRADAY: '23:00',
       HEARTBEAT_DAILY: '6:00',
     }, new Date('2026-05-04T03:00:00Z').getTime());
 
@@ -156,7 +156,7 @@ describe('CronManager heartbeat tasks', () => {
 describe('pickNextSchedule', () => {
   it('returns null when all schedules are empty', () => {
     const result = pickNextSchedule({
-      HEARTBEAT_TIMES: '',
+      HEARTBEAT_INTRADAY: '',
       HEARTBEAT_DAILY: '',
       HEARTBEAT_WEEKLY: '',
       HEARTBEAT_MONTHLY: '',
@@ -169,60 +169,60 @@ describe('pickNextSchedule', () => {
     expect(result).toBeNull();
   });
 
-  it('picks times when only times is set', () => {
-    const result = pickNextSchedule({ HEARTBEAT_TIMES: '8:00,14:00' });
-    expect(result).toEqual({ type: 'times', value: '8:00,14:00' });
+  it('picks intraday when only intraday is set', () => {
+    const result = pickNextSchedule({ HEARTBEAT_INTRADAY: '8:00,14:00' });
+    expect(result).toEqual({ type: 'intraday', value: '8:00,14:00' });
   });
 
-  it('picks daily when daily is sooner than times', () => {
-    // At 9:00 AM: daily 6:00 (tomorrow) vs times 23:00 (today)
-    // times 23:00 today is sooner, so times should win
+  it('picks intraday when intraday is sooner than daily', () => {
+    // At 9:00 AM: daily 6:00 (tomorrow) vs intraday 23:00 (today)
+    // intraday 23:00 today is sooner, so intraday should win
     // To make daily win, use times 1:00 (tomorrow) vs daily 6:00 (today if before 6am, tomorrow if after)
     // Better: use a time where daily is clearly sooner
     const result = pickNextSchedule({
-      HEARTBEAT_TIMES: '23:00',
+      HEARTBEAT_INTRADAY: '23:00',
       HEARTBEAT_DAILY: '6:00',
     }, new Date('2026-05-04T09:00:00Z').getTime());
     // times 23:00 today (14h) vs daily 6:00 tomorrow (21h) -> times wins
     // Need to flip: times at 1:00 (tomorrow) vs daily 6:00 (tomorrow)
     // Actually, let's test the opposite case in the next test
-    expect(result?.type).toBe('times');
+    expect(result?.type).toBe('intraday');
     expect(result?.value).toBe('23:00');
   });
 
-  it('picks times when times is sooner than daily', () => {
-    // At 9:00 AM: times 8:00 (tomorrow) vs daily 23:00 (today) -> daily wins
+  it('picks intraday when intraday is sooner than daily', () => {
+    // At 9:00 AM: intraday 8:00 (tomorrow) vs daily 23:00 (today) -> daily wins
     const result = pickNextSchedule({
-      HEARTBEAT_TIMES: '8:00',
+      HEARTBEAT_INTRADAY: '8:00',
       HEARTBEAT_DAILY: '23:00',
     }, new Date('2026-05-04T09:00:00Z').getTime());
     expect(result?.type).toBe('daily');
     expect(result?.value).toBe('23:00');
   });
 
-  it('picks daily over times when daily is truly sooner', () => {
-    // At 6:30 AM: daily 6:00 (tomorrow) vs times 23:00 (today) -> times wins (16.5h vs 23.5h)
-    // At 3:00 AM: daily 6:00 (today) vs times 23:00 (today) -> daily wins (3h vs 20h)
+  it('picks daily over intraday when daily is truly sooner', () => {
+    // At 6:30 AM: daily 6:00 (tomorrow) vs intraday 23:00 (today) -> intraday wins (16.5h vs 23.5h)
+    // At 3:00 AM: daily 6:00 (today) vs intraday 23:00 (today) -> daily wins (3h vs 20h)
     const result = pickNextSchedule({
-      HEARTBEAT_TIMES: '23:00',
+      HEARTBEAT_INTRADAY: '23:00',
       HEARTBEAT_DAILY: '6:00',
     }, new Date('2026-05-04T03:00:00Z').getTime());
     expect(result?.type).toBe('daily');
     expect(result?.value).toBe('6:00');
   });
 
-  it('breaks ties by priority: times > daily > weekly > monthly', () => {
-    // All at same time — times wins
+  it('breaks ties by priority: intraday > daily > weekly > monthly', () => {
+    // All at same time — intraday wins
     const result = pickNextSchedule({
-      HEARTBEAT_TIMES: '6:00',
+      HEARTBEAT_INTRADAY: '6:00',
       HEARTBEAT_DAILY: '6:00',
     });
-    expect(result?.type).toBe('times');
+    expect(result?.type).toBe('intraday');
   });
 
   it('skips empty schedule types', () => {
     const result = pickNextSchedule({
-      HEARTBEAT_TIMES: '',
+      HEARTBEAT_INTRADAY: '',
       HEARTBEAT_DAILY: '10:00',
       HEARTBEAT_WEEKLY: '',
       HEARTBEAT_MONTHLY: '15@8:00',

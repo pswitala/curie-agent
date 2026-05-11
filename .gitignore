@@ -50,3 +50,5 @@ src/**/*.d.ts.map
 
 #prevent publish plans
 plans/
+
+.npmrc

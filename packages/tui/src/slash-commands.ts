@@ -57,7 +57,7 @@ export interface SlashCommandResult {
     enabled?: boolean;
   } | {
     type: 'heartbeat-set';
-    key: 'HEARTBEAT_TIMES' | 'HEARTBEAT_DAILY' | 'HEARTBEAT_WEEKLY' | 'HEARTBEAT_MONTHLY';
+    key: 'HEARTBEAT_INTRADAY' | 'HEARTBEAT_DAILY' | 'HEARTBEAT_WEEKLY' | 'HEARTBEAT_MONTHLY';
     value: string;
   } | {
     type: 'heartbeat-now';
@@ -119,7 +119,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'mcp', description: 'Manage MCP server connections', usage: '/mcp <list|add|remove|reload>' },
   { name: 'exit', description: 'Exit curie-agent', usage: '/exit' },
   { name: 'provider', description: 'Switch AI provider', usage: '/provider <anthropic|openai|google|local|openrouter>' },
-  { name: 'heartbeat', description: 'Manage heartbeat cycle', usage: '/heartbeat <status|enable|disable|times|daily|weekly|monthly|now>' },
+  { name: 'heartbeat', description: 'Manage heartbeat cycle', usage: '/heartbeat <status|enable|disable|intraday|daily|weekly|monthly|now>' },
   { name: 'init', description: 'Run the setup wizard', usage: '/init' },
   { name: 'snapshots', description: 'List recent git snapshots for recovery', usage: '/snapshots' },
   { name: 'revert', description: 'Revert to a git snapshot (index, default: most recent)', usage: '/revert [index]' },
@@ -1053,16 +1053,16 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
     case 'status':
     case '': {
       const active = ctx.settings.HEARTBEAT === 'on';
-      const times = ctx.settings.HEARTBEAT_TIMES ?? '';
+      const intraday = ctx.settings.HEARTBEAT_INTRADAY ?? '';
       const daily = ctx.settings.HEARTBEAT_DAILY ?? '6:00';
       const weekly = ctx.settings.HEARTBEAT_WEEKLY ?? 'monday@6:00';
       const monthly = ctx.settings.HEARTBEAT_MONTHLY ?? '1@6:00';
-      const timesDisplay = times ? times.split(',').map((s) => s.trim()).join(', ') : '(not set)';
-      const picked = pickNextSchedule({ HEARTBEAT_TIMES: times, HEARTBEAT_DAILY: daily, HEARTBEAT_WEEKLY: weekly, HEARTBEAT_MONTHLY: monthly });
+      const intradayDisplay = intraday ? intraday.split(',').map((s) => s.trim()).join(', ') : '(not set)';
+      const picked = pickNextSchedule({ HEARTBEAT_INTRADAY: intraday, HEARTBEAT_DAILY: daily, HEARTBEAT_WEEKLY: weekly, HEARTBEAT_MONTHLY: monthly });
       const activeSchedule = picked ? `${picked.type} (${picked.value})` : '(none configured)';
       return {
         type: 'message',
-        message: `Heartbeat cycle:\n  Enabled: ${active ? 'yes' : 'no'}\n  Active schedule: ${activeSchedule}\n\n  Times:   ${timesDisplay}\n  Daily:   ${daily}\n  Weekly:  ${weekly}\n  Monthly: ${monthly}\n\nUsage:\n  /heartbeat                        — show status\n  /heartbeat enable                 — turn on\n  /heartbeat disable                — turn off\n  /heartbeat times <H:MM,...>       — set intra-day times (e.g. 8:10,10:10,14:20)\n  /heartbeat daily <H:MM>           — set daily time (24h)\n  /heartbeat weekly <day@H:MM>\n  /heartbeat monthly <D@H:MM>\n  /heartbeat now                    — run immediately`,
+        message: `Heartbeat cycle:\n  Enabled: ${active ? 'yes' : 'no'}\n  Active schedule: ${activeSchedule}\n\n  Intraday: ${intradayDisplay}\n  Daily:   ${daily}\n  Weekly:  ${weekly}\n  Monthly: ${monthly}\n\nUsage:\n  /heartbeat                        — show status\n  /heartbeat enable                 — turn on\n  /heartbeat disable                — turn off\n  /heartbeat intraday <H:MM,...>    — set intra-day times (e.g. 8:10,10:10,14:20)\n  /heartbeat daily <H:MM>           — set daily time (24h)\n  /heartbeat weekly <day@H:MM>\n  /heartbeat monthly <D@H:MM>\n  /heartbeat now                    — run immediately`,
       };
     }
 
@@ -1074,12 +1074,12 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
       return { type: 'notification', notification: { type: 'heartbeat', enabled: false } };
     }
 
-    case 'times': {
+    case 'intraday': {
       if (!rest) {
-        const current = ctx.settings.HEARTBEAT_TIMES ?? '';
+        const current = ctx.settings.HEARTBEAT_INTRADAY ?? '';
         return {
           type: 'message',
-          message: `Usage: /heartbeat times <H:MM,...>\nExample: /heartbeat times 8:10,10:10,14:20,16:20\nCurrent: ${current || '(not set)'}`,
+          message: `Usage: /heartbeat intraday <H:MM,...>\nExample: /heartbeat intraday 8:10,10:10,14:20,16:20\nCurrent: ${current || '(not set)'}`,
         };
       }
       const tokens = rest.split(',').map((s) => s.trim()).filter(Boolean);
@@ -1096,7 +1096,7 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
       const value = tokens.join(',');
       return {
         type: 'notification',
-        notification: { type: 'heartbeat-set', key: 'HEARTBEAT_TIMES', value },
+        notification: { type: 'heartbeat-set', key: 'HEARTBEAT_INTRADAY', value },
       };
     }
 
@@ -1178,7 +1178,7 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
     default:
       return {
         type: 'message',
-        message: `Unknown heartbeat action: "${sub}". Use: status, enable, disable, times, daily, weekly, monthly, now`,
+        message: `Unknown heartbeat action: "${sub}". Use: status, enable, disable, intraday, daily, weekly, monthly, now`,
       };
   }
 }

@@ -1,23 +1,27 @@
-# HEARTBEAT.md
-AI AGENT INSTRUCTIONS: This file dictates your periodic proactive routine. Execute the following protocols strictly according to their designated time intervals to synthesize user context, surface actionable insights, and maintain the primary knowledge base.
+# HEARTBEAT.md - Proactive Routines
 
-## TIMES Routine (Tactical & Immediate)
-- Mailbox Triage: Scan for critical unread items, specifically filtering for direct requests or time-sensitive obligations.
-- Reminders: Parse alerts triggering within the next 4 to 12 hours.
-- Task Alignment: Cross-reference new emails and imminent reminders against [P1] active tasks in `/root/.curie-agent/TODO.md` to ensure immediate priorities are aligned.
+**AI INSTRUCTION:** This file dictates your proactive workflow. Execute the specific routine based on the current time interval. Your goal is to synthesize context, surface insights, and maintain the workspace silently.
 
-## DAILY Routine (Synthesis & Rollover)
-- Data Ingestion: Load and parse the trailing daily logs from day before (e.g., `/root/.curie-agent/memory/2026-05-03.md`).
-- TODO Maintenance: Automatically rollover incomplete tasks. Draft newly identified obligations from the day's emails or logs as staged [P2] or [P3] tasks for user approval.
-- Daily Insight: Formulate 1-2 highly concise, actionable insights based on the day's friction points or completed items.
-- User Output: Generate the Daily Heartbeat Brief containing insights, proposed `/root/.curie-agent/TODO.md` additions, and system status.
+### 🛑 GLOBAL CONSTRAINT: OUTPUT LIMIT
+Before outputting any response to the user, calculate the estimated length. **If the draft exceeds 3,800 characters, you MUST perform a recursive edit.** Swap complex phrases for concise synonyms, remove non-essential adjectives, and compress the output to fit under the limit.
 
-## WEEKLY Routine (Review & Prioritization)
-- Behavioral Analysis: Analyze the past 7 daily logs. Identify tasks that are continuously rolled over, recurring workflow bottlenecks, or shifts in user focus.
-- Backlog Grooming: Review all [P3] (Backlog) tasks in `/root/.curie-agent/TODO.md`. Flag stale tasks (untouched for 2+ weeks) for deletion or suggest elevating them to [P2].
-- Dependency Map: Analyze the upcoming week's reminders and calendar events against current [P1] and [P2] tasks to flag upcoming schedule conflicts.
+---
 
-## MONTHLY Routine (Consolidation & Archival)
-- Consolidate MEMORY.md: Extract the core, high-level developments and milestones from the entire month's daily logs. Append this distilled summary to the main MEMORY.md file to transition short-term events into long-term systemic knowledge.
-- System Cleanup: Move [x] completed tasks in `/root/.curie-agent/TODO.md` older than 30 days into a deep archive state to keep the active file lightweight.
-- Strategic Report: Draft a macro-level summary of the month's productivity trends, major achievements, and proposed adjustments to the user's organizational system.
+## 1. INTRADAY (Execute on EVERY Heartbeat)
+*   **Triage:** Scan the mailbox/channels for critical unread items. Filter specifically for direct requests or time-sensitive obligations.
+*   **Align:** Cross-reference new inputs against `[P1]` active tasks in `TODO.md`. Flag immediate conflicts or priority shifts.
+
+## 2. DAILY (Execute once per day)
+*   **Ingest & Update:** Read yesterday's daily log (e.g., `memory/YYYY-MM-DD.md`). Extract any persistent facts, preferences, or major events missed, and append them to `MEMORY.md`.
+*   **Rollover:** Review `TODO.md`. Draft newly identified obligations from the day's logs/emails as staged `[P2]` or `[P3]` tasks. Do not delete incomplete tasks.
+*   **Report:** Generate a highly concise Daily Brief for the user containing: 1-2 actionable insights (based on friction points), proposed `TODO.md` additions, and a brief system status.
+
+## 3. WEEKLY (Execute on Sunday/End of Week)
+*   **Analyze:** Review the past 7 daily logs. Identify recurring workflow bottlenecks, continuously rolled-over tasks, or shifts in the user's focus.
+*   **Groom Backlog:** Review all `[P3]` tasks in `TODO.md`. Flag stale tasks (untouched for 14+ days) for deletion, or suggest elevating them to `[P2]`.
+*   **Map Dependencies:** Compare the upcoming week's calendar/reminders against current `[P1]` and `[P2]` tasks to flag immediate schedule conflicts.
+
+## 4. MONTHLY (Execute on the 1st of the Month)
+*   **Consolidate:** Extract macro-level developments and milestones from the entire month's logs. Append this distilled summary to `MEMORY.md` to convert short-term events into long-term knowledge.
+*   **Archive:** Move completed `[x]` tasks in `TODO.md` that are older than 30 days into `memory/TODO-ARCHIVE.md` to keep the active file lightweight.
+*   **Strategize:** Draft a brief macro-level report of productivity trends, major achievements, and proposed adjustments to the user's organizational system.
