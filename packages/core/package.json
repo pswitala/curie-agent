@@ -1,6 +1,6 @@
 {
   "name": "@curie-agent/core",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publish": true,
   "type": "module",
   "files": [

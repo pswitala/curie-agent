@@ -588,7 +588,7 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
     | { phase: 'model'; provider?: string };
   const wizardRef = useRef<WizardStep>({ phase: 'idle' });
 
-  const TEMPLATE_FILES = ['AGENTS.md', 'SOUL.md', 'USER.md', 'TODO.md', 'MEMORY.md'];
+  const TEMPLATE_FILES = ['AGENTS.md', 'HEARTBEAT.md', 'SOUL.md', 'USER.md', 'TODO.md', 'MEMORY.md'];
 
   // Store setMessages in a ref so the checker callback can call it
   // without racing with a render cycle. The checker runs in setInterval,
