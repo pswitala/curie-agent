@@ -1,6 +1,6 @@
 {
   "name": "@curie-agent/providers",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "publish": true,
   "type": "module",
   "files": [

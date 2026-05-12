@@ -491,25 +491,9 @@ function formatDuration(ms: number): string {
   return `${h}:${m}:${s}`;
 }
 
-function estimateCost(model: string, inputTokens: number, outputTokens: number, customCost?: string): number {
-  if (customCost) {
-    const parts = customCost.split(';').map(Number);
-    const inC = parts[0];
-    const outC = parts[1];
-    if (inC !== undefined && outC !== undefined && !isNaN(inC) && !isNaN(outC)) {
-      return (inputTokens * inC + outputTokens * outC) / 1_000_000;
-    }
-  }
-  // Rough per-million-token pricing in USD; fall back to Sonnet rates.
-  const pricing: Record<string, { in: number; out: number }> = {
-    'claude-opus': { in: 15, out: 75 },
-    'claude-sonnet': { in: 3, out: 15 },
-    'claude-haiku': { in: 0.8, out: 4 },
-  };
-  const key = Object.keys(pricing).find(k => model.includes(k)) || 'claude-sonnet';
-  const p = pricing[key]!;
-  return (inputTokens * p.in + outputTokens * p.out) / 1_000_000;
-}
+import { estimateCost, parseTieredPricing, selectTier } from './pricing.js';
+
+export { estimateCost, parseTieredPricing, selectTier };
 
 function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeName, system, settings, projects, cronManager: externalCronManager, onReminderHolder, telegramChatIdRef, telegramSubmitRef, telegramGateway, channelRegistry, channelRouter, activeChannelRef, mcpToolsRef, mcpClientsRef, onMcpReconnect, contextWindowSize, resumeSession, resumeSessionId }: AppProps) {
   const [messages, setMessages] = useState<

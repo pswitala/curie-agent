@@ -232,6 +232,46 @@ export async function handleSlashCommand(
   }
 }
 
+function validatePricingString(cost: string | undefined): boolean {
+  if (!cost) return false;
+  if (!cost.includes('|')) {
+    const [inStr = '', outStr = ''] = cost.split(';');
+    const inC = parseFloat(inStr);
+    const outC = parseFloat(outStr);
+    return !isNaN(inC) && !isNaN(outC) && inC >= 0 && outC >= 0;
+  }
+  const tiers = cost.split('|').map(s => s.trim());
+  const firstPair = (tiers[0] ?? '').split(';');
+  const inStr = firstPair[0] ?? '';
+  const outStr = firstPair[1] ?? '';
+  if (isNaN(parseFloat(inStr)) || isNaN(parseFloat(outStr))) return false;
+  for (let i = 1; i < tiers.length; i++) {
+    const tier = tiers[i]!;
+    const idx = tier.indexOf('<');
+    if (idx === -1) return false;
+    const threshold = parseInt(tier.substring(0, idx).trim(), 10);
+    const rest = tier.substring(idx + 1).trim();
+    const [inStr2 = '', outStr2 = ''] = rest.split(';');
+    const tierIn = parseFloat(inStr2);
+    const tierOut = parseFloat(outStr2);
+    if (isNaN(threshold) || isNaN(tierIn) || isNaN(tierOut) || threshold < 0 || tierIn < 0 || tierOut < 0) return false;
+  }
+  return true;
+}
+
+function formatPricingDisplay(cost: string | undefined): string {
+  if (!cost) return '';
+  if (!cost.includes('|')) {
+    const [inStr = '', outStr = ''] = cost.split(';');
+    return `Pricing: $${inStr} in / $${outStr} out per 1M`;
+  }
+  const tiers = cost.split('|').map(s => s.trim());
+  const firstPair = (tiers[0] ?? '').split(';');
+  const inStr = firstPair[0] ?? '?';
+  const outStr = firstPair[1] ?? '?';
+  return `Pricing: $${inStr} in / $${outStr} out per 1M (${tiers.length} tier${tiers.length > 1 ? 's' : ''})`;
+}
+
 function handleStatus(ctx: SlashCommandContext): SlashCommandResult {
   const toolsPerCall = ctx.settings.TOOLS_PER_CALL ?? 10;
   const websearchPerCall = ctx.settings.WEBSEARCH_PER_CALL ?? 5;
@@ -247,7 +287,7 @@ function handleStatus(ctx: SlashCommandContext): SlashCommandResult {
     `Tools per turn: ${toolsPerCall}`,
     `WebSearch per turn: ${websearchPerCall}`,
     ctx.settings.MODEL_COST
-      ? `Pricing: $${ctx.settings.MODEL_COST.split(';')[0]} in / $${ctx.settings.MODEL_COST.split(';')[1]} out per 1M`
+      ? formatPricingDisplay(ctx.settings.MODEL_COST)
       : null,
   ].filter(Boolean);
   return { type: 'message', message: lines.join('\n') };
@@ -306,7 +346,7 @@ function handleModel(args: string, settings?: CurieSettings): SlashCommandResult
     const window = settings?.MODEL_CONTEXT_WINDOW ?? WINDOW_DEFAULT;
     return {
       type: 'message',
-      message: `Usage: /model <model>\n  /model pricing [in;out]        — set custom per-million pricing (e.g. "0.5;2.0")\n  /model windows <tokens>       — set max context window\n\nCurrent: pricing=${cost}  window=${window} tokens`,
+      message: `Usage: /model <model>\n  /model pricing [in;out]        — set custom per-million pricing (e.g. "0.5;2.0" or "0.5;2.0|200000<1.0;4.0")\n  /model windows <tokens>       — set max context window\n\nCurrent: pricing=${cost}  window=${window} tokens`,
     };
   }
 
@@ -318,15 +358,24 @@ function handleModel(args: string, settings?: CurieSettings): SlashCommandResult
     case 'pricing': {
       if (!rest) {
         const cost = settings?.MODEL_COST ?? MODEL_COST_DEFAULT;
-        return { type: 'message', message: `Usage: /model pricing <in;out>\nExample: /model pricing 0.5;2.0\nCurrent: ${cost}` };
+        return { type: 'message', message: `Usage: /model pricing <in;out>\n  /model pricing <in;out|threshold<input;out>...\nExample: /model pricing 0.5;2.0\n  /model pricing 0.5;2.0|200000<1.0;4.0\nCurrent: ${cost}` };
       }
-      const [inStr, outStr] = rest.split(';');
-      const inCost = parseFloat(inStr ?? '');
-      const outCost = parseFloat(outStr ?? '');
-      if (isNaN(inCost) || isNaN(outCost) || inCost < 0 || outCost < 0) {
-        return { type: 'message', message: `Invalid pricing: "${rest}". Use format: <in;out> (per million tokens, e.g. "0.5;2.0").` };
+      const isValidPricing = validatePricingString(rest);
+      if (!isValidPricing) {
+        return { type: 'message', message: `Invalid pricing: "${rest}". Use format: <in;out> or <in;out|threshold<input;out> (per million tokens, e.g. "0.5;2.0" or "0.5;2.0|200000<1.0;4.0").` };
       }
-      return { type: 'update_model_cost', modelCost: rest, message: `Model pricing set to: $${inCost} in / $${outCost} out per 1M tokens` };
+      const [inStr = ''] = rest.split(';');
+      const inCost = parseFloat(inStr);
+      const firstTier = rest.split('|')[0]?.split(';');
+      const outCost = firstTier ? parseFloat(firstTier[1] ?? '') : NaN;
+      const tierCount = rest.includes('|') ? rest.split('|').length : 1;
+      return {
+        type: 'update_model_cost',
+        modelCost: rest,
+        message: tierCount === 1
+          ? `Model pricing set to: $${inCost} in / $${outCost} out per 1M tokens`
+          : `Model pricing set to: ${tierCount} tiers, base $${inCost} in / $${outCost} out per 1M tokens`,
+      };
     }
 
     case 'windows': {

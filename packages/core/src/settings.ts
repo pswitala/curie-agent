@@ -46,6 +46,7 @@ export interface CurieSettings {
   HEARTBEAT_WEEKLY?: string;  // "day@H:MM" (monday|tuesday|...|sunday@H:MM)
   HEARTBEAT_MONTHLY?: string; // "D@H:MM" (1-31@H:MM)
   // Model pricing: semicolon-separated "inputPerMillion;outputPerMillion", e.g. "0.5;2.0"
+  // Tiered: separate tiers with '|', each tiered segment uses '|'threshold<input;output>', e.g. "0.5;2.0|200000<1.0;4.0"
   MODEL_COST?: string;
   // Model context window in tokens
   MODEL_CONTEXT_WINDOW?: number;
