@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-export type ScheduleType = 'intraday' | 'daily' | 'weekly' | 'monthly';
+export type ScheduleType = 'intraday' | 'daily' | 'weekly' | 'monthly' | 'dreaming';
 
 /** Human-readable label for a schedule type. */
 export function scheduleLabel(type: ScheduleType): string {
@@ -21,6 +21,7 @@ export interface CronTask {
     // daily: string = "H:MM" (24h)
     // weekly: string = "day@H:MM" (monday@6:00)
     // monthly: string = "D@H:MM" (1@6:00)
+    // dreaming: string = "H:MM" (24h)
     value: string;
   };
   status: 'pending' | 'fired' | 'cancelled';
@@ -165,6 +166,17 @@ export function computeNextFire(schedule: CronTask['schedule'], now: number): nu
     return next.getTime();
   }
 
+  if (type === 'dreaming') {
+    const t = parseTime(value);
+    if (!t) return now;
+    const next = new Date(now);
+    next.setHours(t.hour, t.minute, 0, 0);
+    if (next.getTime() <= now) {
+      next.setDate(next.getDate() + 1);
+    }
+    return next.getTime();
+  }
+
   return now;
 }
 
@@ -177,17 +189,19 @@ export function pickNextSchedule(settings: {
   HEARTBEAT_DAILY?: string;
   HEARTBEAT_WEEKLY?: string;
   HEARTBEAT_MONTHLY?: string;
+  HEARTBEAT_DREAMING?: string;
 }, now?: number): { type: ScheduleType; value: string } | null {
   const reference = now ?? Date.now();
   const candidates: Array<{ type: ScheduleType; value: string; nextFire: number }> = [];
-  // Tie-break priority: intraday > daily > weekly > monthly
-  const priority = { intraday: 0, daily: 1, weekly: 2, monthly: 3 };
+  // Tie-break priority: intraday > daily > weekly > monthly > dreaming
+  const priority = { intraday: 0, daily: 1, weekly: 2, monthly: 3, dreaming: 4 };
 
   const schedules: Array<{ type: ScheduleType; value: string }> = [
     { type: 'intraday', value: settings.HEARTBEAT_INTRADAY ?? '' },
     { type: 'daily', value: settings.HEARTBEAT_DAILY ?? '' },
     { type: 'weekly', value: settings.HEARTBEAT_WEEKLY ?? '' },
     { type: 'monthly', value: settings.HEARTBEAT_MONTHLY ?? '' },
+    { type: 'dreaming', value: settings.HEARTBEAT_DREAMING ?? '' },
   ];
 
   for (const { type, value } of schedules) {
@@ -320,6 +334,7 @@ export class CronManager {
     HEARTBEAT_DAILY?: string;
     HEARTBEAT_WEEKLY?: string;
     HEARTBEAT_MONTHLY?: string;
+    HEARTBEAT_DREAMING?: string;
   }, now?: number): void {
     const ref = now ?? Date.now();
     const picked = pickNextSchedule(settings, ref);

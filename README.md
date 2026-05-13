@@ -23,11 +23,11 @@ curie-agent unifies the best ideas from **Claude Code**, **OpenAI Codex CLI**, *
 
 ## Features
 
-- **Multi-provider** — Anthropic, OpenAI, Google Gemini, OpenRouter, Local: Ollama / LLama_CPP / VLLM
+- **Multi-provider** — Anthropic, OpenAI, Google Gemini, OpenRouter, Ollama
 - **Multi-platform** — CLI TUI, React web dashboard (planned)
 - **Safe by default** — Codex-style approval tiers (`plan`, `edit`, `auto`, `yolo`) with per-tool policies
-- **Extensible** — MCP client/server, skills, hooks, subagents, slash commands
-- **Memory** — Persistent knowledge base md files  + SQLite + vector search (BM25 + dense retrieval)
+- **Extensible** — MCP client, skills, hooks, subagents, slash commands
+- **Memory** — Persistent markdown memory files (wiki engine with SQLite + vector search on the way)
 - **Open-source** — Apache-2.0, local-first, no cloud SaaS
 
 ## CLI
@@ -39,7 +39,6 @@ curie-agent -p "<prompt>"                # Headless mode, stdout answer
 curie-agent -p "<prompt>" --output-format=stream-json  # Streamed JSON events
 curie-agent resume [<id>]                # Resume a session
 curie-agent continue                     # Resume most recent session
-curie-agent sessions list | show | rm    # Session management
 ```
 
 ### Slash commands
@@ -48,7 +47,7 @@ curie-agent sessions list | show | rm    # Session management
 |---------|-------------|
 | `/status` | Show version, model, provider, mode, tokens, tool limits |
 | `/help` | List all available commands |
-| `/model <model>` | Switch AI model (aliases: opus, sonnet, haiku, gpt4o, o1) |
+| `/model <model>` | Switch AI model (aliases: opus, sonnet, haiku, gpt4o, gpt4turbo, o3-mini, o1) |
 | `/provider <name>` | Switch provider (anthropic, openai, google, local, ollama, openrouter) |
 | `/mode <plan\|edit\|auto\|yolo>` | Set approval mode |
 | `/theme <name>` | Change color theme |
@@ -67,6 +66,8 @@ curie-agent sessions list | show | rm    # Session management
 | `/heartbeat <status\|enable\|...>` | Manage heartbeat cycle |
 | `/memory [status\|add]` | View memory or capture a note |
 | `/init` | Run interactive setup wizard |
+| `/snapshots` | List git snapshots |
+| `/revert [index]` | Revert to git snapshot |
 | `/exit` | Exit curie-agent |
 
 ## Quick start
@@ -90,13 +91,13 @@ curie-agent is built as a **pnpm + Turborepo** monorepo.
 
 | Package | Description |
 |---------|-------------|
-| `@curie-agent/core` | Event bus, session store, permission engine, turn loop, SettingsManager, CronManager, Heartbeat system, TelegramGateway, ChannelRegistry/Router |
+| `@curie-agent/core` | Event bus, session store, permission engine, turn loop, SettingsManager, CronManager, HeartbeatExecutor/Delivery, TelegramGateway, ChannelRegistry, ChannelRouter |
 | `@curie-agent/protocol` | Shared zod schemas for events, JSON-RPC methods, tool definitions |
-| `@curie-agent/providers` | Provider interface with Anthropic, OpenAI, Google Gemini, OpenRouter adapters; Ollama extracted |
+| `@curie-agent/providers` | Provider interface with Anthropic, OpenAI, Google Gemini, Ollama, OpenRouter adapters |
 | `@curie-agent/render` | Rich-style TUI primitives (Panel, Table, Markdown, SyntaxBlock, Progress, Traceback, 8 themes) |
 | `@curie-agent/tools` | Read, Edit, Write, Glob, Grep, Bash, Reminder, WebSearch, WebFetch |
 | `@curie-agent/mcp` | MCP client (stdio transport, tool discovery); server deferred to Phase 3 |
-| `@curie-agent/tui` | Ink TUI components: ChatSurface, StatusLine, TabBar (5 tabs), Mascot, 20+ slash commands, init wizard |
+| `@curie-agent/tui` | Ink TUI components: ChatSurface, StatusLine, TabBar (5 tabs), Mascot, 24+ slash commands, init wizard |
 | `@curie-agent/cli` | CLI entrypoint (`curie-agent` binary), full TUI app, multi-provider, session management |
 
 ```bash
@@ -126,15 +127,16 @@ pnpm turbo build
 
 **Phase 1** — Provider layer (Anthropic streaming), built-in tools (Read, Edit, Write, Glob, Grep, Bash), permission engine with approval prompts, Ink TUI with status line + scrollback, theming, mascot banner, CLI entrypoint, session save/resume, headless mode, session management.
 
-**Phase 1.a** — 20 slash commands, TUI with 5 tabs (assistant, channels, stats, projects, agents), /init interactive setup wizard, effort/mode/approval pickers, MCP client (stdio), Telegram Gateway, Channel Registry/Router, CronManager, HeartbeatExecutor/Delivery, SettingsManager (persisted to `~/.curie-agent/settings.json`).
+**Phase 1.a** — 24 slash commands, TUI with 5 tabs (assistant, channels, stats, projects, agents), /init interactive setup wizard, effort/mode/approval pickers, MCP client (stdio), Telegram Gateway, Channel Registry, Channel Router, CronManager, HeartbeatExecutor/Delivery, SettingsManager (persisted to `~/.curie-agent/settings.json`).
 
-**Phase 2 (partial)** — OpenAI, Google Gemini, OpenRouter provider adapters.
+**Phase 2** — OpenAI, Google Gemini, Ollama, OpenRouter provider adapters. Safety: path guard, command guard, git snapshots, approval tiers enforcement.
 
 ## What's next
 
-- **OllamaProvider** — extract from cli factory into dedicated package adapter (Phase 2)
-- **Sandbox backends** — Docker-first for safe auto/yolo permission modes (Phase 2)
+- **Codex config import** — Read `~/.codex/config.toml`, migrate approval rules + model prefs
 - **MCP server** — expose curie-agent as MCP server (Phase 3)
+- **Skills runtime** — `~/.curie-agent/skills/<name>/SKILL.md` (Phase 3)
+- **Subagents & hooks** — Task tool, worktree isolation, pre/post hooks (Phase 3)
 - **Wiki engine** — markdown-on-disk + SQLite/sqlite-vec (Phase 4)
 - **Daemon + Orchestra** — multi-session cockpit (Phase 5)
 - **Web dashboard** — React SPA consuming daemon (Phase 7a)
@@ -146,7 +148,7 @@ pnpm turbo build
 - **TUI**: Ink (React for CLIs)
 - **Storage**: better-sqlite3 + sqlite-vec (planned)
 - **Schema/IPC**: zod + JSON-RPC 2.0
-- **Tests**: vitest (20 test files, 72 tests across 7 packages)
+- **Tests**: vitest (26 test files, ~350 tests across 8 packages)
 
 ## License
 

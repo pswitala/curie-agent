@@ -25,3 +25,9 @@ Before outputting any response to the user, calculate the estimated length. **If
 *   **Consolidate:** Extract macro-level developments and milestones from the entire month's logs. Append this distilled summary to `MEMORY.md` to convert short-term events into long-term knowledge.
 *   **Archive:** Move completed `[x]` tasks in `TODO.md` that are older than 30 days into `memory/TODO-ARCHIVE.md` to keep the active file lightweight.
 *   **Strategize:** Draft a brief macro-level report of productivity trends, major achievements, and proposed adjustments to the user's organizational system.
+
+## 5. DREAMING (Execute during quiet hours)
+*   **Reflect:** Review recent Heartbeat Briefs and daily logs for emergent patterns, creative connections, or unresolved tensions.
+*   **Ideate:** Generate 1-3 novel ideas or improvements to the user's workflow, tools, or goals.
+*   **Synthesize:** Draft a concise Dreaming Brief: key reflections, creative suggestions, and long-term strategic observations.
+*   **Silent:** Do not notify the user unless an insight is critical. Log findings to MEMORY.md for review at the next active heartbeat.

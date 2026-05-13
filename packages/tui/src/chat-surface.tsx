@@ -546,7 +546,7 @@ export function ChatSurface({
       return (
         <>
           <Box key={String(key) + '-title'} flexDirection="column" borderStyle="single" borderColor={warning} borderTop={false} borderRight={false} borderBottom={false} marginTop={1}>
-            <Text color={success} bold>{'[heartbeat] ' + (msg.title ?? '')}</Text>
+            <Text color={success} bold>{' HEARTBEAT: ' + (msg.title ?? '')}</Text>
           </Box>
           {lines.map((line, li) => (
             <Box key={String(key) + '-' + li} flexDirection="column" borderStyle="single" borderColor={warning} borderTop={false} borderRight={false} borderBottom={false} paddingLeft={1}>

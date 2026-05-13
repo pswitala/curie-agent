@@ -68,6 +68,22 @@ describe('computeNextFire', () => {
     expect(new Date(next).getUTCMonth()).toBe(5); // June
   });
 
+  it('dreaming fires at the set time', () => {
+    const schedule = { type: 'dreaming' as const, value: '2:00' };
+    const now = new Date('2026-05-04T00:00:00Z').getTime();
+    const next = computeNextFire(schedule, now);
+    expect(new Date(next).getHours()).toBe(2);
+    expect(new Date(next).getMinutes()).toBe(0);
+  });
+
+  it('dreaming rolls over to next day', () => {
+    const schedule = { type: 'dreaming' as const, value: '2:00' };
+    const now = new Date('2026-05-04T03:00:00Z').getTime();
+    const next = computeNextFire(schedule, now);
+    expect(new Date(next).getUTCDate()).toBe(5);
+    expect(new Date(next).getHours()).toBe(2);
+  });
+
   it('null schedule returns now', () => {
     const now = Date.now();
     expect(computeNextFire(null, now)).toBe(now);
@@ -238,5 +254,21 @@ describe('pickNextSchedule', () => {
     });
     // Assuming today is before next Monday, weekly is sooner
     expect(result?.type).toBe('weekly');
+  });
+
+  it('picks dreaming when only dreaming is set', () => {
+    const result = pickNextSchedule({
+      HEARTBEAT_DREAMING: '2:00',
+    }, new Date('2026-05-04T00:00:00Z').getTime());
+    expect(result?.type).toBe('dreaming');
+    expect(result?.value).toBe('2:00');
+  });
+
+  it('includes dreaming in tie-break (lowest priority)', () => {
+    const result = pickNextSchedule({
+      HEARTBEAT_DAILY: '6:00',
+      HEARTBEAT_DREAMING: '6:00',
+    });
+    expect(result?.type).toBe('daily');
   });
 });

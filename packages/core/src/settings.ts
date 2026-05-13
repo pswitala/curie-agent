@@ -45,6 +45,7 @@ export interface CurieSettings {
   HEARTBEAT_DAILY?: string;   // "H:MM"  (24h)
   HEARTBEAT_WEEKLY?: string;  // "day@H:MM" (monday|tuesday|...|sunday@H:MM)
   HEARTBEAT_MONTHLY?: string; // "D@H:MM" (1-31@H:MM)
+  HEARTBEAT_DREAMING?: string; // "H:MM" (24h) — creative/reflective routine
   // Model pricing: semicolon-separated "inputPerMillion;outputPerMillion", e.g. "0.5;2.0"
   // Tiered: separate tiers with '|', each tiered segment uses '|'threshold<input;output>', e.g. "0.5;2.0|200000<1.0;4.0"
   MODEL_COST?: string;
@@ -80,6 +81,7 @@ export const DEFAULT_SETTINGS: CurieSettings = {
   HEARTBEAT_DAILY: '6:00',
   HEARTBEAT_WEEKLY: 'monday@6:00',
   HEARTBEAT_MONTHLY: '1@6:00',
+  HEARTBEAT_DREAMING: '2:00',
   SAFETY_PATH_GUARD: 'on',
   SAFETY_PATH_ALLOWLIST: '',
   SAFETY_COMMAND_GUARD: 'on',
@@ -164,6 +166,7 @@ export class SettingsManager {
             HEARTBEAT_DAILY: (parsed.HEARTBEAT_DAILY as string) ?? DEFAULT_SETTINGS.HEARTBEAT_DAILY,
             HEARTBEAT_WEEKLY: (parsed.HEARTBEAT_WEEKLY as string) ?? DEFAULT_SETTINGS.HEARTBEAT_WEEKLY,
             HEARTBEAT_MONTHLY: (parsed.HEARTBEAT_MONTHLY as string) ?? DEFAULT_SETTINGS.HEARTBEAT_MONTHLY,
+            HEARTBEAT_DREAMING: (parsed.HEARTBEAT_DREAMING as string) ?? DEFAULT_SETTINGS.HEARTBEAT_DREAMING,
             MODEL_COST: (parsed.MODEL_COST as string) ?? (parsed.model_cost as string),
             MODEL_CONTEXT_WINDOW: (typeof parsed.MODEL_CONTEXT_WINDOW === 'number' && parsed.MODEL_CONTEXT_WINDOW > 0)
               ? parsed.MODEL_CONTEXT_WINDOW : undefined,

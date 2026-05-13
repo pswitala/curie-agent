@@ -23,7 +23,9 @@ import type { Event, CronTask } from '@curie-agent/core';
 import type { SlashCommandInput, SlashCommandResult, SlashCommandContext, ProjectEntry } from '@curie-agent/tui';
 import type { ChannelTabEntry } from '@curie-agent/tui';
 
-const VERSION = '0.1.2';
+const __dirname = dirname(__filename);
+const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..' , 'package.json'), 'utf-8'));
+const VERSION = pkg.version;
 
 // Module-level user input history — survives App remounts by Ink.
 // A single mutable object that's never recreated, so ALL closures see the same data.
@@ -477,6 +479,8 @@ interface AppProps {
   mcpClientsRef: { current: Array<{ serverId: string; isConnected: boolean; tools: ReadonlyArray<{ name: string }> }> };
   /** Called before creating a new TurnLoop — should reconnect MCP if settings changed. */
   onMcpReconnect?: () => Promise<void>;
+  /** When true, tells onMcpReconnect to actually reconnect. Set by /mcp add/remove. */
+  mcpNeedsReconnect?: { current: boolean };
   /** If true, resume the most recent session. */
   resumeSession?: boolean;
   /** If set, resume this specific session ID. */
@@ -495,7 +499,7 @@ import { estimateCost, parseTieredPricing, selectTier } from './pricing.js';
 
 export { estimateCost, parseTieredPricing, selectTier };
 
-function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeName, system, settings, projects, cronManager: externalCronManager, onReminderHolder, telegramChatIdRef, telegramSubmitRef, telegramGateway, channelRegistry, channelRouter, activeChannelRef, mcpToolsRef, mcpClientsRef, onMcpReconnect, contextWindowSize, resumeSession, resumeSessionId }: AppProps) {
+function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeName, system, settings, projects, cronManager: externalCronManager, onReminderHolder, telegramChatIdRef, telegramSubmitRef, telegramGateway, channelRegistry, channelRouter, activeChannelRef, mcpToolsRef, mcpClientsRef, onMcpReconnect, mcpNeedsReconnect, contextWindowSize, resumeSession, resumeSessionId }: AppProps) {
   const [messages, setMessages] = useState<
     Array<{ role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat'; content: string; title?: string }>
   >([]);
@@ -609,9 +613,9 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
   // Telegram sends are handled in main()'s cron checker callback (fresh closure).
   onReminderHolder.current = (task: CronTask) => {
     const timeStr = new Date(task.scheduledAt).toLocaleString();
-    const briefTask = task as CronTask & { heartbeatBrief?: string };
+    const briefTask = task as CronTask & { heartbeatBrief?: string; executedScheduleType?: string };
     const msg = briefTask.heartbeatBrief
-      ? { role: 'heartbeat' as const, title: task.schedule ? scheduleLabel(task.schedule.type) : 'MANUAL', content: briefTask.heartbeatBrief }
+      ? { role: 'heartbeat' as const, title: briefTask.executedScheduleType ? scheduleLabel(briefTask.executedScheduleType as ScheduleType) : (task.schedule ? scheduleLabel(task.schedule.type) : 'MANUAL'), content: briefTask.heartbeatBrief }
       : { role: 'system' as const, content: `Curie reminder:\nDate: ${timeStr}\n${task.message}` };
 
     if (busyRef.current) {
@@ -752,6 +756,10 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
           settingsMgr.current!.update({ MCP_SERVERS: typeof result.mcpServers === 'string' ? JSON.parse(result.mcpServers) : result.mcpServers });
         }
         loopRef.current = null;
+        if (mcpNeedsReconnect) mcpNeedsReconnect.current = true;
+        // Clear the active channel's TurnLoop so next message creates a fresh one
+        // with the updated MCP tools (reconnectMcp repopulates mcpToolsRef).
+        channelTurnLoopsRef.current.delete(activeChannelId);
         if (result.mcpServerId) {
           push(`${result.message}\nServer "${result.mcpServerId}" changed — TurnLoop invalidated. New tools will be loaded on next message.`);
         } else {
@@ -785,12 +793,14 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
             HEARTBEAT_DAILY: settings.HEARTBEAT_DAILY,
             HEARTBEAT_WEEKLY: settings.HEARTBEAT_WEEKLY,
             HEARTBEAT_MONTHLY: settings.HEARTBEAT_MONTHLY,
+            HEARTBEAT_DREAMING: settings.HEARTBEAT_DREAMING,
           });
           const scheduleLabel: Record<string, string> = {
             HEARTBEAT_INTRADAY: `intraday: ${note.value}`,
             HEARTBEAT_DAILY: `daily at ${note.value}`,
             HEARTBEAT_WEEKLY: `weekly on ${note.value}`,
             HEARTBEAT_MONTHLY: `monthly on day ${note.value}`,
+            HEARTBEAT_DREAMING: `dreaming at ${note.value}`,
           };
           push(`Heartbeat schedule updated: ${scheduleLabel[note.key] ?? note.value}`);
           break;
@@ -1960,6 +1970,7 @@ async function main() {
       HEARTBEAT_DAILY: s.HEARTBEAT_DAILY,
       HEARTBEAT_WEEKLY: s.HEARTBEAT_WEEKLY,
       HEARTBEAT_MONTHLY: s.HEARTBEAT_MONTHLY,
+      HEARTBEAT_DREAMING: s.HEARTBEAT_DREAMING,
     }, Date.now());
     if (picked) {
       cronManager.createHeartbeat('Heartbeat: unified schedule', picked);
@@ -2070,6 +2081,9 @@ async function main() {
   const mcpToolsRef: React.MutableRefObject<typeof allTools> = { current: [] };
   const mcpClientsRef: React.MutableRefObject<Array<{ serverId: string; isConnected: boolean; tools: ReadonlyArray<{ name: string }> }>> = { current: [] };
   const mcpRawClientsRef: React.MutableRefObject<MCPClient[]> = { current: [] };
+  // Tracks whether MCP config has changed (via /mcp add/remove) since last connection.
+  // Prevents unnecessary reconnect on first user message when MCP is already fresh.
+  const mcpNeedsReconnect = { current: false };
 
   const parseMcpConfigs = (raw: string | Record<string, unknown> | undefined): MCPConfig[] => {
     if (!raw) return [];
@@ -2257,11 +2271,15 @@ async function main() {
           HEARTBEAT_DAILY: currentSettings.HEARTBEAT_DAILY,
           HEARTBEAT_WEEKLY: currentSettings.HEARTBEAT_WEEKLY,
           HEARTBEAT_MONTHLY: currentSettings.HEARTBEAT_MONTHLY,
+          HEARTBEAT_DREAMING: currentSettings.HEARTBEAT_DREAMING,
         });
 
         // Show in TUI via reminder holder (attaches brief to task for UI)
-        const briefTask = task as CronTask & { heartbeatBrief?: string };
+        // Note: rescheduleFromSettings mutates task.schedule.type to the next
+        // earliest schedule, so preserve the executed type for the UI title.
+        const briefTask = task as CronTask & { heartbeatBrief?: string; executedScheduleType?: string };
         briefTask.heartbeatBrief = formatted;
+        briefTask.executedScheduleType = scheduleType;
         onReminderHolder.current?.(briefTask);
       } catch (err) {
         // Heartbeat errors silently ignored — Telegram fallback may surface them
@@ -2303,7 +2321,13 @@ async function main() {
       activeChannelRef={activeChannelRef}
       mcpToolsRef={mcpToolsRef}
       mcpClientsRef={mcpClientsRef}
-      onMcpReconnect={reconnectMcp}
+      mcpNeedsReconnect={mcpNeedsReconnect}
+      onMcpReconnect={async () => {
+        if (mcpNeedsReconnect.current) {
+          mcpNeedsReconnect.current = false;
+          await reconnectMcp();
+        }
+      }}
       contextWindowSize={200_000}
       resumeSession={args.resume}
       resumeSessionId={args.resume ? args.prompt : undefined}
