@@ -339,11 +339,14 @@ export class CronManager {
     const ref = now ?? Date.now();
     const picked = pickNextSchedule(settings, ref);
     if (!picked) return;
-    const task = this.data.tasks.find((t) => t.type === 'heartbeat' && t.status === 'pending');
-    if (!task) return;
-    task.schedule = picked;
-    task.scheduledAt = computeNextFire(picked, ref);
-    this.save();
+    let task = this.data.tasks.find((t) => t.type === 'heartbeat' && t.status === 'pending');
+    if (!task) {
+        task = this.createHeartbeat('Heartbeat: unified schedule', picked);
+    } else {
+        task.schedule = picked;
+        task.scheduledAt = computeNextFire(picked, ref);
+        this.save();
+    }
   }
 
   startChecker(intervalMs: number = 60_000, callback: ReminderCallback): void {

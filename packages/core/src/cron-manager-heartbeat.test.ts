@@ -248,11 +248,12 @@ describe('pickNextSchedule', () => {
   });
 
   it('picks weekly over monthly when sooner', () => {
+    // May 6, 2026 is a Wednesday; next Monday = May 11, monthly 15th = May 15
+    const now = new Date('2026-05-06T00:00:00Z').getTime();
     const result = pickNextSchedule({
       HEARTBEAT_WEEKLY: 'monday@6:00',
       HEARTBEAT_MONTHLY: '15@6:00',
-    });
-    // Assuming today is before next Monday, weekly is sooner
+    }, now);
     expect(result?.type).toBe('weekly');
   });
 

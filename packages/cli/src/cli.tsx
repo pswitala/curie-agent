@@ -788,6 +788,18 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
           if (note.enabled) {
             push('Heartbeat enabled. The agent will run on all configured schedules.');
             settingsMgr.current!.update({ HEARTBEAT: 'on' });
+            const settings = settingsMgr.current!.get();
+            const picked = pickNextSchedule({
+              HEARTBEAT_INTRADAY: settings.HEARTBEAT_INTRADAY,
+              HEARTBEAT_DAILY: settings.HEARTBEAT_DAILY,
+              HEARTBEAT_WEEKLY: settings.HEARTBEAT_WEEKLY,
+              HEARTBEAT_MONTHLY: settings.HEARTBEAT_MONTHLY,
+              HEARTBEAT_DREAMING: settings.HEARTBEAT_DREAMING,
+            });
+            const hasTask = cronManagerRef.current?.listReminders('pending').some((t) => t.type === 'heartbeat');
+            if (picked && !hasTask) {
+              cronManagerRef.current?.createHeartbeat('Heartbeat: unified schedule', picked);
+            }
           } else {
             push('Heartbeat disabled.');
             settingsMgr.current!.update({ HEARTBEAT: 'off' });

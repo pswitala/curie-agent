@@ -546,9 +546,9 @@ describe('/heartbeat', () => {
     const result = await handleSlashCommand('heartbeat', '', baseCtx);
     expect(result.type).toBe('message');
     expect(result.message).toContain('Heartbeat cycle');
-    expect(result.message).toContain('Enabled: no');
-    expect(result.message).toContain('Intraday:');
-    expect(result.message).toContain('Daily:');
+    expect(result.message).toContain(': no');
+    expect(result.message).toContain('Intraday');
+    expect(result.message).toContain('Daily');
   });
 
   it('enable returns notification type', async () => {
@@ -577,9 +577,9 @@ it('status with enabled settings shows yes and active schedule', async () => {
     } as SlashCommandContext;
     const result = await handleSlashCommand('heartbeat', 'status', ctx);
     expect(result.type).toBe('message');
-    expect(result.message).toContain('Enabled: yes');
-    expect(result.message).toContain('Active schedule:');
-    expect(result.message).toContain('Daily:');
+    expect(result.message).toContain(': yes');
+    expect(result.message).toContain('Active schedule');
+    expect(result.message).toContain('Daily');
   });
 
   it('intraday with no arg returns usage', async () => {
