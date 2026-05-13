@@ -6,10 +6,22 @@ import type {
   ProviderCompleteArgs,
   ProviderCompleteResult,
   ProviderMessage,
+  ReasoningEffort,
   ToolDefinition,
 } from './provider.js';
 
 type CancelableIterable<T> = { iterable: AsyncIterable<T>; cancel(): void };
+
+function effortToReasoning(effort?: ReasoningEffort) {
+  switch (effort) {
+    case 'low':    return { effort: 'low' };
+    case 'medium': return { effort: 'medium' };
+    case 'high':   return { effort: 'high' };
+    case 'max':    return { effort: 'xhigh' };
+    case 'auto':
+    default:       return undefined;
+  }
+}
 
 const FALLBACK_MODELS = [
   'anthropic/claude-opus-4-7',
@@ -91,13 +103,16 @@ export class OpenRouterProvider implements Provider {
       ? [{ role: 'system', content: args.system }, ...messages]
       : messages;
 
-    const streamParams: OpenAI.ChatCompletionCreateParams = {
+    const reasoning = effortToReasoning(args.effort);
+
+    const streamParams: OpenAI.ChatCompletionCreateParams & { reasoning?: object } = {
       model,
       messages: allMessages,
       stream: true,
       ...(tools ? { tools } : {}),
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
       ...(args.maxTokens ? { max_tokens: args.maxTokens } : {}),
+      ...(reasoning ? { reasoning } : {}),
       stream_options: { include_usage: true },
     };
 
@@ -201,6 +216,7 @@ export class OpenRouterProvider implements Provider {
       ? [{ role: 'system', content: args.system }, ...messages]
       : messages;
 
+    const reasoning = effortToReasoning(args.effort);
     const response = await this.client.chat.completions.create({
       model,
       messages: allMessages,
@@ -208,7 +224,8 @@ export class OpenRouterProvider implements Provider {
       ...(tools ? { tools } : {}),
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
       ...(args.maxTokens ? { max_tokens: args.maxTokens } : {}),
-    });
+      ...(reasoning ? { reasoning } : {}),
+    } as any);
 
     const choice = response.choices[0];
     const text = choice?.message?.content ?? '';

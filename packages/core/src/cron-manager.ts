@@ -58,7 +58,7 @@ function saveCronFile(data: CronFile): void {
   writeFileSync(CRON_FILE, JSON.stringify(data, null, 2), 'utf-8');
 }
 
-type ReminderCallback = (task: CronTask) => void;
+type ReminderCallback = (task: CronTask) => void | Promise<void>;
 
 /** Parse "H:MM" into { hour, minute }. */
 function parseTime(value: string): { hour: number; minute: number } | null {
@@ -227,6 +227,8 @@ export class CronManager {
   private checkerTimer: ReturnType<typeof setInterval> | null = null;
   private onReminderFired: ReminderCallback | null = null;
   private ttlMs: number;
+  /** Set of task IDs currently being executed (prevents re-firing). */
+  private executing = new Set<string>();
 
   constructor(ttlMs?: number) {
     this.ttlMs = ttlMs ?? (7 * 24 * 60 * 60 * 1000); // 7 days default
@@ -360,6 +362,9 @@ export class CronManager {
       );
 
       for (const task of pending) {
+        // Skip if this task is already executing (prevents re-firing
+        // when the async callback takes longer than the interval).
+        if (this.executing.has(task.id)) continue;
         const isHeartbeat = task.type === 'heartbeat';
         // Mark reminders as fired so they don't re-fire.
         // Leave heartbeats as pending — the caller will call
@@ -367,7 +372,10 @@ export class CronManager {
         if (!isHeartbeat) {
           task.status = 'fired';
         }
-        callback(task);
+        this.executing.add(task.id);
+        Promise.resolve(callback(task)).finally(() => {
+          this.executing.delete(task.id);
+        });
         // Don't re-schedule heartbeats here — let the caller (cli.tsx)
         // call rescheduleFromSettings() with all four schedule settings
       }
@@ -382,6 +390,7 @@ export class CronManager {
       clearInterval(this.checkerTimer);
       this.checkerTimer = null;
     }
+    this.executing.clear();
   }
 
   get pendingCount(): number {
