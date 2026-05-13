@@ -32,6 +32,7 @@ export interface Tool {
 
 export type ProviderEvent =
   | { type: 'text-delta'; text: string }
+  | { type: 'thinking-delta'; text: string }
   | { type: 'thinking-block'; thinking: string; signature: string }
   | { type: 'tool-call'; id: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }
   | { type: 'tool-result-request'; callId: string }
@@ -331,6 +332,10 @@ export class TurnLoop {
               case 'text-delta':
                 fullText += event.text;
                 emit({ type: 'assistant-delta', id: session.id, text: event.text, timestamp: Date.now() });
+                break;
+
+              case 'thinking-delta':
+                emit({ type: 'thinking-delta', id: session.id, text: event.text, timestamp: Date.now() });
                 break;
 
               case 'thinking-block':

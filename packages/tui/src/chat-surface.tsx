@@ -21,7 +21,7 @@ export interface SlashCommandInput {
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat';
+  role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'thinking';
   content: string;
   title?: string;
 }
@@ -134,6 +134,8 @@ export function ChatSurface({
   const [effortIndex, setEffortIndex] = useState(0);
   const [modePickerOpen, setModePickerOpen] = useState(false);
   const [modeIndex, setModeIndex] = useState(0);
+  // Thinking toggle: Set of message indices that are expanded.
+  const [expandedThinking, setExpandedThinking] = useState<Set<number>>(new Set());
   const { exit } = useApp();
   const { stdout } = useStdout();
 
@@ -350,6 +352,21 @@ export function ChatSurface({
       return;
     }
 
+    // ctrl+o toggles the last thinking message expand/collapse.
+    if (char === 'o' && key.ctrl && currentTab === 'assistant' && !inputText) {
+      setExpandedThinking((prev) => {
+        const next = new Set(prev);
+        // Find the last thinking message index
+        const lastThinking = displayMessages.map((m, i) => m.role === 'thinking' ? i : -1).filter(i => i >= 0).pop();
+        if (lastThinking !== undefined && lastThinking >= 0) {
+          if (next.has(lastThinking)) next.delete(lastThinking);
+          else next.add(lastThinking);
+        }
+        return next;
+      });
+      return;
+    }
+
     if (key.return) {
       // Shift+Enter, Alt+Enter, or Ctrl+Enter inserts a newline.
       // Requires Kitty keyboard protocol enabled (kittyKeyboard: 'auto' in render options).
@@ -557,6 +574,21 @@ export function ChatSurface({
             <Text> </Text>
           </Box>
         </>
+      );
+    }
+    if (msg.role === 'thinking') {
+      const isExpanded = expandedThinking.has(key);
+      const lines = msg.content.split('\n');
+      const totalChars = msg.content.length;
+      return (
+        <Box key={String(key)} flexDirection="column" marginTop={1} marginBottom={1}>
+          <Text color={fg}>
+            {isExpanded ? '▾' : '▸'} Thinking ({totalChars} chars) — ctrl+o to {isExpanded ? 'collapse' : 'expand'}
+          </Text>
+          {isExpanded && lines.map((line, li) => (
+            <Text key={li} color={fg}>{'    ' + line}</Text>
+          ))}
+        </Box>
       );
     }
     if (msg.role === 'system') {

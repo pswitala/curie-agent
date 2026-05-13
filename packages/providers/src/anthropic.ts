@@ -23,10 +23,32 @@ function effortToBudget(effort?: ReasoningEffort): number | undefined {
   }
 }
 
+function effortToAdaptiveEffort(effort?: ReasoningEffort): 'low' | 'medium' | 'high' | 'max' | 'xhigh' | undefined {
+  switch (effort) {
+    case 'low':    return 'low';
+    case 'medium': return 'medium';
+    case 'high':   return 'high';
+    case 'max':    return 'max';
+    case 'auto':
+    default:       return undefined;
+  }
+}
+
+const ADAPTIVE_MODELS = new Set([
+  'claude-opus-4-7',
+  'claude-sonnet-4-6',
+  'claude-opus-4-6',
+]);
+
+function isAdaptiveModel(model: string): boolean {
+  return ADAPTIVE_MODELS.has(model);
+}
+
 export class AnthropicProvider implements Provider {
   readonly name = 'anthropic';
   readonly models = [
     'claude-opus-4-7',
+    'claude-opus-4-6',
     'claude-sonnet-4-6',
     'claude-haiku-4-5-20251001',
   ];
@@ -51,26 +73,40 @@ export class AnthropicProvider implements Provider {
 
   stream(args: ProviderStreamArgs): CancelableIterable<ProviderEvent> {
     const model = args.model || this.defaultModel;
-    const thinkingBudget = effortToBudget(args.effort);
-    // When thinking is enabled the model reserves the budget from max_tokens,
-    // so raise the ceiling to leave room for the actual answer.
-    const maxTokens = args.maxTokens || (thinkingBudget ? thinkingBudget + 8192 : 8192);
+    const useAdaptive = isAdaptiveModel(model);
+    const adaptiveEffort = effortToAdaptiveEffort(args.effort);
 
     const messages = this.mapMessages(args.messages);
     const tools = args.tools ? this.mapTools(args.tools) : undefined;
 
     const streamArgs: Anthropic.MessageStreamParams = {
       model,
-      max_tokens: maxTokens,
+      max_tokens: args.maxTokens || 16384,
       system: args.system,
       messages,
       tools,
-      // Extended thinking requires temperature = 1.
-      temperature: thinkingBudget ? 1 : args.temperature,
     };
-    if (thinkingBudget) {
-      streamArgs.thinking = { type: 'enabled', budget_tokens: thinkingBudget };
+
+    if (useAdaptive) {
+      streamArgs.thinking = { type: 'adaptive', display: 'summarized' };
+      if (adaptiveEffort) {
+        streamArgs.output_config = { effort: adaptiveEffort };
+      }
+      streamArgs.temperature = args.temperature;
+    } else if (!useAdaptive && args.effort && args.effort !== 'auto') {
+      // Manual budget_tokens for older models (Haiku 4.5, etc.)
+      const thinkingBudget = effortToBudget(args.effort);
+      if (thinkingBudget) {
+        streamArgs.max_tokens = thinkingBudget + 8192;
+        streamArgs.thinking = { type: 'enabled', budget_tokens: thinkingBudget };
+        streamArgs.temperature = 1;
+      } else {
+        streamArgs.temperature = args.temperature;
+      }
+    } else {
+      streamArgs.temperature = args.temperature;
     }
+
     const sdkStream = this.client.messages.stream(streamArgs);
 
     // keyed by content block index
@@ -112,6 +148,7 @@ export class AnthropicProvider implements Provider {
           } else if (event.delta.type === 'thinking_delta') {
             const t = thinkingBlocks.get(event.index);
             if (t) t.thinking += event.delta.thinking;
+            yield { type: 'thinking-delta', text: event.delta.thinking };
           } else if (event.delta.type === 'signature_delta') {
             const t = thinkingBlocks.get(event.index);
             if (t) t.signature += event.delta.signature;
@@ -197,25 +234,40 @@ export class AnthropicProvider implements Provider {
 
   async complete(args: ProviderCompleteArgs): Promise<ProviderCompleteResult> {
     const model = args.model || this.defaultModel;
-    const thinkingBudget = effortToBudget(args.effort);
-    const maxTokens = args.maxTokens || (thinkingBudget ? thinkingBudget + 8192 : 8192);
+    const useAdaptive = isAdaptiveModel(model);
+    const adaptiveEffort = effortToAdaptiveEffort(args.effort);
 
     const messages = this.mapMessages(args.messages);
     const tools = args.tools ? this.mapTools(args.tools) : undefined;
 
-    const streamArgs: Anthropic.MessageCreateParams = {
+    const createArgs: Anthropic.MessageCreateParams = {
       model,
-      max_tokens: maxTokens,
+      max_tokens: args.maxTokens || 16384,
       system: args.system,
       messages,
       tools,
-      temperature: thinkingBudget ? 1 : (args.temperature ?? 0),
     };
-    if (thinkingBudget) {
-      streamArgs.thinking = { type: 'enabled', budget_tokens: thinkingBudget };
+
+    if (useAdaptive) {
+      createArgs.thinking = { type: 'adaptive', display: 'summarized' };
+      if (adaptiveEffort) {
+        createArgs.output_config = { effort: adaptiveEffort };
+      }
+      createArgs.temperature = args.temperature;
+    } else if (!useAdaptive && args.effort && args.effort !== 'auto') {
+      const thinkingBudget = effortToBudget(args.effort);
+      if (thinkingBudget) {
+        createArgs.max_tokens = thinkingBudget + 8192;
+        createArgs.thinking = { type: 'enabled', budget_tokens: thinkingBudget };
+        createArgs.temperature = 1;
+      } else {
+        createArgs.temperature = args.temperature ?? 0;
+      }
+    } else {
+      createArgs.temperature = args.temperature ?? 0;
     }
 
-    const response = await this.client.messages.create(streamArgs);
+    const response = await this.client.messages.create(createArgs);
 
     const text = response.content
       .filter((c): c is Anthropic.TextBlock => c.type === 'text')

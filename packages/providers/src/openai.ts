@@ -13,22 +13,30 @@ import type {
 
 type CancelableIterable<T> = { iterable: AsyncIterable<T>; cancel(): void };
 
-function effortToReasoning(effort?: ReasoningEffort): OpenAI.ChatCompletionCreateParams['reasoning_effort'] | undefined {
+function effortToReasoning(effort?: ReasoningEffort): string | undefined {
   switch (effort) {
     case 'low':    return 'low';
     case 'medium': return 'medium';
     case 'high':   return 'high';
-    case 'max':    return 'high';
+    case 'max':    return 'xhigh';
     case 'auto':
     default:       return undefined;
   }
 }
 
-const REASONING_MODEL_RE = /^(o1|o3)[-:]?(mini|medium|high|pro)?$/i;
+function effortToReasoningObj(effort?: ReasoningEffort): { effort: string } | undefined {
+  const level = effortToReasoning(effort);
+  if (level) return { effort: level };
+  return undefined;
+}
+
+const REASONING_MODEL_RE = /^(o1|o3|o4|gpt-5)[-\d:.]*(mini|medium|high|pro)?(-\d+)?$/i;
 
 function isReasoningModel(model: string): boolean {
   return REASONING_MODEL_RE.test(model);
 }
+
+// ─── Provider ────────────────────────────────────────────────
 
 export class OpenAIProvider implements Provider {
   readonly name = 'openai';
@@ -42,6 +50,12 @@ export class OpenAIProvider implements Provider {
     'o1-preview',
     'o3-mini',
     'o3-mini-2025-01-31',
+    'o3',
+    'o4-mini',
+    'gpt-5.5',
+    'gpt-5.5-pro',
+    'gpt-5.4',
+    'gpt-5.4-mini',
     'gpt-4-turbo',
   ];
   readonly defaultModel = 'gpt-4o';
@@ -63,9 +77,18 @@ export class OpenAIProvider implements Provider {
     });
   }
 
- stream(args: ProviderStreamArgs): CancelableIterable<ProviderEvent> {
-    const self = this;
+  // ─── Stream ────────────────────────────────────────────────
+
+  stream(args: ProviderStreamArgs): CancelableIterable<ProviderEvent> {
     const model = args.model || this.defaultModel;
+    if (isReasoningModel(model)) {
+      return this.streamResponses(args, model);
+    }
+    return this.streamChat(args, model);
+  }
+
+  private streamChat(args: ProviderStreamArgs, model: string): CancelableIterable<ProviderEvent> {
+    const self = this;
     const modelIsReasoning = isReasoningModel(model);
     const reasoningEffort = effortToReasoning(args.effort);
 
@@ -80,7 +103,7 @@ export class OpenAIProvider implements Provider {
       ? [{ role: 'system', content: args.system }, ...messages]
       : messages;
 
-    const streamParams: OpenAI.ChatCompletionCreateParams = {
+    const streamParams = {
       model,
       messages: allMessages,
       stream: true,
@@ -94,38 +117,32 @@ export class OpenAIProvider implements Provider {
     let sdkStream: AsyncIterable<OpenAI.ChatCompletionChunk> | null = null;
 
     async function* generator(): AsyncIterable<ProviderEvent> {
-      sdkStream = await self.client.chat.completions.create(streamParams) as AsyncIterable<OpenAI.ChatCompletionChunk>;
+      sdkStream = await self.client.chat.completions.create(
+        streamParams as OpenAI.ChatCompletionCreateParams,
+      ) as AsyncIterable<OpenAI.ChatCompletionChunk>;
 
       const pendingTools = new Map<number, { id: string; name: string; inputStr: string }>();
       let lastUsage: OpenAI.CompletionUsage | null = null;
 
       if (!sdkStream) return;
       for await (const chunk of sdkStream) {
-        if (args.signal?.aborted) {
-          break;
-        }
+        if (args.signal?.aborted) break;
 
-        if (chunk.usage) {
-          lastUsage = chunk.usage;
-        }
+        if (chunk.usage) lastUsage = chunk.usage;
 
         const choice = chunk.choices?.[0];
         if (!choice) continue;
 
-        // Text deltas
         if (choice.delta?.content) {
           yield { type: 'text-delta', text: choice.delta.content };
         }
 
-        // Tool call deltas
         if (choice.delta?.tool_calls) {
           for (const tc of choice.delta.tool_calls) {
             const idx = tc.index ?? 0;
-
             if (tc.id) {
               pendingTools.set(idx, { id: tc.id, name: tc.function?.name ?? '', inputStr: '' });
             }
-
             const pending = pendingTools.get(idx);
             if (pending) {
               pending.inputStr += tc.function?.arguments ?? '';
@@ -134,18 +151,12 @@ export class OpenAIProvider implements Provider {
         }
       }
 
-      // Resolve any pending tool calls
       for (const [, pending] of pendingTools) {
         let input: Record<string, unknown> = {};
-        try {
-          if (pending.inputStr) {
-            input = JSON.parse(pending.inputStr);
-          }
-        } catch { /* empty input on parse failure */ }
+        try { if (pending.inputStr) input = JSON.parse(pending.inputStr); } catch { /* empty */ }
         yield { type: 'tool-call', id: pending.id, name: pending.name, input };
       }
 
-      // Emit usage
       if (lastUsage) {
         yield {
           type: 'usage',
@@ -160,17 +171,110 @@ export class OpenAIProvider implements Provider {
     return {
       iterable: generator(),
       cancel() {
-        // The OpenAI Node.js SDK doesn't expose a public cancel method on the
-        // async iterable. The signal.aborted check inside the generator loop
-        // will break on the next iteration, but there's no way to
-        // synchronously abort the underlying HTTP request.
-        // The abort signal is still passed through streamParams, so the SDK
-        // may honor it internally.
+        // Chat Completions SDK doesn't expose a public cancel method.
       },
     };
   }
 
+  private streamResponses(args: ProviderStreamArgs, model: string): CancelableIterable<ProviderEvent> {
+    const self = this;
+    const reasoningEffort = effortToReasoningObj(args.effort);
+    const inputItems = this.mapMessagesToInput(args.messages);
+    const tools = args.tools ? this.mapToolsToResponses(args.tools) : undefined;
+
+    const respParams: Record<string, unknown> = {
+      model,
+      input: inputItems,
+      ...(args.system ? { instructions: args.system } : {}),
+      ...(tools ? { tools } : {}),
+      ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
+      ...(args.maxTokens ? { max_output_tokens: args.maxTokens } : {}),
+      reasoning: {
+        ...(reasoningEffort ?? { effort: 'low' }),
+        summary: 'auto',
+      },
+      truncation: 'auto',
+      stream: true,
+    };
+
+    async function* generator(): AsyncIterable<ProviderEvent> {
+      const sdkStream = await self.client.responses.create(respParams as any) as unknown as AsyncIterable<Record<string, unknown>>;
+
+      const pendingTools = new Map<number, { callId: string; name: string; inputStr: string }>();
+      let lastUsageInput = 0;
+      let lastUsageOutput = 0;
+
+      for await (const raw of sdkStream) {
+        if (args.signal?.aborted) break;
+        const evt = raw as Record<string, unknown>;
+        const type = String(evt.type ?? '');
+
+        if (type === 'response.output_text.delta') {
+          yield { type: 'text-delta', text: String(evt.delta ?? '') };
+        } else if (type === 'response.reasoning_summary_text.delta' || type === 'response.reasoning.delta') {
+          yield { type: 'thinking-delta', text: String(evt.delta ?? '') };
+        } else if (type === 'response.function_call_arguments.delta') {
+          const idx = Number(evt.output_index ?? 0);
+          const existing = pendingTools.get(idx);
+          if (existing) existing.inputStr += String(evt.delta ?? '');
+        } else if (type === 'response.function_call_arguments.done') {
+          const idx = Number(evt.output_index ?? 0);
+          let input: Record<string, unknown> = {};
+          try { if (evt.arguments) input = JSON.parse(String(evt.arguments)); } catch { /* empty */ }
+          const existing = pendingTools.get(idx);
+          if (existing) {
+            yield { type: 'tool-call', id: existing.callId, name: existing.name, input };
+          }
+          pendingTools.delete(idx);
+        } else if (type === 'response.output_item.added') {
+          const item = evt.item as Record<string, unknown>;
+          if (item && item.type === 'function_call') {
+            pendingTools.set(Number(evt.output_index ?? 0), {
+              callId: String(item.call_id ?? ''),
+              name: String(item.name ?? ''),
+              inputStr: '',
+            });
+          }
+        } else if (type === 'response.completed') {
+          const resp = evt.response as Record<string, unknown>;
+          const u = resp.usage as Record<string, unknown>;
+          if (u) {
+            lastUsageInput = Number(u.input_tokens ?? 0);
+            lastUsageOutput = Number(u.output_tokens ?? 0);
+          }
+        }
+      }
+
+      if (lastUsageInput || lastUsageOutput) {
+        yield { type: 'usage', inputTokens: lastUsageInput, outputTokens: lastUsageOutput };
+      }
+
+      yield { type: 'stop', reason: args.signal?.aborted ? 'aborted' : 'stop' };
+    }
+
+    return {
+      iterable: generator(),
+      cancel() {
+        // Responses API stream cancellation via abort signal in the loop.
+      },
+    };
+  }
+
+  // ─── Check ─────────────────────────────────────────────────
+
   async check(prompt: string, args?: {
+    model?: string;
+    system?: string;
+    signal?: AbortSignal;
+  }): Promise<string> {
+    const model = args?.model || this.defaultModel;
+    if (isReasoningModel(model)) {
+      return this.checkResponses(prompt, args);
+    }
+    return this.checkChat(prompt, args);
+  }
+
+  private async checkChat(prompt: string, args?: {
     model?: string;
     system?: string;
     signal?: AbortSignal;
@@ -191,8 +295,34 @@ export class OpenAIProvider implements Provider {
     return response.choices[0]?.message?.content?.trim() ?? '';
   }
 
+  private async checkResponses(prompt: string, args?: {
+    model?: string;
+    system?: string;
+    signal?: AbortSignal;
+  }): Promise<string> {
+    const model = args?.model || this.defaultModel;
+    const response = await this.client.responses.create({
+      model,
+      input: [{ role: 'user', content: prompt }],
+      ...(args?.system ? { instructions: args.system } : {}),
+      max_output_tokens: 256,
+      temperature: 0,
+      truncation: 'auto',
+    } as any);
+    return (response as { output_text?: string })?.output_text?.trim() ?? '';
+  }
+
+  // ─── Complete ──────────────────────────────────────────────
+
   async complete(args: ProviderCompleteArgs): Promise<ProviderCompleteResult> {
     const model = args.model || this.defaultModel;
+    if (isReasoningModel(model)) {
+      return this.completeResponses(args, model);
+    }
+    return this.completeChat(args, model);
+  }
+
+  private async completeChat(args: ProviderCompleteArgs, model: string): Promise<ProviderCompleteResult> {
     const modelIsReasoning = isReasoningModel(model);
     const reasoningEffort = effortToReasoning(args.effort);
 
@@ -207,7 +337,7 @@ export class OpenAIProvider implements Provider {
       ? [{ role: 'system', content: args.system }, ...messages]
       : messages;
 
-    const response = await this.client.chat.completions.create({
+    const responseParams = {
       model,
       messages: allMessages,
       stream: false,
@@ -215,24 +345,17 @@ export class OpenAIProvider implements Provider {
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
       ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
       ...(modelIsReasoning && reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
- stream_options: { include_usage: true },
-    });
+      stream_options: { include_usage: true },
+    };
+    const response = await this.client.chat.completions.create(responseParams as any) as OpenAI.ChatCompletion;
 
     const choice = response.choices[0];
     const text = choice?.message?.content ?? '';
 
     const toolCalls = choice?.message?.tool_calls?.map(tc => {
       let input: Record<string, unknown> = {};
-      try {
-        if (tc.function?.arguments) {
-          input = JSON.parse(tc.function.arguments);
-        }
-      } catch { /* empty input on parse failure */ }
-      return {
-        id: tc.id ?? '',
-        name: tc.function?.name ?? '',
-        input,
-      };
+      try { if (tc.function?.arguments) input = JSON.parse(tc.function.arguments); } catch { /* empty */ }
+      return { id: tc.id ?? '', name: tc.function?.name ?? '', input };
     }).filter(tc => tc.id) ?? [];
 
     const usage = response.usage
@@ -243,17 +366,58 @@ export class OpenAIProvider implements Provider {
       text: text.trim(),
       stopReason: (choice?.finish_reason === 'stop' || choice?.finish_reason === 'function_call')
         ? 'stop'
-        : choice?.finish_reason === 'tool_calls'
-        ? 'tool_use'
-        : choice?.finish_reason === 'length'
-        ? 'length'
-        : choice?.finish_reason === 'content_filter'
-        ? 'content_filter'
+        : choice?.finish_reason === 'tool_calls' ? 'tool_use'
+        : choice?.finish_reason === 'length' ? 'length'
+        : choice?.finish_reason === 'content_filter' ? 'content_filter'
         : 'stop',
       usage,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     };
   }
+
+  private async completeResponses(args: ProviderCompleteArgs, model: string): Promise<ProviderCompleteResult> {
+    const reasoningEffort = effortToReasoningObj(args.effort);
+    const inputItems = this.mapMessagesToInput(args.messages);
+    const tools = args.tools ? this.mapToolsToResponses(args.tools) : undefined;
+
+    const respParams: Record<string, unknown> = {
+      model,
+      input: inputItems,
+      ...(args.system ? { instructions: args.system } : {}),
+      ...(tools ? { tools } : {}),
+      ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
+      ...(args.maxTokens ? { max_output_tokens: args.maxTokens } : {}),
+      ...(reasoningEffort ? { reasoning: reasoningEffort } : {}),
+      truncation: 'auto',
+    };
+
+    const response = await this.client.responses.create(respParams as any) as unknown as Record<string, unknown>;
+
+    const text = (response.output_text as string) ?? '';
+
+    const outputItems = (response.output as any[]) ?? [];
+    const toolCalls = outputItems
+      .filter(item => item.type === 'function_call')
+      .map((fc) => {
+        let input: Record<string, unknown> = {};
+        try { if (fc.arguments) input = JSON.parse(fc.arguments); } catch { /* empty */ }
+        return { id: fc.call_id as string, name: fc.name as string, input };
+      });
+
+    const usageObj = response.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+    const usage = usageObj
+      ? { inputTokens: usageObj.input_tokens ?? 0, outputTokens: usageObj.output_tokens ?? 0 }
+      : undefined;
+
+    return {
+      text: text.trim(),
+      stopReason: toolCalls.length > 0 ? 'tool_use' : 'stop',
+      usage,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    };
+  }
+
+  // ─── Chat Completions mappers ──────────────────────────────
 
   private mapMessages(messages: ProviderMessage[]): OpenAI.ChatCompletionMessageParam[] {
     return messages.map((m) => {
@@ -285,10 +449,7 @@ export class OpenAIProvider implements Provider {
           .map(c => ({
             id: c.id,
             type: 'function' as const,
-            function: {
-              name: c.name,
-              arguments: JSON.stringify(c.input),
-            },
+            function: { name: c.name, arguments: JSON.stringify(c.input) },
           }));
 
         return {
@@ -310,6 +471,70 @@ export class OpenAIProvider implements Provider {
         description: t.description,
         parameters: t.inputSchema as Record<string, unknown>,
       },
+    }));
+  }
+
+  // ─── Responses API mappers ─────────────────────────────────
+
+  private mapMessagesToInput(messages: ProviderMessage[]): Record<string, unknown>[] {
+    const items: Record<string, unknown>[] = [];
+    for (const m of messages) {
+      if (m.role === 'tool') {
+        items.push({
+          type: 'function_call_output',
+          call_id: (m as { toolUseId: string }).toolUseId,
+          output: m.content as string,
+        });
+      } else if (typeof m.content === 'string') {
+        items.push({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        });
+      } else if (Array.isArray(m.content)) {
+        if (m.role === 'assistant') {
+          const textParts = m.content
+            .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+            .map(c => c.text);
+          const toolUses = m.content
+            .filter((c): c is { type: 'tool-use'; id: string; name: string; input: Record<string, unknown> } => c.type === 'tool-use');
+
+          if (textParts.length > 0) {
+            items.push({
+              role: 'assistant',
+              type: 'message',
+              content: textParts.map((t) => ({ type: 'output_text', text: t })),
+              status: 'completed',
+            });
+          }
+          for (const tu of toolUses) {
+            items.push({
+              type: 'function_call',
+              call_id: tu.id,
+              name: tu.name,
+              arguments: JSON.stringify(tu.input),
+            });
+          }
+        } else {
+          const textParts = m.content
+            .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+            .map(c => c.text);
+          items.push({
+            role: 'user',
+            content: textParts.join('\n'),
+          });
+        }
+      }
+    }
+    return items;
+  }
+
+  private mapToolsToResponses(tools: ToolDefinition[]): Record<string, unknown>[] {
+    return tools.map((t) => ({
+      type: 'function',
+      name: t.name,
+      description: t.description,
+      parameters: t.inputSchema,
+      strict: null,
     }));
   }
 }

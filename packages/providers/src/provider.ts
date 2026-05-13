@@ -10,6 +10,7 @@ export interface ToolDefinition {
 
 export type ProviderEvent =
   | { type: 'text-delta'; text: string }
+  | { type: 'thinking-delta'; text: string }
   | { type: 'thinking-block'; thinking: string; signature: string }
   | { type: 'tool-call'; id: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }
   | { type: 'tool-result-request'; callId: string }

@@ -124,6 +124,7 @@ export class OpenRouterProvider implements Provider {
       if (!sdkStream) return;
 
       const pendingTools = new Map<number, { id: string; name: string; inputStr: string }>();
+      const thinkingBlocks = new Map<number, { thinking: string; signature: string }>();
       let lastUsage: OpenAI.CompletionUsage | null = null;
 
       for await (const chunk of sdkStream) {
@@ -137,6 +138,37 @@ export class OpenRouterProvider implements Provider {
 
         const choice = chunk.choices?.[0];
         if (!choice) continue;
+
+        // OpenRouter reasoning_details (not in OpenAI SDK types, cast to any).
+        const rawDelta = choice.delta as Record<string, unknown> | undefined;
+        const reasoningDetails = rawDelta?.reasoning_details as Array<{
+          type: string;
+          text?: string;
+          signature?: string | null;
+          index?: number;
+        }> | undefined;
+
+        if (reasoningDetails?.length) {
+          for (const rd of reasoningDetails) {
+            if (rd.type !== 'reasoning.text') continue;
+            const idx = rd.index ?? 0;
+            if (!thinkingBlocks.has(idx)) {
+              thinkingBlocks.set(idx, { thinking: '', signature: '' });
+            }
+            const tb = thinkingBlocks.get(idx)!;
+            if (rd.text) {
+              tb.thinking += rd.text;
+              yield { type: 'thinking-delta', text: rd.text };
+            }
+            if (rd.signature) tb.signature = rd.signature;
+          }
+        } else {
+          // No more reasoning_details — flush any pending thinking blocks.
+          for (const [, tb] of thinkingBlocks) {
+            yield { type: 'thinking-block', thinking: tb.thinking, signature: tb.signature };
+          }
+          thinkingBlocks.clear();
+        }
 
         if (choice.delta?.content) {
           yield { type: 'text-delta', text: choice.delta.content };

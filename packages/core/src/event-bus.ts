@@ -1,6 +1,7 @@
 export type Event =
   | { type: 'user-prompt'; id: string; text: string; cwd: string; timestamp: number }
   | { type: 'assistant-delta'; id: string; text: string; timestamp: number }
+  | { type: 'thinking-delta'; id: string; text: string; timestamp: number }
   | { type: 'assistant-stop'; id: string; timestamp: number }
   | { type: 'tool-call'; id: string; toolCallId: string; name: string; input: Record<string, unknown>; thoughtSignature?: string; timestamp: number }
   | { type: 'tool-result'; id: string; toolCallId: string; output: unknown; error?: string; timestamp: number }

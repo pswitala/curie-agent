@@ -503,12 +503,12 @@ export { estimateCost, parseTieredPricing, selectTier };
 
 function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeName, system, settings, projects, cronManager: externalCronManager, onReminderHolder, telegramChatIdRef, telegramSubmitRef, telegramGateway, channelRegistry, channelRouter, activeChannelRef, mcpToolsRef, mcpClientsRef, mcpFailedRef, onMcpReconnect, mcpNeedsReconnect, contextWindowSize, resumeSession, resumeSessionId }: AppProps) {
   const [messages, setMessages] = useState<
-    Array<{ role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat'; content: string; title?: string }>
+    Array<{ role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'thinking'; content: string; title?: string }>
   >([]);
   // Multi-channel: per-channel message storage (keyed by channel ID)
   // 'main' channel starts with the cold-start banner as the first message so it
   // scrolls naturally with the conversation rather than being pinned to a header.
-  const [channelMessages, setChannelMessages] = useState<Record<string, Array<{ role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat'; content: string; title?: string }>>>({
+  const [channelMessages, setChannelMessages] = useState<Record<string, Array<{ role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'thinking'; content: string; title?: string }>>>({
     main: [{ role: 'assistant', content: COLD_START_BANNER }],
   });
   // Queue for background messages (cron/reminder/heartbeat) that arrive
@@ -1435,6 +1435,7 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
     setStatus('working');
 
     let assistantText = '';
+    let thinkingText = '';
     toolGroupIndexRef.current = null;
 
     const unsubs = [
@@ -1480,6 +1481,25 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
             return [...base.slice(0, -1), { role: 'assistant' as const, content: assistantText }];
           }
           return [...base, { role: 'assistant' as const, content: assistantText }];
+        });
+      }),
+      loop.eventBus.subscribe('thinking-delta', (e: Event) => {
+        if (e.type !== 'thinking-delta') return;
+        thinkingText += e.text;
+        setChannelMessages((prev) => {
+          const chMsgs = prev[targetChannel] || [];
+          const last = chMsgs[chMsgs.length - 1];
+          if (last && last.role === 'thinking') {
+            return { ...prev, [targetChannel]: [...chMsgs.slice(0, -1), { role: 'thinking' as const, content: thinkingText }] };
+          }
+          return { ...prev, [targetChannel]: [...chMsgs, { role: 'thinking' as const, content: thinkingText }] };
+        });
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last && last.role === 'thinking') {
+            return [...prev.slice(0, -1), { role: 'thinking' as const, content: thinkingText }];
+          }
+          return [...prev, { role: 'thinking' as const, content: thinkingText }];
         });
       }),
       loop.eventBus.subscribe('session-start', (e: Event) => {
