@@ -477,6 +477,8 @@ interface AppProps {
   contextWindowSize?: number;
   /** MCP client instances for connection status display. */
   mcpClientsRef: { current: Array<{ serverId: string; isConnected: boolean; tools: ReadonlyArray<{ name: string }> }> };
+  /** Server IDs that failed to connect during createMcpTools. */
+  mcpFailedRef: { current: string[] };
   /** Called before creating a new TurnLoop — should reconnect MCP if settings changed. */
   onMcpReconnect?: () => Promise<void>;
   /** When true, tells onMcpReconnect to actually reconnect. Set by /mcp add/remove. */
@@ -499,7 +501,7 @@ import { estimateCost, parseTieredPricing, selectTier } from './pricing.js';
 
 export { estimateCost, parseTieredPricing, selectTier };
 
-function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeName, system, settings, projects, cronManager: externalCronManager, onReminderHolder, telegramChatIdRef, telegramSubmitRef, telegramGateway, channelRegistry, channelRouter, activeChannelRef, mcpToolsRef, mcpClientsRef, onMcpReconnect, mcpNeedsReconnect, contextWindowSize, resumeSession, resumeSessionId }: AppProps) {
+function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeName, system, settings, projects, cronManager: externalCronManager, onReminderHolder, telegramChatIdRef, telegramSubmitRef, telegramGateway, channelRegistry, channelRouter, activeChannelRef, mcpToolsRef, mcpClientsRef, mcpFailedRef, onMcpReconnect, mcpNeedsReconnect, contextWindowSize, resumeSession, resumeSessionId }: AppProps) {
   const [messages, setMessages] = useState<
     Array<{ role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat'; content: string; title?: string }>
   >([]);
@@ -760,10 +762,20 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
         // Clear the active channel's TurnLoop so next message creates a fresh one
         // with the updated MCP tools (reconnectMcp repopulates mcpToolsRef).
         channelTurnLoopsRef.current.delete(activeChannelId);
+        // Reconnect MCP immediately so mcpClientsRef is fresh for slash commands
+        // (e.g. /mcp list can show correct status right after /mcp add/remove/reload).
+        if (onMcpReconnect && mcpNeedsReconnect) {
+          mcpNeedsReconnect.current = false;
+          try {
+            await onMcpReconnect();
+          } catch {
+            /* reconnect failure is non-fatal */
+          }
+        }
         if (result.mcpServerId) {
-          push(`${result.message}\nServer "${result.mcpServerId}" changed — TurnLoop invalidated. New tools will be loaded on next message.`);
+          push(`${result.message}\nServer "${result.mcpServerId}" changed.`);
         } else {
-          push(`${result.message}\nMCP reloaded — TurnLoop invalidated. New tools will be loaded on next message.`);
+          push(`${result.message}`);
         }
         break;
       }
@@ -1106,6 +1118,7 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
       channelMessages: channelMessages[activeChannelId],
       cronManager: cronManagerRef.current ?? undefined,
       mcpClients: mcpClientsRef.current,
+      mcpFailed: mcpFailedRef.current,
       contextWindowSize: contextWindowSize ?? 200_000,
       thinkingBudget: ({ low: 2000, medium: 6000, high: 16000, max: 32000, auto: 0 })[currentEffort ?? 'auto'] ?? 0,
       listSnapshots: (cwd: string) => listSnapshots(cwd),
@@ -1613,9 +1626,10 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
   }, [onSubmit, telegramSubmitRef]);
 
   const onBashCommand = useCallback((command: string) => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setStatus('running shell');
+    setChannelMessages(prev => ({
+      ...prev,
+      [activeChannelId]: [...(prev[activeChannelId] || []), { role: 'user', content: `! ${command}` }],
+    }));
     setMessages(prev => [...prev, { role: 'user', content: `! ${command}` }]);
 
     // Handle `cd` (and `chdir`) ourselves so directory changes persist across
@@ -1646,9 +1660,11 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
         loopRef.current?.setCwd(target);
         content = `$ ${command}\n${target}\n[exit 0]`;
       }
+      setChannelMessages(prev => ({
+        ...prev,
+        [activeChannelId]: [...(prev[activeChannelId] || []), { role: 'tool', content }],
+      }));
       setMessages(prev => [...prev, { role: 'tool', content }]);
-      busyRef.current = false;
-      setStatus('idle');
       return;
     }
 
@@ -1671,20 +1687,21 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
       const content = output.length
         ? `$ ${command}\n${output}\n[exit ${code ?? 0}]`
         : `$ ${command}\n[exit ${code ?? 0}]`;
+      setChannelMessages(prev => ({
+        ...prev,
+        [activeChannelId]: [...(prev[activeChannelId] || []), { role: 'tool', content }],
+      }));
       setMessages(prev => [...prev, { role: 'tool', content }]);
       shellChildRef.current = null;
-      busyRef.current = false;
-      setStatus('idle');
     });
 
     child.on('error', err => {
-      setMessages(prev => [
+      setChannelMessages(prev => ({
         ...prev,
-        { role: 'tool', content: `$ ${command}\nError: ${err.message}` },
-      ]);
+        [activeChannelId]: [...(prev[activeChannelId] || []), { role: 'tool', content: `$ ${command}\nError: ${err.message}` }],
+      }));
+      setMessages(prev => [...prev, { role: 'tool', content: `$ ${command}\nError: ${err.message}` }]);
       shellChildRef.current = null;
-      busyRef.current = false;
-      setStatus('idle');
     });
   }, []);
 
@@ -2081,6 +2098,7 @@ async function main() {
   const mcpToolsRef: React.MutableRefObject<typeof allTools> = { current: [] };
   const mcpClientsRef: React.MutableRefObject<Array<{ serverId: string; isConnected: boolean; tools: ReadonlyArray<{ name: string }> }>> = { current: [] };
   const mcpRawClientsRef: React.MutableRefObject<MCPClient[]> = { current: [] };
+  const mcpFailedRef: React.MutableRefObject<string[]> = { current: [] };
   // Tracks whether MCP config has changed (via /mcp add/remove) since last connection.
   // Prevents unnecessary reconnect on first user message when MCP is already fresh.
   const mcpNeedsReconnect = { current: false };
@@ -2089,11 +2107,11 @@ async function main() {
     if (!raw) return [];
     try {
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw as Record<string, unknown>;
-      return Object.values(parsed).map((v) => {
+      return Object.entries(parsed).map(([key, v]) => {
         const r = v as Record<string, unknown>;
         return {
-          id: (r.id as string) ?? '',
-          name: (r.name as string) ?? '',
+          id: key,
+          name: (r.name as string) || key,
           transport: (r.transport as 'stdio' | 'sse' | 'streamable-http') ?? 'stdio',
           command: r.command as string | undefined,
           args: r.args as string[] | undefined,
@@ -2108,6 +2126,9 @@ async function main() {
   };
 
   const reconnectMcp = async () => {
+    // Reload settings from disk to pick up changes made via App's settingsMgr
+    // (e.g., /mcp add/remove which update settingsMgr.current!.update())
+    settingsManager.load();
     // Disconnect existing clients
     for (const client of mcpRawClientsRef.current) {
       client.disconnect().catch(() => {});
@@ -2115,6 +2136,7 @@ async function main() {
     mcpRawClientsRef.current = [];
     mcpClientsRef.current = [];
     mcpToolsRef.current = [];
+    mcpFailedRef.current = [];
 
     // Read fresh settings from disk so we pick up settingsManager updates
     const freshSettings = settingsManager.get();
@@ -2130,6 +2152,7 @@ async function main() {
           tools: c.tools,
         }));
         mcpRawClientsRef.current = result.clients;
+        mcpFailedRef.current = result.failed;
         console.error(`[mcp] Connected — ${mcpToolsRef.current.length} tool(s) from ${mcpClientsRef.current.length} server(s)`);
       } catch (err) {
         console.error(`[mcp] Reconnect failed: ${err instanceof Error ? err.message : err}`);
@@ -2151,6 +2174,7 @@ async function main() {
           tools: c.tools,
         }));
         mcpRawClientsRef.current = result.clients;
+        mcpFailedRef.current = result.failed;
         console.error(`[mcp] Connected — ${mcpToolsRef.current.length} tool(s) exposed from ${mcpClientsRef.current.length} server(s)`);
       }
     } catch (err) {
@@ -2321,6 +2345,7 @@ async function main() {
       activeChannelRef={activeChannelRef}
       mcpToolsRef={mcpToolsRef}
       mcpClientsRef={mcpClientsRef}
+      mcpFailedRef={mcpFailedRef}
       mcpNeedsReconnect={mcpNeedsReconnect}
       onMcpReconnect={async () => {
         if (mcpNeedsReconnect.current) {

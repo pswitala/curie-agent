@@ -33,6 +33,8 @@ export interface CreateMcpToolsResult {
   tools: CurieTool[];
   /** The active MCP clients — caller should dispose them on shutdown. */
   clients: MCPClient[];
+  /** Server IDs that failed to connect (silently skipped unless `failFast`). */
+  failed: string[];
 }
 
 /**
@@ -50,6 +52,7 @@ export async function createMcpTools(
 
   const allTools: CurieTool[] = [];
   const clients: MCPClient[] = [];
+  const failed: string[] = [];
 
   for (const config of configs) {
     const client = new MCPClient({
@@ -69,6 +72,7 @@ export async function createMcpTools(
       const msg = normalizeError(err, config.id).message;
       console.error(`[mcp] Failed to connect to server "${config.id}": ${msg}`);
       if (failFast) throw err;
+      failed.push(config.id);
       continue;
     }
 
@@ -81,5 +85,5 @@ export async function createMcpTools(
     clients.push(client);
   }
 
-  return { tools: allTools, clients };
+  return { tools: allTools, clients, failed };
 }

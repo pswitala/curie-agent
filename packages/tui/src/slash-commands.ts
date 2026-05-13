@@ -19,6 +19,8 @@ export interface SlashCommandContext {
   cronManager?: CronManager;
   /** MCP client instances for connection status display. */
   mcpClients?: Array<{ serverId: string; isConnected: boolean; tools: ReadonlyArray<{ name: string }> }>;
+  /** Server IDs that failed to connect during createMcpTools. */
+  mcpFailed?: string[];
   /** Current model's context window size in tokens. */
   contextWindowSize?: number;
   /** Extended thinking token budget (0 if disabled). */
@@ -107,7 +109,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'memory', description: 'View memory file sizes or capture a memory', usage: '/memory [status|add]' },
   { name: 'stats', description: 'Daily usage, sessions, streaks', usage: '/stats' },
   { name: 'context', description: 'Visual grid showing context window usage', usage: '/context [messages|compact [detailed|brief]]' },
-  { name: 'model', description: 'Switch AI model, set pricing or context window', usage: '/model <model|pricing in;out|windows tokens>' },
+  { name: 'model', description: 'Switch AI model, set pricing or context window', usage: '/model <model|pricing in;out|window tokens>' },
   { name: 'effort', description: 'Set reasoning effort level', usage: '/effort <low|medium|high|max|auto>' },
   { name: 'mode', description: 'Set approval mode', usage: '/mode <manual|plan|auto-edit|full-auto|yolo>' },
   { name: 'agent', description: 'Launch external AI agent', usage: '/agent <prompt>' },
@@ -346,7 +348,7 @@ function handleModel(args: string, settings?: CurieSettings): SlashCommandResult
     const window = settings?.MODEL_CONTEXT_WINDOW ?? WINDOW_DEFAULT;
     return {
       type: 'message',
-      message: `Usage: /model <model>\n  /model pricing [in;out]        — set custom per-million pricing (e.g. "0.5;2.0" or "0.5;2.0|200000<1.0;4.0")\n  /model windows <tokens>       — set max context window\n\nCurrent: pricing=${cost}  window=${window} tokens`,
+      message: `Usage: /model <model>\n  /model pricing [in;out]        — set custom per-million pricing (e.g. "0.5;2.0" or "0.5;2.0|200000<1.0;4.0")\n  /model window <tokens>       — set max context window\n\nCurrent: pricing=${cost}  window=${window} tokens`,
     };
   }
 
@@ -378,10 +380,10 @@ function handleModel(args: string, settings?: CurieSettings): SlashCommandResult
       };
     }
 
-    case 'windows': {
+    case 'window': {
       if (!rest) {
         const window = settings?.MODEL_CONTEXT_WINDOW ?? WINDOW_DEFAULT;
-        return { type: 'message', message: `Usage: /model windows <tokens>\nExample: /model windows 1000000\nCurrent: ${window}` };
+        return { type: 'message', message: `Usage: /model window <tokens>\nExample: /model window 1000000\nCurrent: ${window}` };
       }
       const windowSize = parseInt(rest, 10);
       if (isNaN(windowSize) || windowSize < 1024) {
@@ -710,12 +712,14 @@ function handleMcp(args: string, ctx: SlashCommandContext): SlashCommandResult {
           detail = `url: ${(c.url as string) || '?'}`;
         }
         const client = ctx.mcpClients?.find((cl) => cl.serverId === id);
+        const wasFailed = ctx.mcpFailed?.includes(id);
         if (!client) {
-          lines.push(`  · ${id} (${name}) — ${transport}: ${detail} [not loaded]`);
+          const status = wasFailed ? 'connection failed' : 'not running';
+          lines.push(`  ⚠️  ${id} (${name}) — ${transport}: ${detail} [${status}]`);
         } else if (client.isConnected) {
-          lines.push(`  ● ${id} (${name}) — ${transport}: ${detail} [connected]`);
+          lines.push(`  ✅ ${id} (${name}) — ${transport}: ${detail}`);
         } else {
-          lines.push(`  ○ ${id} (${name}) — ${transport}: ${detail} [disconnected]`);
+          lines.push(`  ⚠️  ${id} (${name}) — ${transport}: ${detail} [disconnected]`);
         }
       }
       return { type: 'message', message: lines.join('\n') };
