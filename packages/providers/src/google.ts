@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import type {
   Provider,
   ProviderEvent,
@@ -17,11 +16,17 @@ function nextCallId(): string {
   return `call_${++_callId}`;
 }
 
-/** Returns true if the model may return thought_signature fields on function call parts. */
+/** Returns true if the model may return thought fields on parts. */
 function isThinkingModelName(model: string): boolean {
   const m = model.toLowerCase();
   return m.startsWith('gemini-2.5') || m.startsWith('gemini-3') || m.includes('flash-latest') || m.includes('pro-latest');
 }
+
+const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com';
+const DEFAULT_API_VERSION = 'v1beta';
+
+type ApiCandidate = { content: { parts: unknown[] } };
+type ApiChunk = { candidates?: ApiCandidate[] };
 
 export class GoogleGeminiProvider implements Provider {
   readonly name = 'google';
@@ -33,7 +38,7 @@ export class GoogleGeminiProvider implements Provider {
   ];
   readonly defaultModel = 'gemini-2.0-flash';
 
-  private genAI: GoogleGenerativeAI;
+  private apiKey: string;
   private baseUrl: string;
 
   constructor(apiKey?: string, baseUrl?: string) {
@@ -45,99 +50,223 @@ export class GoogleGeminiProvider implements Provider {
         'GoogleGeminiProvider: no API key (pass explicitly or set GOOGLE_API_KEY).',
       );
     }
-    this.genAI = new GoogleGenerativeAI(resolvedKey);
-    this.baseUrl = baseUrl || '';
+    this.apiKey = resolvedKey;
+    this.baseUrl = baseUrl || DEFAULT_BASE_URL;
   }
 
   private isThinkingModel(model?: string): boolean {
     return isThinkingModelName(model || this.defaultModel);
   }
 
-  private baseModelParams(): Record<string, unknown> {
-    const params: Record<string, unknown> = { model: this.defaultModel };
-    if (this.baseUrl) {
-      params['baseUrl'] = this.baseUrl;
+  private apiEndpoint(model: string, task: string, altSse?: boolean): string {
+    const safeModel = model.startsWith('models/') ? model : `models/${model}`;
+    let url = `${this.baseUrl}/${DEFAULT_API_VERSION}/${safeModel}:${task}`;
+    if (altSse) {
+      url += '?alt=sse';
     }
-    return params;
+    return url;
   }
 
-   private getModel(model?: string, tools?: unknown): ReturnType<typeof this.genAI.getGenerativeModel> {
-    const m = model || this.defaultModel;
-    const params: Record<string, unknown> = { ...this.baseModelParams(), model: m };
-    if (this.isThinkingModel(m)) {
-      params['enable_thoughts'] = false;
+  /** Build the API request body, including thinkingConfig for thinking models. */
+  private buildRequestBody(
+    model: string,
+    contents: unknown[],
+    opts?: {
+      system?: string;
+      tools?: unknown[];
+      thinking?: boolean;
+    },
+  ): Record<string, unknown> {
+    const safeModel = model.startsWith('models/') ? model : `models/${model}`;
+    const body: Record<string, unknown> = { model: safeModel, contents };
+    if (opts?.system) {
+      body.systemInstruction = { role: 'system', parts: [{ text: opts.system }] };
     }
-    if (tools && (tools as unknown[]).length > 0) {
-      params['tools'] = [{ functionDeclarations: tools }];
+    if (opts?.tools && opts.tools.length) body.tools = opts.tools;
+    const generationConfig: Record<string, unknown> = {};
+    if (opts?.thinking) {
+      generationConfig.thinkingConfig = { includeThoughts: true };
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return this.genAI.getGenerativeModel(params as any);
+    if (Object.keys(generationConfig).length) {
+      body.generationConfig = generationConfig;
+    }
+    return body;
+  }
+
+  /** Parse the SSE stream response line by line into complete JSON chunks. */
+  private async* parseSSEStream(response: Response): AsyncGenerator<Record<string, unknown>> {
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let dataLines: string[] = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let nlIdx: number;
+      while ((nlIdx = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, nlIdx).replace(/\r$/, '');
+        buffer = buffer.slice(nlIdx + 1);
+
+        if (line.startsWith('data: ')) {
+          dataLines.push(line.slice(6));
+        } else if (line.startsWith('event:')) {
+          // `event: default` lines are Gemini's event boundaries — yield
+          // accumulated data before moving to the next event.
+          if (dataLines.length > 0) {
+            for (const dl of dataLines) {
+              const trimmed = dl.trim();
+              if (!trimmed) continue;
+              try {
+                yield JSON.parse(trimmed) as Record<string, unknown>;
+              } catch { /* skip malformed */ }
+            }
+            dataLines = [];
+          }
+        } else if (line === '') {
+          if (dataLines.length > 0) {
+            for (const dl of dataLines) {
+              const trimmed = dl.trim();
+              if (!trimmed) continue;
+              try {
+                yield JSON.parse(trimmed) as Record<string, unknown>;
+              } catch { /* skip malformed */ }
+            }
+            dataLines = [];
+          }
+        }
+        // ignore comment lines (':'), id:, retry: — skip them
+      }
+    }
+
+    if (dataLines.length > 0) {
+      for (const dl of dataLines) {
+        const trimmed = dl.trim();
+        if (!trimmed) continue;
+        try {
+          yield JSON.parse(trimmed) as Record<string, unknown>;
+        } catch { /* empty */ }
+      }
+    }
   }
 
  stream(args: ProviderStreamArgs): CancelableIterable<ProviderEvent> {
     const model = args.model || this.defaultModel;
+    const thinking = this.isThinkingModel(model);
     const tools = args.tools ? this.toFunctionDeclarations(args.tools) : undefined;
-    const genModel = this.getModel(model, tools);
 
     const contents = this.mapMessages(args.messages);
-    const requestTools = args.tools ? [{ functionDeclarations: this.toFunctionDeclarations(args.tools) }] : undefined;
+    const requestBody = this.buildRequestBody(model, contents, {
+      system: args.system,
+      tools: tools ? [{ functionDeclarations: tools }] : undefined,
+      thinking,
+    });
+
+    const controller = new AbortController();
+    if (args.signal) {
+      args.signal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
 
     async function* generator(): AsyncIterable<ProviderEvent> {
-      const streamResult = await genModel.generateContentStream({
-        contents,
-        systemInstruction: args.system,
-        ...(requestTools ? { tools: requestTools as never } : {}),
+      const url = self.apiEndpoint(model, 'streamGenerateContent', true);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': self.apiKey,
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
       });
 
-      // Collect raw chunk parts as they stream in to preserve thoughtSignature,
-      // which the SDK's aggregated response object drops from its typed interface.
-      const rawParts: Array<Record<string, unknown>> = [];
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Google API error ${response.status} (${url}): ${errText}`);
+      }
 
-      for await (const chunk of streamResult.stream) {
-        if (args.signal?.aborted) {
+     const rawParts: Array<Record<string, unknown>> = [];
+      let accumulatedThinking = '';
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
+      let lastThoughtLen = 0;
+      let totalDeltaSent = 0;
+
+      for await (const chunk of self.parseSSEStream(response)) {
+        if (args.signal?.aborted || controller.signal.aborted) {
           break;
         }
 
-        const text = chunk.text();
-        if (text) {
-          yield { type: 'text-delta', text };
+        const apiChunk = chunk as unknown as ApiChunk;
+        const chunkParts = apiChunk.candidates?.[0]?.content?.parts ?? [];
+        for (const part of chunkParts) {
+          const raw = part as unknown as Record<string, unknown>;
+
+          if (raw.thought === true && typeof raw.text === 'string' && raw.text) {
+            // Google Gemini sends accumulated text (full thinking so far) in
+            // each SSE chunk. We need delta tracking within a turn, but must
+            // detect turn resets when text shrinks.
+            if (raw.text.length < totalDeltaSent) {
+              // Turn reset detected — emit full text for new turn.
+              totalDeltaSent = raw.text.length;
+              lastThoughtLen = 0;
+            }
+            const newText = raw.text.slice(lastThoughtLen);
+            if (newText) {
+              accumulatedThinking += newText;
+              totalDeltaSent += newText.length;
+              lastThoughtLen = raw.text.length;
+              yield { type: 'thinking-delta', text: newText };
+            }
+          } else if (typeof raw.text === 'string' && raw.text) {
+            yield { type: 'text-delta', text: raw.text };
+          }
+
+          rawParts.push(raw);
         }
 
-        // Capture raw parts from each chunk before the SDK strips unknown fields
-        const chunkParts = chunk.candidates?.[0]?.content?.parts ?? [];
-        for (const part of chunkParts) {
-          rawParts.push(part as unknown as Record<string, unknown>);
+        const usage = (chunk as Record<string, unknown>).usageMetadata as Record<string, unknown> | undefined;
+        if (usage) {
+          totalInputTokens = Number(usage.promptTokenCount ?? totalInputTokens);
+          totalOutputTokens = Number(usage.candidatesTokenCount ?? totalOutputTokens);
         }
       }
 
-      if (args.signal?.aborted) {
+      if (accumulatedThinking) {
+        yield { type: 'thinking-block', thinking: accumulatedThinking, signature: '' };
+      }
+
+      if (args.signal?.aborted || controller.signal.aborted) {
         yield { type: 'stop', reason: 'aborted' };
         return;
       }
 
-      try {
-        // Prefer raw parts collected during streaming (preserves thoughtSignature).
-        // Fall back to aggregated response parts if streaming collected nothing.
-        const response = await streamResult.response;
-        const aggParts = response.candidates?.[0]?.content?.parts ?? [];
-        const parts = rawParts.length > 0 ? rawParts : (aggParts as unknown as Record<string, unknown>[]);
-
-        for (const p of parts) {
-          if (p.functionCall && typeof p.functionCall === 'object') {
-            const fc = p.functionCall as { name: string; args?: Record<string, unknown> };
-            const sig = (typeof p.thoughtSignature === 'string' ? p.thoughtSignature : undefined)
-                     ?? (typeof p.thought_signature === 'string' ? p.thought_signature : undefined);
-            yield {
-              type: 'tool-call',
-              id: nextCallId(),
-              name: fc.name,
-              input: (fc.args ?? {}) as Record<string, unknown>,
-              ...(sig ? { thoughtSignature: sig } : {}),
-            };
+      let thoughtSignature = '';
+      for (const p of rawParts) {
+        if (p.functionCall && typeof p.functionCall === 'object') {
+          // Extract thoughtSignature from function call part (Gemini API quirk)
+          if (!thoughtSignature) {
+            thoughtSignature = (typeof p.thoughtSignature === 'string' ? p.thoughtSignature : undefined)
+                     ?? (typeof p.thought_signature === 'string' ? p.thought_signature : undefined)
+                     ?? '';
           }
+          const fc = p.functionCall as { name: string; args?: Record<string, unknown> };
+          yield {
+            type: 'tool-call',
+            id: nextCallId(),
+            name: fc.name,
+            input: (fc.args ?? {}) as Record<string, unknown>,
+            ...(thoughtSignature ? { thoughtSignature: thoughtSignature } : {}),
+          };
         }
-      } catch {
-        // Response may throw if prompt was blocked
+      }
+
+      if (totalInputTokens || totalOutputTokens) {
+        yield { type: 'usage', inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
       }
 
       yield { type: 'stop', reason: 'stop' };
@@ -146,9 +275,7 @@ export class GoogleGeminiProvider implements Provider {
     return {
       iterable: generator(),
       cancel() {
-        // The Google Gemini SDK doesn't expose a public cancel method.
-        // The signal.aborted check inside the generator loop breaks on the
-        // next iteration, but there's no way to synchronously abort.
+        controller.abort();
       },
     };
   }
@@ -159,58 +286,88 @@ export class GoogleGeminiProvider implements Provider {
     signal?: AbortSignal;
   }): Promise<string> {
     const model = args?.model || this.defaultModel;
-    const genModel = this.getModel(model);
-
-    const response = await genModel.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      systemInstruction: args?.system,
+    const requestBody = this.buildRequestBody(model, [{ role: 'user', parts: [{ text: prompt }] }], {
+      system: args?.system,
     });
 
-    return response.response.text().trim().slice(0, 256);
+    const response = await fetch(this.apiEndpoint(model, 'generateContent'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': this.apiKey,
+      },
+      body: JSON.stringify(requestBody),
+      signal: args?.signal,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Google API error ${response.status}: ${errText}`);
+    }
+
+    const json = await response.json() as unknown as ApiChunk;
+    const parts = (json.candidates?.[0]?.content?.parts ?? []) as Record<string, unknown>[];
+    const text = parts.map((p) => p.text).filter(Boolean).join('');
+    return text.trim().slice(0, 256);
   }
 
   async complete(args: ProviderCompleteArgs): Promise<ProviderCompleteResult> {
     const model = args.model || this.defaultModel;
-    const tools = args.tools ? this.toFunctionDeclarations(args.tools) : undefined;
-    const genModel = this.getModel(model, tools);
-
+    const thinking = this.isThinkingModel(model);
     let contents = this.mapMessages(args.messages);
     const allText: string[] = [];
     let stopReason: ProviderCompleteResult['stopReason'] = 'stop';
     let toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> | undefined;
 
     for (let turn = 0; turn < 16; turn++) {
-      const requestTools = args.tools ? [{ functionDeclarations: this.toFunctionDeclarations(args.tools) }] : undefined;
-
-      const response = await genModel.generateContent({
-        contents,
-        systemInstruction: args.system,
-        ...(requestTools ? { tools: requestTools as never } : {}),
+      const tools = args.tools ? this.toFunctionDeclarations(args.tools) : undefined;
+      const requestBody = this.buildRequestBody(model, contents, {
+        system: args.system,
+        tools: tools ? [{ functionDeclarations: tools }] : undefined,
+        thinking,
       });
 
-      const text = response.response.text().trim();
-      if (text) allText.push(text);
+      const response = await fetch(this.apiEndpoint(model, 'generateContent'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': this.apiKey,
+        },
+        body: JSON.stringify(requestBody),
+        signal: args.signal,
+      });
 
-      // Use raw parts to preserve thought_signature for thinking models.
-      const rawParts = response.response.candidates?.[0]?.content?.parts ?? [];
-      const fcParts = rawParts.filter((p) => (p as unknown as Record<string, unknown>).functionCall);
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Google API error ${response.status}: ${errText}`);
+      }
+
+      const json = await response.json() as unknown as ApiChunk;
+      const rawParts = (json.candidates?.[0]?.content?.parts ?? []) as Record<string, unknown>[];
+
+      // Collect text (non-thought) parts
+      for (const part of rawParts) {
+        if (part.thought !== true && typeof part.text === 'string' && part.text) {
+          allText.push(part.text);
+        }
+      }
+
+      const fcParts = rawParts.filter((p) => p.functionCall);
       if (fcParts.length === 0) {
         stopReason = 'stop';
         break;
       }
 
       toolCalls = fcParts.map((p) => {
-        const fc = (p as unknown as Record<string, unknown>).functionCall as { name: string; args?: Record<string, unknown> };
+        const fc = p.functionCall as { name: string; args?: Record<string, unknown> };
         return { id: nextCallId(), name: fc.name, input: (fc.args ?? {}) as Record<string, unknown> };
       });
       stopReason = 'tool_use';
 
-      // Build follow-up content echoing thoughtSignature back for thinking models.
-      // thoughtSignature is a top-level Part field (camelCase in JS SDK).
       contents.push({
         role: 'model',
         parts: fcParts.map((p) => {
-          const raw = p as unknown as Record<string, unknown>;
+          const raw = p;
           const fc = raw.functionCall as Record<string, unknown>;
           const sig = (typeof raw.thoughtSignature === 'string' ? raw.thoughtSignature : undefined)
                    ?? (typeof raw.thought_signature === 'string' ? raw.thought_signature : undefined);
@@ -221,13 +378,13 @@ export class GoogleGeminiProvider implements Provider {
       } as never);
 
       for (const p of fcParts) {
-        const fc = (p as unknown as Record<string, unknown>).functionCall as { name: string; args?: Record<string, unknown> };
+        const fc = (p as Record<string, unknown>).functionCall as { name: string; args?: Record<string, unknown> };
         contents.push({
           role: 'user',
           parts: [{
             functionResponse: {
               name: fc.name,
-              response: { result: fc.args },
+              response: { output: fc.args },
             },
           }],
         } as never);
@@ -316,6 +473,13 @@ export class GoogleGeminiProvider implements Provider {
         for (const c of m.content) {
           if (c.type === 'text') {
             parts.push({ text: c.text });
+          } else if (c.type === 'thinking') {
+            // Thinking blocks from turn loop are sent as regular text (Gemini
+            // uses accumulated text approach; thinking blocks are internal).
+            const tc = c as { thinking: string };
+            if (tc.thinking) {
+              parts.push({ text: tc.thinking });
+            }
           } else if (c.type === 'tool-use') {
             // thoughtSignature is a top-level Part field (camelCase in JS SDK)
             const fcPart: Record<string, unknown> = {

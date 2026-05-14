@@ -1435,7 +1435,6 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
     setStatus('working');
 
     let assistantText = '';
-    let thinkingText = '';
     toolGroupIndexRef.current = null;
 
     const unsubs = [
@@ -1485,21 +1484,20 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
       }),
       loop.eventBus.subscribe('thinking-delta', (e: Event) => {
         if (e.type !== 'thinking-delta') return;
-        thinkingText += e.text;
         setChannelMessages((prev) => {
           const chMsgs = prev[targetChannel] || [];
           const last = chMsgs[chMsgs.length - 1];
           if (last && last.role === 'thinking') {
-            return { ...prev, [targetChannel]: [...chMsgs.slice(0, -1), { role: 'thinking' as const, content: thinkingText }] };
+            return { ...prev, [targetChannel]: [...chMsgs.slice(0, -1), { role: 'thinking' as const, content: last.content + e.text }] };
           }
-          return { ...prev, [targetChannel]: [...chMsgs, { role: 'thinking' as const, content: thinkingText }] };
+          return { ...prev, [targetChannel]: [...chMsgs, { role: 'thinking' as const, content: e.text }] };
         });
         setMessages((prev) => {
           const last = prev[prev.length - 1];
           if (last && last.role === 'thinking') {
-            return [...prev.slice(0, -1), { role: 'thinking' as const, content: thinkingText }];
+            return [...prev.slice(0, -1), { role: 'thinking' as const, content: last.content + e.text }];
           }
-          return [...prev, { role: 'thinking' as const, content: thinkingText }];
+          return [...prev, { role: 'thinking' as const, content: e.text }];
         });
       }),
       loop.eventBus.subscribe('session-start', (e: Event) => {

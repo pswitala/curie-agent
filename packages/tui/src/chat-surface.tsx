@@ -134,7 +134,7 @@ export function ChatSurface({
   const [effortIndex, setEffortIndex] = useState(0);
   const [modePickerOpen, setModePickerOpen] = useState(false);
   const [modeIndex, setModeIndex] = useState(0);
-  // Thinking toggle: Set of message indices that are expanded.
+  // Thinking toggle: Set of message indices that are expanded (collapsed by default).
   const [expandedThinking, setExpandedThinking] = useState<Set<number>>(new Set());
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -356,7 +356,6 @@ export function ChatSurface({
     if (char === 'o' && key.ctrl && currentTab === 'assistant' && !inputText) {
       setExpandedThinking((prev) => {
         const next = new Set(prev);
-        // Find the last thinking message index
         const lastThinking = displayMessages.map((m, i) => m.role === 'thinking' ? i : -1).filter(i => i >= 0).pop();
         if (lastThinking !== undefined && lastThinking >= 0) {
           if (next.has(lastThinking)) next.delete(lastThinking);

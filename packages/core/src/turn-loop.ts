@@ -149,6 +149,7 @@ export class TurnLoop {
     const messages: Message[] = [];
     let currentTurn = {
       assistantDeltas: [] as string[],
+      thinkingDeltas: [] as string[],
       toolCalls: [] as Array<{ toolCallId: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }>,
       toolResults: [] as Array<{ toolCallId: string; output: unknown }>,
     };
@@ -160,7 +161,7 @@ export class TurnLoop {
           messages.push(...this.buildTurnMessages(currentTurn));
         }
         messages.push({ role: 'user', content: event.text });
-        currentTurn = { assistantDeltas: [], toolCalls: [], toolResults: [] };
+        currentTurn = { assistantDeltas: [], thinkingDeltas: [], toolCalls: [], toolResults: [] };
         hasActiveTurn = true;
         continue;
       }
@@ -168,6 +169,8 @@ export class TurnLoop {
 
       if (event.type === 'assistant-delta') {
         currentTurn.assistantDeltas.push(event.text);
+      } else if (event.type === 'thinking-delta') {
+        currentTurn.thinkingDeltas.push(event.text);
       } else if (event.type === 'tool-call') {
         currentTurn.toolCalls.push({ toolCallId: event.toolCallId, name: event.name, input: event.input, thoughtSignature: event.thoughtSignature });
       } else if (event.type === 'tool-result') {
@@ -183,13 +186,17 @@ export class TurnLoop {
 
   private buildTurnMessages(turn: {
     assistantDeltas: string[];
+    thinkingDeltas: string[];
     toolCalls: Array<{ toolCallId: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }>;
     toolResults: Array<{ toolCallId: string; output: unknown }>;
   }): Message[] {
     const msgs: Message[] = [];
 
-    // Assistant message: text blocks + tool-use blocks
+    // Assistant message: thinking blocks + text blocks + tool-use blocks
     const assistantBlocks: AssistantBlock[] = [];
+    for (const text of turn.thinkingDeltas) {
+      assistantBlocks.push({ type: 'thinking', thinking: text, signature: '' });
+    }
     for (const text of turn.assistantDeltas) {
       assistantBlocks.push({ type: 'text', text });
     }
