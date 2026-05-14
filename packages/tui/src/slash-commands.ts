@@ -12,6 +12,9 @@ export interface SlashCommandContext {
   cwd: string;
   inputTokens?: number;
   outputTokens?: number;
+  /** Current context window token usage (after compaction). Falls back to inputTokens if not set. */
+  contextWindowInputTokens?: number;
+  contextWindowOutputTokens?: number;
   /** Message history for the current session (user, assistant, tool messages). */
   messages?: Message[];
   /** Channel message display data from the TUI (broader role set, includes tool-group and system). */
@@ -1044,13 +1047,13 @@ function handleContext(ctx: SlashCommandContext, args?: string): SlashCommandRes
         messages: loopMsgs,
         depth,
       },
-      message: `Compacting conversation (${depth} summary)...\nThe agent will process the summary and continue with a condensed context.`,
+      message: `Compacting conversation (${loopMsgs.length} messages)... This will use one AI turn to summarize your session. The agent will continue automatically.`,
     };
   }
 
   // Default: context window visual (unchanged behavior)
-  const input = ctx.inputTokens ?? 0;
-  const output = ctx.outputTokens ?? 0;
+  const input = ctx.contextWindowInputTokens ?? ctx.inputTokens ?? 0;
+  const output = ctx.contextWindowOutputTokens ?? ctx.outputTokens ?? 0;
   const model = ctx.model || 'unknown';
   const windowSize = ctx.settings.MODEL_CONTEXT_WINDOW ?? ctx.contextWindowSize ?? 200_000;
   const pct = input > 0 ? Math.min(100, Math.round((input / windowSize) * 100)) : 0;

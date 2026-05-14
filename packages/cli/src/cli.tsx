@@ -528,6 +528,13 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
   const [currentSystem, setCurrentSystem] = useState(system);
   const [inputTokens, setInputTokens] = useState<number | undefined>(undefined);
   const [outputTokens, setOutputTokens] = useState<number | undefined>(undefined);
+  // Keep refs in sync with state so applySlashResult (which has empty deps) reads current values
+  useEffect(() => {
+    contextWindowInputTokensRef.current = inputTokens;
+  }, [inputTokens]);
+  useEffect(() => {
+    contextWindowOutputTokensRef.current = outputTokens;
+  }, [outputTokens]);
   const [currentTab, setCurrentTab] = useState<'assistant' | 'stats' | 'projects' | 'agents' | 'channels'>('assistant');
   const [duration, setDuration] = useState('00:00:00');
   const [status, setStatus] = useState('idle');
@@ -536,6 +543,9 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
   // Persist TurnLoop messages across turns so slash commands can read them
   // even when loopRef.current is cleared (mode change, provider change, etc.)
   const sessionMessagesRef = useRef<Message[]>([]);
+  // Tracks current context window token usage (reduced after compaction)
+  const contextWindowInputTokensRef = useRef<number | undefined>(undefined);
+  const contextWindowOutputTokensRef = useRef<number | undefined>(undefined);
   const busyRef = useRef(false);
   const toolGroupIndexRef = useRef<number | null>(null);
   const planFileRef = useRef<string | null>(null);
@@ -973,6 +983,7 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
       }
 
        case 'compact': {
+        push(result.message!);
         const compact = result.compact!;
         const { messages, depth } = compact;
         const originalSystem = currentSystem;
@@ -994,57 +1005,20 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
           return '';
         }).join('\n');
 
-        const compactionPrompt = depth === 'brief'
-          ? `You are compacting a conversation between a user and an AI coding agent.
-Your job is to reduce the conversation to a single meaningful turn.
+        const compactionSystem = `You are a conversation compaction engine. Your ONLY job is to output a valid JSON array representing a condensed version of a conversation. You will NEVER write prose, summaries, or commentary. Your entire output must be parseable as a JSON array of Message objects.`;
 
-RULES:
-- Reduce to approximately 2-4 messages (1 user request + 1-3 assistant/tool responses)
-- Keep the FIRST user message (session intent)
-- Keep the LAST user message (current intent)
-- For assistant messages: keep only text that contains decisions, findings, or key facts
-- For tool calls: keep only tool name + brief input — no need for full output
-- For tool results: keep only if the output was critical to a decision (≤200 chars)
-
-OUTPUT FORMAT:
-Respond ONLY with a valid JSON array of Message objects. Use this exact format:
-
-[{"role":"user","content":"User message text"},
-{"role":"assistant","content":[{"type":"text","text":"Assistant response"}]},
-{"role":"assistant","content":[{"type":"tool-use","id":"tu_1","name":"Read","input":{"path":"main.py"}}]},
-{"role":"tool","toolUseId":"tu_1","content":"Tool output text"}]
-
-CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fences.`
-          : `You are compacting a conversation between a user and an AI coding agent.
-Your job is to reduce the conversation size while preserving all important context.
-
-RULES:
-- Reduce to approximately 50% of the original message count
-- Keep ALL user messages (they define the intent)
-- For assistant messages with tool calls: keep the tool name and a brief description of what it did, but truncate long outputs
-- For assistant text: keep full content unless very long (>200 chars), then summarize
-- For tool results: if >500 chars, keep the first 300 chars + "[truncated, N chars total]"
-- NEVER drop entire turns — always keep at least one response per user message
-
-OUTPUT FORMAT:
-Respond ONLY with a valid JSON array of Message objects. Use this exact format:
-
-[{"role":"user","content":"User message text"},
-{"role":"assistant","content":[{"type":"text","text":"Assistant response"}]},
-{"role":"assistant","content":[{"type":"thinking","thinking":"thinking text","signature":"sig"}]},
-{"role":"assistant","content":[{"type":"tool-use","id":"tu_1","name":"Read","input":{"path":"main.py"}}]},
-{"role":"tool","toolUseId":"tu_1","content":"Tool output text"}]
-
-Each message has: role, content (string for user/tool, array for assistant).
-Assistant blocks: {type:"text",text:"..."} | {type:"thinking",thinking:"...",signature:"..."} | {type:"tool-use",id:"...",name:"...",input:{...}}
-
-CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fences.`;
+        const compactionInstruction = depth === 'brief'
+          ? `REDUCE THIS CONVERSATION TO 2-4 MESSAGES. Keep only the first user request, the last user request, and 1-2 key assistant responses. Output ONLY a JSON array.`
+          : `REDUCE THIS CONVERSATION TO ~50% OF MESSAGES. Keep ALL user messages. Truncate long assistant text (>200 chars) and tool results (>300 chars). NEVER drop entire turns. Output ONLY a JSON array.`;
 
         try {
           const provider = streamProviderHolder.current;
           const completeResult = await provider.complete!({
-            messages: messages as any,
-            system: compactionPrompt,
+            messages: [
+              ...messages as any,
+              { role: 'user' as const, content: compactionInstruction },
+            ],
+            system: compactionSystem,
             tools: [],
             model: currentModel,
           });
@@ -1054,24 +1028,89 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
             return;
           }
 
-          // Try to extract JSON from the response (LLM may add explanation text)
-          let jsonStr = completeResult.text.trim();
-          const firstBracket = jsonStr.indexOf('[');
-          const lastBracket = jsonStr.lastIndexOf(']');
-          if (firstBracket >= 0 && lastBracket > firstBracket) {
-            jsonStr = jsonStr.slice(firstBracket, lastBracket + 1);
+          // Extract JSON from the LLM response using multiple strategies
+          let compactedMessages: Message[];
+
+          function extractJSON(text: string): string | null {
+            const trimmed = text.trim();
+
+            // Strategy 1: Try direct parse
+            try {
+              JSON.parse(trimmed);
+              return trimmed;
+            } catch { /* fall through */ }
+
+            // Strategy 2: Extract from markdown code fences
+            const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (fenceMatch) {
+              const candidate = fenceMatch[1]!.trim();
+              try {
+                JSON.parse(candidate);
+                return candidate;
+              } catch { /* fall through */ }
+            }
+
+            // Strategy 3: Find best bracket pair using depth tracking
+            let best: string | null = null;
+            for (let i = 0; i < text.length && (!best || best.length < 50); i++) {
+              if (text[i] !== '[') continue;
+              let depth = 0;
+              for (let j = i; j < text.length; j++) {
+                if (text[j] === '[') depth++;
+                if (text[j] === ']') depth--;
+                if (depth === 0) {
+                  const candidate = text.slice(i, j + 1);
+                  try {
+                    JSON.parse(candidate);
+                    best = candidate;
+                    break;
+                  } catch { /* continue searching */ }
+                }
+              }
+            }
+            return best;
           }
 
-          // Parse and validate the compacted messages
-          let compactedMessages: Message[];
+          const jsonStr = extractJSON(completeResult.text);
+          if (!jsonStr) {
+            const preview = completeResult.text.trim().slice(0, 500);
+            push(`Compaction failed: could not parse compacted messages. The model did not return valid JSON. Response preview: "${preview}"`);
+            return;
+          }
+
           try {
-            compactedMessages = JSON.parse(jsonStr) as Message[];
-            if (!Array.isArray(compactedMessages) || compactedMessages.length === 0) {
+            const raw = JSON.parse(jsonStr);
+            if (!Array.isArray(raw) || raw.length === 0) {
               push('Compaction failed: invalid response format.');
               return;
             }
+             // Normalize: ensure assistant messages always have content as an array of AssistantBlock
+            // and tool messages use toolUseId (not name) as their identifier
+            const originalMsgCount = messages.length;
+            compactedMessages = raw.map((m: any) => {
+              if (m.role === 'assistant' && typeof m.content === 'string') {
+                return { ...m, content: [{ type: 'text' as const, text: m.content }] };
+              }
+              if (m.role === 'tool' && m.name && !m.toolUseId) {
+                const { name, ...rest } = m;
+                return { ...rest, toolUseId: name };
+              }
+              return m;
+            }) as Message[];
+
+            // Scale down context window tokens by compaction ratio (original vs compacted message count)
+            const currentInput = contextWindowInputTokensRef.current;
+            const currentOutput = contextWindowOutputTokensRef.current;
+            if (originalMsgCount > 0 && compactedMessages.length > 0 && currentInput != null) {
+              const ratio = compactedMessages.length / originalMsgCount;
+              contextWindowInputTokensRef.current = Math.round(currentInput * ratio);
+            }
+            if (originalMsgCount > 0 && compactedMessages.length > 0 && currentOutput != null) {
+              const ratio = compactedMessages.length / originalMsgCount;
+              contextWindowOutputTokensRef.current = Math.round(currentOutput * ratio);
+            }
           } catch {
-            push('Compaction failed: could not parse compacted messages. The model did not return valid JSON.');
+            push('Compaction failed: could not parse compacted messages.');
             return;
           }
 
@@ -1081,7 +1120,10 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
           // Build new system prompt: original system + compacted messages summary
           const compactedText = compactedMessages.map((m: Message) => {
             if (m.role === 'user') return `USER: ${m.content}`;
-            if (m.role === 'assistant') return `ASSISTANT: ${m.content.map((b: any) => (b.type === 'text' ? b.text : '')).join('\n')}`;
+            if (m.role === 'assistant') {
+              const blocks = Array.isArray(m.content) ? m.content : [{ type: 'text' as const, text: m.content }];
+              return `ASSISTANT: ${blocks.map((b: any) => (b.type === 'text' ? b.text : '')).join('\n')}`;
+            }
             if (m.role === 'tool') return `TOOL RESULT (${m.toolUseId}): ${m.content}`;
             return '';
           }).join('\n');
@@ -1126,6 +1168,8 @@ CRITICAL: Output ONLY the JSON array. No markdown, no explanation, no code fence
       cwd: currentCwd,
       inputTokens,
       outputTokens,
+      contextWindowInputTokens: contextWindowInputTokensRef.current,
+      contextWindowOutputTokens: contextWindowOutputTokensRef.current,
       messages: loopRef.current?.getMessages() ?? sessionMessagesRef.current,
       channelMessages: channelMessages[activeChannelId],
       cronManager: cronManagerRef.current ?? undefined,
