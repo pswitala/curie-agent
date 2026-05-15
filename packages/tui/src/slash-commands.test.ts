@@ -63,7 +63,7 @@ describe('handleSlashCommand', () => {
   it('returns help message with all commands', async () => {
     const result = await handleSlashCommand('help', '', mockContext);
     expect(result.type).toBe('message');
-    expect(result.message).toContain('Slash commands:');
+    expect(result.message).toContain('General');
     expect(result.message).toContain('/model');
     expect(result.message).toContain('/theme');
   });

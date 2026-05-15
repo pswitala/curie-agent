@@ -94,6 +94,7 @@ export interface SlashCommandDef {
   name: string;
   description: string;
   usage: string;
+  category: string;
 }
 
 
@@ -106,31 +107,39 @@ const THINKING_BUDGET_MAP: Record<string, number> = {
 };
 
 export const SLASH_COMMANDS: SlashCommandDef[] = [
-  { name: 'status', description: 'Show version, model, and account info', usage: '/status' },
-  { name: 'help', description: 'Show all available commands', usage: '/help' },
-  { name: 'debug', description: 'Toggle debug logging', usage: '/debug [on|off]' },
-  { name: 'statusline', description: 'Toggle status line display', usage: '/statusline [on|off]' },
-  { name: 'theme', description: 'Change color theme', usage: '/theme <name>' },
-  { name: 'memory', description: 'View memory file sizes or capture a memory', usage: '/memory [status|add]' },
-  { name: 'stats', description: 'Daily usage, sessions, streaks', usage: '/stats' },
-  { name: 'context', description: 'Visual grid showing context window usage, compaction, autocompaction', usage: '/context [auto|messages|compact [detailed|brief]]' },
-  { name: 'model', description: 'Switch AI model, set pricing or context window', usage: '/model <model|pricing in;out|window tokens>' },
-  { name: 'effort', description: 'Set reasoning effort level', usage: '/effort <low|medium|high|max|auto>' },
-  { name: 'mode', description: 'Set approval mode', usage: '/mode <manual|plan|auto-edit|full-auto|yolo>' },
-  { name: 'agent', description: 'Launch external AI agent', usage: '/agent <prompt>' },
-  { name: 'remind', description: 'Create a reminder', usage: '/remind <message at time>' },
-  { name: 'cron', description: 'Manage reminders', usage: '/cron <list|delete|clear>' },
-  { name: 'task', description: 'Schedule an agent task', usage: '/task <create|list|delete>' },
-  { name: 'channels', description: 'Manage Telegram channel config', usage: '/channels <list|set-bot-token|set-user-id|set-chat-id|disconnect>' },
-  { name: 'tools', description: 'View/set tool call limits per turn', usage: '/tools [tools_per_call [websearch_per_call]]' },
-  { name: 'websearch', description: 'View/set web search+fetch limit per turn', usage: '/websearch [count]' },
-  { name: 'mcp', description: 'Manage MCP server connections', usage: '/mcp <list|add|remove|reload>' },
-  { name: 'exit', description: 'Exit curie-agent', usage: '/exit' },
-  { name: 'provider', description: 'Switch AI provider', usage: '/provider <anthropic|openai|google|local|ollama|openrouter>' },
-  { name: 'heartbeat', description: 'Manage heartbeat cycle', usage: '/heartbeat <status|enable|disable|intraday|daily|weekly|monthly|dreaming|now>' },
-  { name: 'init', description: 'Run the setup wizard', usage: '/init' },
-  { name: 'snapshots', description: 'List recent git snapshots for recovery', usage: '/snapshots' },
-  { name: 'revert', description: 'Revert to a git snapshot (index, default: most recent)', usage: '/revert [index]' },
+  // General
+  { name: 'status', description: 'Show version, model, and account info', usage: '/status', category: 'General' },
+  { name: 'help', description: 'Show all available commands', usage: '/help', category: 'General' },
+  { name: 'init', description: 'Run the setup wizard', usage: '/init', category: 'General' },
+  { name: 'exit', description: 'Exit curie-agent', usage: '/exit', category: 'General' },
+  // Model & Provider
+  { name: 'provider', description: 'Switch AI provider', usage: '/provider <anthropic|openai|google|local|ollama|openrouter>', category: 'Model & Provider' },
+  { name: 'model', description: 'Switch AI model, set pricing or context window', usage: '/model <model|pricing in;out|window tokens>', category: 'Model & Provider' },
+  { name: 'effort', description: 'Set reasoning effort level', usage: '/effort <low|medium|high|max|auto>', category: 'Model & Provider' },
+  { name: 'mode', description: 'Set approval mode', usage: '/mode <manual|plan|auto-edit|full-auto|yolo>', category: 'Model & Provider' },
+  // Display
+  { name: 'theme', description: 'Change color theme', usage: '/theme <name>', category: 'Display' },
+  { name: 'debug', description: 'Toggle debug logging', usage: '/debug [on|off]', category: 'Display' },
+  { name: 'statusline', description: 'Toggle status line display', usage: '/statusline [on|off]', category: 'Display' },
+  // Knowledge
+  { name: 'memory', description: 'View memory file sizes or capture a memory', usage: '/memory [status|add]', category: 'Knowledge' },
+  { name: 'stats', description: 'Daily usage, sessions, streaks', usage: '/stats', category: 'Knowledge' },
+  { name: 'context', description: 'Visual grid showing context window usage, compaction, autocompaction', usage: '/context [auto|messages|compact [detailed|brief]]', category: 'Knowledge' },
+  // Automation
+  { name: 'remind', description: 'Create a reminder', usage: '/remind <message at time>', category: 'Automation' },
+  { name: 'cron', description: 'Manage reminders', usage: '/cron <list|delete|clear>', category: 'Automation' },
+  { name: 'task', description: 'Schedule an agent task', usage: '/task <create|list|delete>', category: 'Automation' },
+  { name: 'heartbeat', description: 'Manage heartbeat cycle', usage: '/heartbeat <status|enable|disable|intraday|daily|weekly|monthly|dreaming|now>', category: 'Automation' },
+  // Tools
+  { name: 'agent', description: 'Launch external AI agent', usage: '/agent <prompt>', category: 'Tools' },
+  { name: 'tools', description: 'View/set tool call limits per turn', usage: '/tools [tools_per_call [websearch_per_call]]', category: 'Tools' },
+  { name: 'websearch', description: 'View/set web search+fetch limit per turn', usage: '/websearch [count]', category: 'Tools' },
+  { name: 'mcp', description: 'Manage MCP server connections', usage: '/mcp <list|add|remove|reload>', category: 'Tools' },
+  // Communication
+  { name: 'channels', description: 'Manage Telegram channel config', usage: '/channels <list|set-bot-token|set-user-id|set-chat-id|disconnect>', category: 'Communication' },
+  // Safety
+  { name: 'snapshots', description: 'List recent git snapshots for recovery', usage: '/snapshots', category: 'Safety' },
+  { name: 'revert', description: 'Revert to a git snapshot (index, default: most recent)', usage: '/revert [index]', category: 'Safety' },
 ];
 
 export function parseSlashCommand(input: string): { command: string; args: string } | null {
@@ -306,10 +315,33 @@ function handleStatus(ctx: SlashCommandContext): SlashCommandResult {
 }
 
 function handleHelp(): SlashCommandResult {
-  const lines = ['Slash commands:'];
+  const lines: string[] = [];
+
+  // Group by category
+  const groups: Record<string, SlashCommandDef[]> = {};
   for (const cmd of SLASH_COMMANDS) {
-    lines.push(`  ${cmd.usage.padEnd(24)} ${cmd.description}`);
+    if (!groups[cmd.category]) groups[cmd.category] = [];
+    groups[cmd.category]!.push(cmd);
   }
+
+  // Calculate column width per group
+  const colWidth: Record<string, number> = {};
+  for (const [cat, cmds] of Object.entries(groups)) {
+    colWidth[cat] = Math.min(
+      Math.max(...cmds.map((c) => c.usage.length)) + 4,
+      40,
+    );
+  }
+
+  for (const [cat, cmds] of Object.entries(groups)) {
+    if (lines.length > 0) lines.push('');
+    lines.push(cat);
+    const w = colWidth[cat]!;
+    for (const cmd of cmds) {
+      lines.push(`  ${cmd.usage.padEnd(w)} ${cmd.description}`);
+    }
+  }
+
   return { type: 'message', message: lines.join('\n') };
 }
 

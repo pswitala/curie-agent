@@ -735,6 +735,8 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
       case 'update_model':
         setCurrentModel(result.model!);
         settingsMgr.current!.setProviderKey(settingsMgr.current!.getCurrentProvider(), 'model', result.model!);
+        loopRef.current = null;
+        channelTurnLoopsRef.current.delete(activeChannelId);
         push(result.message!);
         break;
 
@@ -760,6 +762,7 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
         // eslint-disable-next-line @typescript-eslint/no-use-before-define
         streamProviderHolder.current = createProvider(settings);
         loopRef.current = null;
+        channelTurnLoopsRef.current.delete(activeChannelId);
         setCurrentProvider(streamProviderHolder.current.name);
         push(result.message!);
         break;
