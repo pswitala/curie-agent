@@ -120,6 +120,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'agent', description: 'Launch external AI agent', usage: '/agent <prompt>' },
   { name: 'remind', description: 'Create a reminder', usage: '/remind <message at time>' },
   { name: 'cron', description: 'Manage reminders', usage: '/cron <list|delete|clear>' },
+  { name: 'task', description: 'Schedule an agent task', usage: '/task <create|list|delete>' },
   { name: 'channels', description: 'Manage Telegram channel config', usage: '/channels <list|set-bot-token|set-user-id|set-chat-id|disconnect>' },
   { name: 'tools', description: 'View/set tool call limits per turn', usage: '/tools [tools_per_call [websearch_per_call]]' },
   { name: 'websearch', description: 'View/set web search+fetch limit per turn', usage: '/websearch [count]' },
@@ -196,6 +197,9 @@ export async function handleSlashCommand(
 
     case 'cron':
       return handleCron(args, ctx);
+
+    case 'task':
+      return handleTask(args, ctx);
 
     case 'channels':
       return handleChannels(args, ctx);
@@ -558,7 +562,7 @@ function handleCron(args: string, ctx: SlashCommandContext): SlashCommandResult 
 
   switch (action) {
     case 'list': {
-      const statusFilter = ['pending', 'fired', 'cancelled'].includes(rest) ? (rest as 'pending' | 'fired' | 'cancelled') : undefined;
+      const statusFilter = ['pending', 'fired', 'cancelled', 'completed', 'failed', 'executing'].includes(rest) ? (rest as 'pending' | 'fired' | 'cancelled' | 'completed' | 'failed' | 'executing') : undefined;
       const tasks = cronManager.listReminders(statusFilter);
       if (tasks.length === 0) {
         return {
@@ -571,9 +575,18 @@ function handleCron(args: string, ctx: SlashCommandContext): SlashCommandResult 
   const lines = [`Reminders (${tasks.length}${statusFilter ? ` — ${statusFilter}` : ''}):`];
       for (const t of tasks) {
         const timeStr = new Date(t.scheduledAt).toLocaleString();
-        const statusEmoji = t.status === 'pending' ? '⏳' : t.status === 'fired' ? '✅' : '❌';
-        const label = t.schedule ? `[${scheduleLabel(t.schedule.type)}] ` : '';
-        lines.push(`  ${statusEmoji} ${label}${t.message}\n    Date: ${timeStr}\n    ID: ${t.id}`);
+        const statusEmoji = t.status === 'pending' ? '⏳'
+          : t.status === 'fired' ? '🔔'
+          : t.status === 'executing' ? '⚙️'
+          : t.status === 'completed' ? '✅'
+          : t.status === 'failed' ? '❌'
+          : '❌';
+        const typeLabel = t.type === 'heartbeat'
+          ? `Heartbeat: ${t.schedule ? `[${scheduleLabel(t.schedule.type)}] ` : ''}`
+          : t.type === 'task'
+            ? 'Task: '
+            : 'Reminder: ';
+        lines.push(`  ${statusEmoji} ${typeLabel}${t.message}\n    Date: ${timeStr}\n    ID: ${t.id}`);
       }
       return { type: 'message', message: lines.join('\n') };
     }
@@ -923,6 +936,8 @@ function formatChannelMessages(messages: Array<{ role: string; content: string; 
       : msg.role === 'system' ? 'System'
       : msg.role === 'decision' ? 'Decision'
       : msg.role === 'heartbeat' ? 'Heartbeat'
+      : msg.role === 'task' ? 'Task'
+      : msg.role === 'debug' ? 'Debug'
       : msg.role;
     const titlePrefix = msg.title ? `[${msg.title}] ` : '';
     const truncated = msg.content.length > 300
@@ -1380,4 +1395,90 @@ async function handleRevert(args: string, ctx: SlashCommandContext): Promise<Sla
     return { type: 'message', message: files ? `Reverted to snapshot ${target.sha.slice(0, 7)} (${target.label}) — ${files}` : `Reverted to snapshot ${target.sha.slice(0, 7)} (${target.label}).` };
   }
   return { type: 'message', message: result.error ?? 'Revert failed.' };
+}
+
+function handleTask(args: string, ctx: SlashCommandContext): SlashCommandResult {
+  const cronManager = ctx.cronManager;
+  if (!cronManager) {
+    return {
+      type: 'message',
+      message: 'Task service not available. Please restart the application.',
+    };
+  }
+
+  cronManager.load();
+
+  const parts = args.trim().split(/\s+/);
+  const action = parts[0]?.toLowerCase();
+  const rest = parts.slice(1).join(' ').trim();
+
+  switch (action) {
+    case 'create': {
+      if (!rest) {
+        return {
+          type: 'message',
+          message: 'Usage: /task create <instruction at time>\nExamples:\n  /task create "at 7:55 make a report about AI models"\n  /task create "tomorrow at 9am check abc.com and summarize"',
+        };
+      }
+      const { parseReminderTime } = require('../../core/src/reminder-parser.js');
+      const parsed = parseReminderTime(rest);
+      if (!parsed) {
+        return {
+          type: 'message',
+          message: `Could not parse time from: "${rest}".\nTry: /task create "at 7:55 do something"`,
+        };
+      }
+      const task = cronManager.createTask(parsed.message, parsed.scheduledAt);
+      const timeStr = new Date(task.scheduledAt).toLocaleString();
+      return {
+        type: 'message',
+        message: `Task scheduled:\nTime: ${timeStr}\nInstruction: ${parsed.message}\nID: ${task.id}`,
+      };
+    }
+
+    case 'list': {
+      const validStatuses = ['pending', 'executing', 'completed', 'failed', 'cancelled'] as const;
+      const statusFilter = validStatuses.includes(rest as any) ? rest : undefined;
+      const tasks = cronManager.listTasks(statusFilter as 'pending' | 'executing' | 'completed' | 'failed' | 'cancelled' | undefined);
+      if (tasks.length === 0) {
+        return {
+          type: 'message',
+          message: statusFilter
+            ? `No ${statusFilter} tasks.`
+            : 'No tasks yet.\nUse /task create to schedule one.',
+        };
+      }
+      const lines = [`Tasks (${tasks.length}${statusFilter ? ` — ${statusFilter}` : ''}):`];
+      for (const t of tasks) {
+        const timeStr = new Date(t.scheduledAt).toLocaleString();
+        const statusLabel = t.status === 'pending' ? 'PENDING'
+          : t.status === 'executing' ? 'RUNNING'
+          : t.status === 'completed' ? 'DONE'
+          : t.status === 'failed' ? 'FAILED'
+          : 'CANCELLED';
+        lines.push(`  [${statusLabel}] ${t.message}\n    Time: ${timeStr}\n    ID: ${t.id.slice(0, 8)}`);
+      }
+      return { type: 'message', message: lines.join('\n') };
+    }
+
+    case 'delete': {
+      if (!rest) {
+        return {
+          type: 'message',
+          message: 'Usage: /task delete <id>',
+        };
+      }
+      const result = cronManager.cancelReminder(rest);
+      if (!result) {
+        return { type: 'message', message: `No task found with ID: ${rest}` };
+      }
+      return { type: 'message', message: 'Task cancelled.' };
+    }
+
+    default:
+      return {
+        type: 'message',
+        message: 'Usage: /task <create|list|delete>\n  create <instruction at time>  — Schedule a task\n  list [status]                   — List tasks\n  delete <id>                     — Cancel a task',
+      };
+  }
 }

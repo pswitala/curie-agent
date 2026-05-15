@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 
 import { ChatSurface, handleSlashCommand, COLD_START_BANNER } from '@curie-agent/tui';
 import { getTheme } from '@curie-agent/render';
-import { TurnLoop, SettingsManager, DEFAULT_SETTINGS, CronManager, TelegramGateway, ChannelRegistry, ChannelRouter, HeartbeatExecutor, HeartbeatDelivery, pickNextSchedule, scheduleLabel, TokenMonitor, type CurieSettings, type ScheduleType, type Message, type TokenEvent } from '@curie-agent/core';
+import { TurnLoop, SettingsManager, DEFAULT_SETTINGS, CronManager, TelegramGateway, ChannelRegistry, ChannelRouter, HeartbeatExecutor, HeartbeatDelivery, TaskExecutor, pickNextSchedule, scheduleLabel, TokenMonitor, type CurieSettings, type ScheduleType, type Message, type TokenEvent } from '@curie-agent/core';
 import { listSnapshots, revertTo } from '@curie-agent/core/safety/snapshot.js';
 import { AnthropicProvider, OpenAIProvider, OllamaProvider, GoogleGeminiProvider, OpenRouterProvider } from '@curie-agent/providers';
 import { allTools, setGlobalCwd } from '@curie-agent/tools';
@@ -452,6 +452,10 @@ interface OnReminderCallback {
   (task: CronTask): void;
 }
 
+interface OnDebugCallback {
+  (message: string): void;
+}
+
 interface AppProps {
   provider: { name: string; stream: (args: any) => { iterable: AsyncIterable<any>; cancel(): void }; check: (prompt: string, args?: { model?: string; system?: string }) => Promise<string> };
   streamProviderHolder: { current: { name: string; stream: (args: any) => { iterable: AsyncIterable<any>; cancel(): void }; check: (prompt: string, args?: { model?: string; system?: string }) => Promise<string>; complete?: (args: any) => Promise<{ text: string; stopReason: string }> } };
@@ -464,6 +468,7 @@ interface AppProps {
   projects: ProjectEntry[];
   cronManager: CronManager;
   onReminderHolder: { current: OnReminderCallback | null };
+  onDebugHolder: { current: OnDebugCallback | null };
   telegramChatIdRef: React.MutableRefObject<string | null>;
   telegramSubmitRef: React.MutableRefObject<((text: string) => void) | null>;
   telegramGateway: InstanceType<typeof TelegramGateway> | null;
@@ -503,20 +508,20 @@ import { estimateCost, parseTieredPricing, selectTier } from './pricing.js';
 // Re-export pricing utilities from cli for backward compatibility (they come from core via pricing.js)
 export { estimateCost, parseTieredPricing, selectTier } from './pricing.js';
 
-function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeName, system, settings, projects, cronManager: externalCronManager, onReminderHolder, telegramChatIdRef, telegramSubmitRef, telegramGateway, channelRegistry, channelRouter, activeChannelRef, mcpToolsRef, mcpClientsRef, mcpFailedRef, onMcpReconnect, mcpNeedsReconnect, contextWindowSize: contextWindowSizeProp, resumeSession, resumeSessionId }: AppProps) {
+function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeName, system, settings, projects, cronManager: externalCronManager, onReminderHolder, onDebugHolder, telegramChatIdRef, telegramSubmitRef, telegramGateway, channelRegistry, channelRouter, activeChannelRef, mcpToolsRef, mcpClientsRef, mcpFailedRef, onMcpReconnect, mcpNeedsReconnect, contextWindowSize: contextWindowSizeProp, resumeSession, resumeSessionId }: AppProps) {
   const [messages, setMessages] = useState<
-    Array<{ role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'thinking'; content: string; title?: string }>
+    Array<{ role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'task' | 'debug' | 'thinking'; content: string; title?: string }>
   >([]);
   // Multi-channel: per-channel message storage (keyed by channel ID)
   // 'main' channel starts with the cold-start banner as the first message so it
   // scrolls naturally with the conversation rather than being pinned to a header.
-  const [channelMessages, setChannelMessages] = useState<Record<string, Array<{ role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'thinking'; content: string; title?: string }>>>({
+  const [channelMessages, setChannelMessages] = useState<Record<string, Array<{ role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'task' | 'debug' | 'thinking'; content: string; title?: string }>>>({
     main: [{ role: 'assistant', content: COLD_START_BANNER }],
   });
   // Queue for background messages (cron/reminder/heartbeat) that arrive
   // during an active turn — they must not displace the streaming assistant
   // message from the live rendering slot.
-  const backgroundMessageQueueRef = useRef<Array<{ role: 'system' | 'heartbeat'; content: string; title?: string }>>([]);
+  const backgroundMessageQueueRef = useRef<Array<{ role: 'system' | 'heartbeat' | 'task' | 'debug'; content: string; title?: string }>>([]);
   const [activeChannelId, setActiveChannelId] = useState<string>('main');
   // Per-channel TurnLoop instances
   const channelTurnLoopsRef = useRef<Map<string, TurnLoop>>(new Map());
@@ -653,7 +658,9 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
     const timeStr = new Date(task.scheduledAt).toLocaleString();
     const briefTask = task as CronTask & { heartbeatBrief?: string; executedScheduleType?: string };
     const msg = briefTask.heartbeatBrief
-      ? { role: 'heartbeat' as const, title: briefTask.executedScheduleType ? scheduleLabel(briefTask.executedScheduleType as ScheduleType) : (task.schedule ? scheduleLabel(task.schedule.type) : 'MANUAL'), content: briefTask.heartbeatBrief }
+      ? task.type === 'task'
+        ? { role: 'task' as const, title: task.message, content: briefTask.heartbeatBrief }
+        : { role: 'heartbeat' as const, title: briefTask.executedScheduleType ? scheduleLabel(briefTask.executedScheduleType as ScheduleType) : (task.schedule ? scheduleLabel(task.schedule.type) : 'MANUAL'), content: briefTask.heartbeatBrief }
       : { role: 'system' as const, content: `Curie reminder:\nDate: ${timeStr}\n${task.message}` };
 
     if (busyRef.current) {
@@ -666,6 +673,21 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
       return { ...prev, [activeChannelId]: [...ch, msg] };
     });
   };
+
+  // Register the debug callback — pushes debug messages to channel
+  onDebugHolder.current = currentDebug
+      ? (content: string) => {
+        const debugMsg = { role: 'debug' as const, content };
+        if (busyRef.current) {
+          backgroundMessageQueueRef.current.push(debugMsg);
+          return;
+        }
+        setChannelMessages(prev => {
+          const ch = prev[activeChannelId] || [];
+          return { ...prev, [activeChannelId]: [...ch, debugMsg] };
+        });
+      }
+      : null;
   const [agents, setAgents] = useState<Map<string, AgentEntry>>(new Map());
   const agentsRef = useRef<Map<string, AgentEntry>>(new Map());
   agentsRef.current = agents;
@@ -2297,6 +2319,7 @@ async function main() {
   // Mutable holder for the reminder notification callback.
   // Created outside the component since hooks can't be called in main().
   const onReminderHolder = { current: null as OnReminderCallback | null };
+  const onDebugHolder = { current: null as OnDebugCallback | null };
 
   // Ref to the submit function — the Telegram gateway uses this to inject messages into the turn loop
   const telegramSubmitRef = { current: null as ((text: string) => void) | null };
@@ -2601,6 +2624,62 @@ async function main() {
       return;
     }
 
+    // Handle scheduled tasks — agent executes custom instruction
+    if (task.type === 'task') {
+      const settings = settingsManager.load();
+
+      const mcpTools = mcpToolsRef.current;
+      const taskTools = mcpTools.length > 0
+        ? [...allTools, ...mcpTools]
+        : allTools;
+
+      const executor = new TaskExecutor({
+        provider: streamProviderHolder.current,
+        model: settings.model,
+        tools: taskTools,
+        cwd: cwd,
+        settings,
+        effort: 'auto' as any,
+        instruction: task.message,
+      });
+
+      try {
+        cronManager.updateTaskStatus(task.id, 'executing');
+        const result = await executor.execute();
+        const taskLines = [result.text];
+        if (result.errors.length > 0) {
+          taskLines.push('', 'Errors:');
+          for (const err of result.errors) {
+            taskLines.push(`- ${err}`);
+          }
+        }
+        const formatted = taskLines.join('\n');
+
+        // Deliver to Telegram if configured
+        const tgChatId = settings.channels?.chat_id || null;
+        const tgChat = tgChatId ?? telegramChatIdRef.current;
+        if (tgChat && telegramGateway) {
+          await telegramGateway.sendMessage(tgChat, formatted);
+        }
+
+        cronManager.updateTaskStatus(task.id, 'completed');
+
+        const briefTask = task as CronTask & { heartbeatBrief?: string; executedScheduleType?: string };
+        briefTask.heartbeatBrief = formatted;
+        briefTask.executedScheduleType = 'task' as any;
+        onReminderHolder.current?.(briefTask);
+      } catch (err) {
+        console.error('[Task] Execution failed:', err);
+        cronManager.updateTaskStatus(task.id, 'failed');
+        onReminderHolder.current?.({
+          ...task,
+          heartbeatBrief: `Task failed: ${err instanceof Error ? err.message : String(err)}`,
+          executedScheduleType: 'task' as any,
+        } as CronTask & { heartbeatBrief?: string; executedScheduleType?: string });
+      }
+      return;
+    }
+
     // Original reminder handling
     const cb = onReminderHolder.current;
     if (cb) cb(task);
@@ -2612,7 +2691,7 @@ async function main() {
       const timeStr = new Date(task.scheduledAt).toLocaleString();
       telegramGateway.sendMessage(chatId, `Curie reminder:\nDate: ${timeStr}\n${task.message}`).catch(() => {});
     }
-  });
+  }, onDebugHolder);
 
   render(
     <App
@@ -2627,6 +2706,7 @@ async function main() {
       projects={claudeProjects}
       cronManager={cronManager}
       onReminderHolder={onReminderHolder}
+      onDebugHolder={onDebugHolder}
       telegramChatIdRef={telegramChatIdRef}
       telegramSubmitRef={telegramSubmitRef}
       telegramGateway={telegramGateway}

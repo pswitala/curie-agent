@@ -21,7 +21,7 @@ export interface SlashCommandInput {
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'thinking';
+  role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'task' | 'debug' | 'thinking';
   content: string;
   title?: string;
 }
@@ -577,6 +577,24 @@ export function ChatSurface({
         </>
       );
     }
+    if (msg.role === 'task') {
+      const lines = msg.content.split('\n');
+      return (
+        <>
+          <Box key={String(key) + '-title'} flexDirection="column" borderStyle="single" borderColor={primary} borderTop={false} borderRight={false} borderBottom={false} marginTop={1}>
+            <Text color={primary} bold>{' TASK: ' + (msg.title ?? '')}</Text>
+          </Box>
+          {lines.map((line, li) => (
+            <Box key={String(key) + '-' + li} flexDirection="column" borderStyle="single" borderColor={primary} borderTop={false} borderRight={false} borderBottom={false} paddingLeft={1}>
+              <Text color={fg}>{line}</Text>
+            </Box>
+          ))}
+          <Box key={String(key) + '-sep'} flexDirection="column" marginTop={1}>
+            <Text> </Text>
+          </Box>
+        </>
+      );
+    }
     if (msg.role === 'thinking') {
       const isExpanded = expandedThinking.has(key);
       const lines = msg.content.split('\n');
@@ -590,6 +608,24 @@ export function ChatSurface({
             <Text key={li} color={fg}>{'    ' + line}</Text>
           ))}
         </Box>
+      );
+    }
+      if (msg.role === 'debug') {
+      const lines = msg.content.split('\n');
+      return (
+        <>
+          <Box key={String(key) + '-title'} flexDirection="column" borderStyle="single" borderColor={muted} borderTop={false} borderRight={false} borderBottom={false} marginTop={1}>
+            <Text color={muted} bold>{' DEBUG: ' + (msg.title ?? '')}</Text>
+          </Box>
+          {lines.map((line, li) => (
+            <Box key={String(key) + '-' + li} flexDirection="column" borderStyle="single" borderColor={muted} borderTop={false} borderRight={false} borderBottom={false} paddingLeft={1}>
+              <Text color={muted}>{line}</Text>
+            </Box>
+          ))}
+          <Box key={String(key) + '-sep'} flexDirection="column" marginTop={1}>
+            <Text> </Text>
+          </Box>
+        </>
       );
     }
     if (msg.role === 'system') {

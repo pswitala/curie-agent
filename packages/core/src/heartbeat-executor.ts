@@ -27,7 +27,7 @@ export interface HeartbeatResult {
   errors: string[];
 }
 
-interface BatchResult {
+export interface BatchResult {
   text: string;
   toolCalls: number;
   sessionId: string;
@@ -39,7 +39,7 @@ interface BatchResult {
  * Wraps TurnLoop with yolo (auto-approve) mode and collects
  * text output, tool call count, and errors via EventBus subscriptions.
  */
-class BatchTurnLoop {
+export class BatchTurnLoop {
   private turnLoop: TurnLoop;
   private collectedText = '';
   private toolCallCount = 0;

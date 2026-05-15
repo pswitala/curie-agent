@@ -21,6 +21,9 @@ export const reminderTool = createTool(
         error: `Invalid datetime: "${input.scheduled_at}". Use ISO 8601 format (e.g. "2026-05-03T07:00:00Z").`,
       };
     }
+    // Reload from disk before creating so we don't overwrite
+    // status changes made by the CLI's CronManager instance.
+    CronManagerSingleton.load();
     const task = CronManagerSingleton.createReminder(input.message, scheduledAt);
     const timeStr = new Date(scheduledAt).toLocaleString();
     return {

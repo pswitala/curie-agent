@@ -9,9 +9,12 @@ export function scheduleLabel(type: ScheduleType): string {
   return type.toUpperCase(); // INTRADAY, DAILY, WEEKLY, MONTHLY
 }
 
+export type CronTaskType = 'reminder' | 'heartbeat' | 'task';
+export type CronTaskStatus = 'pending' | 'fired' | 'executing' | 'completed' | 'failed' | 'cancelled';
+
 export interface CronTask {
   id: string;
-  type: 'reminder' | 'heartbeat';
+  type: CronTaskType;
   scheduledAt: number;
   message: string;
   /** Schedule definition for heartbeat tasks. */
@@ -24,8 +27,10 @@ export interface CronTask {
     // dreaming: string = "H:MM" (24h)
     value: string;
   };
-  status: 'pending' | 'fired' | 'cancelled';
+  status: CronTaskStatus;
   createdAt: number;
+  /** Populated when a task finishes execution. */
+  completedAt?: number;
 }
 
 export interface CronFile {
@@ -61,6 +66,8 @@ function saveCronFile(data: CronFile, filePath?: string): void {
 }
 
 type ReminderCallback = (task: CronTask) => void | Promise<void>;
+type DebugCallback = (message: string) => void;
+interface DebugCallbackHolder { current: DebugCallback | null | undefined; }
 
 /** Parse "H:MM" into { hour, minute }. */
 function parseTime(value: string): { hour: number; minute: number } | null {
@@ -228,6 +235,7 @@ export class CronManager {
   private data: CronFile;
   private checkerTimer: ReturnType<typeof setInterval> | null = null;
   private onReminderFired: ReminderCallback | null = null;
+  private debugHolder: DebugCallbackHolder | null = null;
   private ttlMs: number;
   private filePath: string;
   /** Set of task IDs currently being executed (prevents re-firing). */
@@ -277,19 +285,51 @@ export class CronManager {
     return true;
   }
 
-  listReminders(filter?: 'pending' | 'fired' | 'cancelled'): CronTask[] {
+  listReminders(filter?: CronTaskStatus): CronTask[] {
     if (!filter) return [...this.data.tasks];
     return this.data.tasks.filter((t) => t.status === filter);
   }
 
   clearCompleted(): number {
     const before = this.data.tasks.length;
-    this.data.tasks = this.data.tasks.filter((t) => t.status !== 'fired');
+    this.data.tasks = this.data.tasks.filter(
+      (t) => t.status !== 'fired' && t.status !== 'completed' && t.status !== 'failed',
+    );
     const removed = before - this.data.tasks.length;
     if (removed > 0) {
       this.save();
     }
     return removed;
+  }
+
+  createTask(message: string, scheduledAt: number): CronTask {
+    const task: CronTask = {
+      id: crypto.randomUUID(),
+      type: 'task',
+      scheduledAt,
+      message,
+      status: 'pending',
+      createdAt: Date.now(),
+    };
+    this.data.tasks.push(task);
+    this.save();
+    return task;
+  }
+
+  updateTaskStatus(id: string, status: 'executing' | 'completed' | 'failed'): boolean {
+    const task = this.data.tasks.find((t) => t.id === id);
+    if (!task) return false;
+    task.status = status;
+    if (status === 'completed' || status === 'failed') {
+      task.completedAt = Date.now();
+    }
+    this.save();
+    return true;
+  }
+
+  listTasks(filter?: 'pending' | 'executing' | 'completed' | 'failed' | 'cancelled'): CronTask[] {
+    if (!filter) return this.data.tasks.filter((t) => t.type === 'task');
+    return this.data.tasks.filter((t) => t.type === 'task' && t.status === filter);
   }
 
   /** Remove fired/cancelled tasks older than the cutoff. Pending tasks always kept. */
@@ -361,8 +401,9 @@ export class CronManager {
     }
   }
 
-  startChecker(intervalMs: number = 60_000, callback: ReminderCallback): void {
+  startChecker(intervalMs: number = 60_000, callback: ReminderCallback, debugHolder?: DebugCallbackHolder): void {
     this.onReminderFired = callback;
+    this.debugHolder = debugHolder || null;
     this.checkerTimer = setInterval(() => {
       this.data = loadCronFile();
       this.pruneOld(Date.now() - this.ttlMs);
@@ -399,13 +440,21 @@ export class CronManager {
         this.save();
 
         const timeLabel = new Date(now).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-        const taskLabel = isHeartbeat && task.schedule ? `[${scheduleLabel(task.schedule.type)}]` : '';
-        console.log(`[CronManager] Reminder started at ${timeLabel}: ${taskLabel} ${task.message}`);
+        const taskLabel = isHeartbeat && task.schedule
+          ? `[${scheduleLabel(task.schedule.type)}]`
+          : task.type === 'task' ? '[TASK]' : '';
+        const startedMsg = `[CronManager] Reminder started at ${timeLabel}: ${taskLabel} ${task.message}`;
+        console.log(startedMsg);
+        this.debugHolder?.current?.(startedMsg);
         this.executing.add(task.id);
         Promise.resolve(callback(task)).catch((err) => {
-          console.error('[CronManager] Reminder callback failed:', err);
+          const errMsg = `[CronManager] Reminder callback failed: ${err instanceof Error ? err.message : String(err)}`;
+          console.error(errMsg);
+          this.debugHolder?.current?.(errMsg);
         }).finally(() => {
-          console.log(`[CronManager] Reminder finished: ${taskLabel} ${task.message}`);
+          const finishedMsg = `[CronManager] Reminder finished: ${taskLabel} ${task.message}`;
+          console.log(finishedMsg);
+          this.debugHolder?.current?.(finishedMsg);
           this.executing.delete(task.id);
         });
       }

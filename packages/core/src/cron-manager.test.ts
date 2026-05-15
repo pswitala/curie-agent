@@ -175,4 +175,67 @@ describe('CronManager', () => {
     const fresh = new CronManager(1000);
     expect(fresh.listReminders().length).toBe(0);
   });
+
+  // Task tests
+  it('creates a task', () => {
+    const task = manager.createTask('check abc.com and summarize', Date.now() + 60_000);
+    expect(task.id).toBeTruthy();
+    expect(task.message).toBe('check abc.com and summarize');
+    expect(task.status).toBe('pending');
+    expect(task.type).toBe('task');
+  });
+
+  it('listTasks returns only tasks', () => {
+    manager.createReminder('a reminder', Date.now() + 60_000);
+    manager.createTask('a task', Date.now() + 60_000);
+    manager.createTask('another task', Date.now() + 120_000);
+    const tasks = manager.listTasks();
+    expect(tasks.length).toBe(2);
+    expect(tasks.every((t) => t.type === 'task')).toBe(true);
+  });
+
+  it('listTasks filters by status', () => {
+    manager.createTask('pending task', Date.now() + 60_000);
+    const completedTask = manager.createTask('completed task', Date.now() + 60_000);
+    manager.updateTaskStatus(completedTask.id, 'completed');
+    expect(manager.listTasks('pending').length).toBe(1);
+    expect(manager.listTasks('completed').length).toBe(1);
+    expect(manager.listTasks('failed').length).toBe(0);
+  });
+
+  it('updateTaskStatus transitions status and sets completedAt', () => {
+    const task = manager.createTask('test task', Date.now() + 60_000);
+    expect(task.completedAt).toBeUndefined();
+
+    manager.updateTaskStatus(task.id, 'executing');
+    expect(manager.listTasks('executing').length).toBe(1);
+    expect(manager.listTasks('executing')[0].completedAt).toBeUndefined();
+
+    manager.updateTaskStatus(task.id, 'completed');
+    const completed = manager.listTasks('completed')[0];
+    expect(completed.status).toBe('completed');
+    expect(completed.completedAt).toBeGreaterThan(Date.now() - 1000);
+  });
+
+  it('updateTaskStatus returns false for non-existent task', () => {
+    expect(manager.updateTaskStatus('non-existent', 'completed')).toBe(false);
+  });
+
+  it('clearCompleted also clears completed and failed tasks', () => {
+    manager.createReminder('stay reminder', Date.now() + 60_000);
+    const firedReminder = manager.createReminder('fired', Date.now() - 1000);
+    firedReminder.status = 'fired';
+    manager.save();
+
+    const completedTask = manager.createTask('completed', Date.now() + 60_000);
+    manager.updateTaskStatus(completedTask.id, 'completed');
+    const failedTask = manager.createTask('failed', Date.now() + 60_000);
+    manager.updateTaskStatus(failedTask.id, 'failed');
+
+    const cleared = manager.clearCompleted();
+    expect(cleared).toBe(3);
+    expect(manager.listTasks().length).toBe(0);
+    expect(manager.listReminders().length).toBe(1);
+    expect(manager.listReminders()[0].message).toBe('stay reminder');
+  });
 });
