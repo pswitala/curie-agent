@@ -4,6 +4,7 @@ import { lexer } from 'marked';
 
 interface MarkdownProps {
   value: string;
+  foreground?: string;
 }
 
 function Inline({ nodes }: { nodes: unknown[] }) {
@@ -92,7 +93,7 @@ function renderListContent(token: BlockToken): ReactNode {
   return <Inline nodes={[]} />;
 }
 
-function renderBlock(token: BlockToken, key: React.Key): ReactNode {
+function renderBlock(token: BlockToken, key: React.Key, fg: string): ReactNode {
   if (token.type === 'text') {
     // Block-level text token (e.g. inside list items) — use nested tokens for inline formatting
     const childNodes = token.tokens as unknown[] ?? [];
@@ -101,7 +102,7 @@ function renderBlock(token: BlockToken, key: React.Key): ReactNode {
       : String(token.text ?? '');
     return (
       <Box key={key} flexDirection="column">
-        <Text color="#a9b1d6">{content}</Text>
+        <Text color={fg}>{content}</Text>
       </Box>
     );
   }
@@ -114,7 +115,7 @@ function renderBlock(token: BlockToken, key: React.Key): ReactNode {
     return (
       <Box key={key} flexDirection="column" marginLeft={1} marginTop={1}>
         {lines.map((line, li) => (
-          <Text key={li} color="#a9b1d6">{line}</Text>
+          <Text key={li} color={fg}>{line}</Text>
         ))}
       </Box>
     );
@@ -130,7 +131,7 @@ function renderBlock(token: BlockToken, key: React.Key): ReactNode {
         </Box>
         <Box flexDirection="column" backgroundColor="#1a1b26" paddingX={1}>
           {text.split('\n').map((line: string, li: number) => (
-            <Text key={li} color="#a9b1d6">{line}\n</Text>
+            <Text key={li} color={fg}>{line}\n</Text>
           ))}
         </Box>
       </Box>
@@ -152,12 +153,12 @@ function renderBlock(token: BlockToken, key: React.Key): ReactNode {
         {innerTokens.map((inner, j) => {
           if (inner.type === 'paragraph' && inner.tokens) {
             return (
-              <Text key={j} color="#a9b1d6">
+              <Text key={j} color={fg}>
                 <Inline nodes={inner.tokens} />
               </Text>
             );
           }
-          return renderBlock(inner, `${key}-${j}`);
+          return renderBlock(inner, `${key}-${j}`, fg);
         })}
       </Box>
     );
@@ -172,7 +173,7 @@ function renderBlock(token: BlockToken, key: React.Key): ReactNode {
     }).join('\n');
     return (
       <Box key={key} flexDirection="column" marginLeft={1}>
-        <Text color="#a9b1d6">{lines}</Text>
+        <Text color={fg}>{lines}</Text>
       </Box>
     );
   }
@@ -184,7 +185,7 @@ function renderBlock(token: BlockToken, key: React.Key): ReactNode {
     return (
       <Box key={key} flexDirection="column" marginLeft={1} marginTop={1}>
         <Text bold>{prefix}</Text>
-        <Text bold color="#a9b1d6">
+        <Text bold color={fg}>
           <Inline nodes={tokens} />
         </Text>
       </Box>
@@ -194,7 +195,7 @@ function renderBlock(token: BlockToken, key: React.Key): ReactNode {
   return null;
 }
 
-export function Markdown({ value }: MarkdownProps) {
+export function Markdown({ value, foreground = '#a9b1d6' }: MarkdownProps) {
   const trimmed = useMemo(() => value.trimEnd(), [value]);
 
   if (!trimmed) {
@@ -203,8 +204,8 @@ export function Markdown({ value }: MarkdownProps) {
 
   const blocks = useMemo(() => {
     const tokens = lexer(trimmed);
-    return tokens.map((token, i) => renderBlock(token as BlockToken, i));
-  }, [trimmed]);
+    return tokens.map((token, i) => renderBlock(token as BlockToken, i, foreground));
+  }, [trimmed, foreground]);
 
   return <>{blocks}</>;
 }

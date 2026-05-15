@@ -645,7 +645,7 @@ export function ChatSurface({
     }
     return (
       <Box key={String(key)} flexDirection="column" marginLeft={1}>
-        <Markdown value={msg.content} />
+        <Markdown value={msg.content} foreground={fg} />
       </Box>
     );
   };
