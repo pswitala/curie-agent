@@ -23,3 +23,5 @@ export type { ScheduleType, CronTask } from './cron-manager.js';
 export { pickNextSchedule, scheduleLabel } from './cron-manager.js';
 export { HeartbeatDelivery } from './heartbeat-delivery.js';
 export type { HeartbeatDeliveryConfig } from './heartbeat-delivery.js';
+export { TokenMonitor, parseTieredPricing, selectTier, estimateCost, type PriceTier } from './token-monitor.js';
+export type { TokenMonitorConfig, TokenEvent } from './token-monitor.js';

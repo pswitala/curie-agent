@@ -15,6 +15,8 @@ export {
   SessionStopEvent,
   HookEvent,
   StatusEvent,
+  SessionResumedEvent,
+  ContextWarningEvent,
 } from './event-schemas.js';
 export type { Event } from './event-schemas.js';
 

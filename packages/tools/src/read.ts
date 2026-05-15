@@ -19,8 +19,8 @@ export const readTool = createTool(
     const filePath = path.resolve(ctx.cwd, expandPath(input.file_path));
 
     // Safety: refuse reads outside allowed directories (project cwd + user allowlist).
-    if (ctx.settings.SAFETY_PATH_GUARD !== 'off') {
-      const allowlist = parseAllowlist(ctx.settings.SAFETY_PATH_ALLOWLIST ?? '');
+    if (ctx.settings.safety?.path_guard !== 'off') {
+      const allowlist = parseAllowlist(ctx.settings.safety?.path_allowlist ?? '');
       if (!isPathAllowed(filePath, ctx.cwd, allowlist)) {
         return { output: null, error: 'PathGuard: read blocked — path is outside allowed directories' };
       }

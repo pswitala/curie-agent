@@ -42,11 +42,15 @@ const mockContext: SlashCommandContext = {
     theme: 'tokyo-night',
     statusline: true,
     debug: false,
-    HEARTBEAT: 'off',
-    HEARTBEAT_INTRADAY: '',
-    HEARTBEAT_DAILY: '6:00',
-    HEARTBEAT_WEEKLY: 'monday@6:00',
-    HEARTBEAT_MONTHLY: '1@6:00',
+    current_provider: 'anthropic',
+    providers: {
+      anthropic: { model: 'claude-sonnet-4-6', model_cost: '', model_context_window: 200000 },
+    },
+    heartbeat: { schedule: 'off', intraday: '', daily: '6:00', weekly: 'monday@6:00', monthly: '1@6:00', dreaming: '2:00' },
+    channels: { bot_token: '', user_id: '', chat_id: '', allow_groups: false, tab_active: 'main' },
+    safety: { path_guard: 'on', path_allowlist: '', command_guard: 'on', snapshots: 'on' },
+    tools_per_call: 10,
+    websearch_per_call: 5,
   },
   version: '0.1.0',
   model: 'claude-sonnet-4-6',
@@ -475,8 +479,7 @@ describe('/channels', () => {
       ...baseCtx,
       settings: {
         ...baseCtx.settings,
-        TELEGRAM_BOT_TOKEN: '123456:ABC-DEF',
-        TELEGRAM_USER_ID: '42',
+        channels: { ...baseCtx.settings.channels, bot_token: '123456:ABC-DEF', user_id: '42' },
       },
     } as unknown as SlashCommandContext;
     const result = await handleSlashCommand('channels', 'list', ctx);
@@ -570,9 +573,7 @@ it('status with enabled settings shows yes and active schedule', async () => {
       ...baseCtx,
       settings: {
         ...baseCtx.settings,
-        HEARTBEAT: 'on',
-        HEARTBEAT_INTRADAY: '8:00,14:00',
-        HEARTBEAT_DAILY: '6:00',
+        heartbeat: { ...baseCtx.settings.heartbeat, schedule: 'on', intraday: '8:00,14:00', daily: '6:00' },
       },
     } as SlashCommandContext;
     const result = await handleSlashCommand('heartbeat', 'status', ctx);
@@ -593,7 +594,7 @@ it('status with enabled settings shows yes and active schedule', async () => {
     expect(result.type).toBe('notification');
     expect(result.notification!.type).toBe('heartbeat-set');
     const hb = result.notification as { type: 'heartbeat-set'; key: string };
-    expect(hb.key).toBe('HEARTBEAT_INTRADAY');
+    expect(hb.key).toBe('heartbeat.intraday');
     expect(hb.value).toBe('8:10,10:10,14:20');
   });
 
@@ -614,7 +615,7 @@ it('status with enabled settings shows yes and active schedule', async () => {
     expect(result.type).toBe('notification');
     expect(result.notification!.type).toBe('heartbeat-set');
     const hbDaily = result.notification as { type: 'heartbeat-set'; key: string };
-    expect(hbDaily.key).toBe('HEARTBEAT_DAILY');
+    expect(hbDaily.key).toBe('heartbeat.daily');
     expect(hbDaily.value).toBe('7:30');
   });
 
@@ -629,7 +630,7 @@ it('status with enabled settings shows yes and active schedule', async () => {
     expect(result.type).toBe('notification');
     expect(result.notification!.type).toBe('heartbeat-set');
     const hbWeekly = result.notification as { type: 'heartbeat-set'; key: string };
-    expect(hbWeekly.key).toBe('HEARTBEAT_WEEKLY');
+    expect(hbWeekly.key).toBe('heartbeat.weekly');
     expect(hbWeekly.value).toBe('monday@9:00');
   });
 
@@ -644,7 +645,7 @@ it('status with enabled settings shows yes and active schedule', async () => {
     expect(result.type).toBe('notification');
     expect(result.notification!.type).toBe('heartbeat-set');
     const hbMonthly = result.notification as { type: 'heartbeat-set'; key: string };
-    expect(hbMonthly.key).toBe('HEARTBEAT_MONTHLY');
+    expect(hbMonthly.key).toBe('heartbeat.monthly');
     expect(hbMonthly.value).toBe('15@6:00');
   });
 
@@ -676,11 +677,15 @@ describe('/context compact', () => {
       theme: 'tokyo-night',
       statusline: true,
       debug: false,
-      HEARTBEAT: 'off',
-      HEARTBEAT_INTRADAY: '',
-      HEARTBEAT_DAILY: '6:00',
-      HEARTBEAT_WEEKLY: 'monday@6:00',
-      HEARTBEAT_MONTHLY: '1@6:00',
+      current_provider: 'anthropic',
+      providers: {
+        anthropic: { model: 'claude-sonnet-4-6', model_cost: '', model_context_window: 200000 },
+      },
+      heartbeat: { schedule: 'off', intraday: '', daily: '6:00', weekly: 'monday@6:00', monthly: '1@6:00', dreaming: '2:00' },
+      channels: { bot_token: '', user_id: '', chat_id: '', allow_groups: false, tab_active: 'main' },
+      safety: { path_guard: 'on', path_allowlist: '', command_guard: 'on', snapshots: 'on' },
+      tools_per_call: 10,
+      websearch_per_call: 5,
     },
     version: '0.1.0',
     model: 'claude-sonnet-4-6',

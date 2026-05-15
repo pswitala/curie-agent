@@ -13,7 +13,8 @@ export type Event =
   | { type: 'session-stop'; id: string; reason: string; timestamp: number }
   | { type: 'hook'; id: string; phase: string; name: string; result?: string; error?: string; timestamp: number }
   | { type: 'status'; id: string; message: string; spinner?: boolean; timestamp: number }
-  | { type: 'session-resumed'; id: string; turnsRecovered: number; timestamp: number };
+  | { type: 'session-resumed'; id: string; turnsRecovered: number; timestamp: number }
+| { type: 'context-warning'; id: string; message: string; timestamp: number };
 
 export type EventType = Event['type'];
 

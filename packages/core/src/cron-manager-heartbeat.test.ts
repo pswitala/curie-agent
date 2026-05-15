@@ -1,5 +1,30 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { CronManager, computeNextFire, pickNextSchedule } from './cron-manager.js';
+import { existsSync, unlinkSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+
+const TEST_CRON_FILE = join(homedir(), '.curie-agent', 'cron-heartbeat-test.json');
+
+function backupCronFile(): string | null {
+  if (existsSync(TEST_CRON_FILE)) {
+    const content = readFileSync(TEST_CRON_FILE, 'utf-8');
+    writeFileSync(TEST_CRON_FILE + '.bak', content);
+    return content;
+  }
+  return null;
+}
+
+function restoreCronFile(backup: string | null): void {
+  if (backup !== null) {
+    writeFileSync(TEST_CRON_FILE, backup, 'utf-8');
+  } else if (existsSync(TEST_CRON_FILE)) {
+    unlinkSync(TEST_CRON_FILE);
+  }
+  if (existsSync(TEST_CRON_FILE + '.bak')) {
+    unlinkSync(TEST_CRON_FILE + '.bak');
+  }
+}
 
 describe('computeNextFire', () => {
   it('intraday fires at the next upcoming time in the list', () => {
@@ -94,7 +119,8 @@ describe('CronManager heartbeat tasks', () => {
   let manager: CronManager;
 
   beforeEach(() => {
-    manager = new CronManager();
+    backupCronFile();
+    manager = new CronManager(7 * 24 * 60 * 60 * 1000, TEST_CRON_FILE);
     manager.data.tasks = [];
     manager.save();
   });
@@ -102,6 +128,8 @@ describe('CronManager heartbeat tasks', () => {
   afterEach(() => {
     manager.stopChecker();
     manager.data.tasks = [];
+    manager.save();
+    restoreCronFile(null);
   });
 
   it('creates a heartbeat task with schedule', () => {
@@ -166,6 +194,33 @@ describe('CronManager heartbeat tasks', () => {
     manager.save();
     // Should not throw
     expect(() => manager.rescheduleFromSettings({ HEARTBEAT_DAILY: '6:00' })).not.toThrow();
+  });
+
+  it('fires heartbeat task when scheduledAt is in the past', (done) => {
+    const fixedNow = new Date('2026-05-04T10:00:00Z').getTime();
+    const task = manager.createHeartbeat('HB check', { type: 'daily', value: '6:00' });
+    // Force scheduledAt to the past so the checker fires immediately
+    task.scheduledAt = fixedNow - 1000;
+    manager.save();
+
+    let fired = false;
+    manager.startChecker(50, async (t) => {
+      if (t.type === 'heartbeat') {
+        fired = true;
+        expect(t.status).toBe('pending'); // heartbeats stay pending
+        // scheduledAt should have been updated to a future time by the checker
+        expect(t.scheduledAt).toBeGreaterThan(fixedNow);
+      }
+      manager.stopChecker();
+      done();
+    });
+
+    // Give the checker time to fire
+    setTimeout(() => {
+      manager.stopChecker();
+      expect(fired).toBe(true);
+      done();
+    }, 500);
   });
 });
 

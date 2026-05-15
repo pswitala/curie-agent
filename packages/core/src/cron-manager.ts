@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 export type ScheduleType = 'intraday' | 'daily' | 'weekly' | 'monthly' | 'dreaming';
 
@@ -36,10 +36,11 @@ export interface CronFile {
 const CRON_DIR = join(homedir(), '.curie-agent');
 const CRON_FILE = join(CRON_DIR, 'cron.json');
 
-function loadCronFile(): CronFile {
-  if (existsSync(CRON_FILE)) {
+function loadCronFile(filePath?: string): CronFile {
+  const file = filePath ?? CRON_FILE;
+  if (existsSync(file)) {
     try {
-      const parsed = JSON.parse(readFileSync(CRON_FILE, 'utf-8')) as unknown;
+      const parsed = JSON.parse(readFileSync(file, 'utf-8')) as unknown;
       if (typeof parsed === 'object' && parsed !== null && 'tasks' in parsed && Array.isArray((parsed as CronFile).tasks)) {
         return parsed as CronFile;
       }
@@ -50,12 +51,13 @@ function loadCronFile(): CronFile {
   return { version: 1, tasks: [] };
 }
 
-function saveCronFile(data: CronFile): void {
-  if (!existsSync(CRON_DIR)) {
-    const { mkdirSync } = require('node:fs');
-    mkdirSync(CRON_DIR, { recursive: true });
+function saveCronFile(data: CronFile, filePath?: string): void {
+  const file = filePath ?? CRON_FILE;
+  const dir = filePath ? dirname(file) : CRON_DIR;
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
   }
-  writeFileSync(CRON_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  writeFileSync(file, JSON.stringify(data, null, 2), 'utf-8');
 }
 
 type ReminderCallback = (task: CronTask) => void | Promise<void>;
@@ -227,22 +229,30 @@ export class CronManager {
   private checkerTimer: ReturnType<typeof setInterval> | null = null;
   private onReminderFired: ReminderCallback | null = null;
   private ttlMs: number;
+  private filePath: string;
   /** Set of task IDs currently being executed (prevents re-firing). */
   private executing = new Set<string>();
 
-  constructor(ttlMs?: number) {
-    this.ttlMs = ttlMs ?? (7 * 24 * 60 * 60 * 1000); // 7 days default
-    this.data = loadCronFile();
+  constructor(ttlMsOrFilePath?: number | string, filePath?: string) {
+    // Support: new CronManager(), new CronManager(ttlMs), new CronManager(ttlMs, filePath)
+    if (typeof ttlMsOrFilePath === 'string') {
+      this.filePath = ttlMsOrFilePath;
+      this.ttlMs = 7 * 24 * 60 * 60 * 1000;
+    } else {
+      this.ttlMs = ttlMsOrFilePath ?? (7 * 24 * 60 * 60 * 1000);
+      this.filePath = filePath ?? CRON_FILE;
+    }
+    this.data = loadCronFile(this.filePath);
     this.pruneOld(Date.now() - this.ttlMs);
   }
 
   load(): CronFile {
-    this.data = loadCronFile();
+    this.data = loadCronFile(this.filePath);
     return this.data;
   }
 
   save(): void {
-    saveCronFile(this.data);
+    saveCronFile(this.data, this.filePath);
   }
 
   createReminder(message: string, scheduledAt: number): CronTask {
@@ -361,26 +371,43 @@ export class CronManager {
         (t) => t.status === 'pending' && t.scheduledAt <= now,
       );
 
+      const hasNonHeartbeatChanges = pending.some((t) => t.type !== 'heartbeat');
+
       for (const task of pending) {
         // Skip if this task is already executing (prevents re-firing
         // when the async callback takes longer than the interval).
         if (this.executing.has(task.id)) continue;
         const isHeartbeat = task.type === 'heartbeat';
+
+        // For heartbeats: update and persist scheduledAt BEFORE firing.
+        // The checker loads a fresh copy of the file each tick, so without
+        // persisting this update, the next tick would find the same task
+        // with the old (past) scheduledAt and fire it again — potentially
+        // while the async callback is still running from the previous tick.
+        if (isHeartbeat && task.schedule) {
+          task.scheduledAt = computeNextFire(task.schedule, now);
+        }
+
         // Mark reminders as fired so they don't re-fire.
-        // Leave heartbeats as pending — the caller will call
-        // rescheduleFromSettings() which searches for pending heartbeats.
+        // Leave heartbeats as pending — caller handles rescheduling.
         if (!isHeartbeat) {
           task.status = 'fired';
         }
+
+        // Persist changes before firing the async callback.
+        // This prevents the checker's next tick from finding stale tasks.
+        this.save();
+
+        const timeLabel = new Date(now).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        const taskLabel = isHeartbeat && task.schedule ? `[${scheduleLabel(task.schedule.type)}]` : '';
+        console.log(`[CronManager] Reminder started at ${timeLabel}: ${taskLabel} ${task.message}`);
         this.executing.add(task.id);
-        Promise.resolve(callback(task)).finally(() => {
+        Promise.resolve(callback(task)).catch((err) => {
+          console.error('[CronManager] Reminder callback failed:', err);
+        }).finally(() => {
+          console.log(`[CronManager] Reminder finished: ${taskLabel} ${task.message}`);
           this.executing.delete(task.id);
         });
-        // Don't re-schedule heartbeats here — let the caller (cli.tsx)
-        // call rescheduleFromSettings() with all four schedule settings
-      }
-      if (pending.length > 0) {
-        this.save();
       }
     }, intervalMs);
   }

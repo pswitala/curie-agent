@@ -110,6 +110,20 @@ export const StatusEvent = z.object({
   timestamp: z.number(),
 });
 
+export const SessionResumedEvent = z.object({
+  type: z.literal('session-resumed'),
+  id: z.string(),
+  turnsRecovered: z.number(),
+  timestamp: z.number(),
+});
+
+export const ContextWarningEvent = z.object({
+  type: z.literal('context-warning'),
+  id: z.string(),
+  message: z.string(),
+  timestamp: z.number(),
+});
+
 export const EventSchema = z.discriminatedUnion('type', [
   UserPromptEvent,
   AssistantDeltaEvent,
@@ -124,6 +138,8 @@ export const EventSchema = z.discriminatedUnion('type', [
   SessionStopEvent,
   HookEvent,
   StatusEvent,
+  SessionResumedEvent,
+  ContextWarningEvent,
 ]);
 
 export type Event = z.infer<typeof EventSchema>;

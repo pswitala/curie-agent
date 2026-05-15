@@ -16,11 +16,11 @@ export const writeTool = createTool(
   async (input, ctx: ToolContext) => {
     let filePath: string;
 
-    if (ctx.settings.SAFETY_PATH_GUARD !== 'off') {
+    if (ctx.settings.safety?.path_guard !== 'off') {
       const check = resolveSafePath(
         input.file_path,
         ctx.cwd,
-        parseAllowlist(ctx.settings.SAFETY_PATH_ALLOWLIST ?? ''),
+        parseAllowlist(ctx.settings.safety?.path_allowlist ?? ''),
       );
       if ('error' in check) return { output: null, error: check.error };
       filePath = check.path;

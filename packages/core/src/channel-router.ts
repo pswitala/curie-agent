@@ -37,7 +37,7 @@ export class ChannelRouter {
   onTelegramMessage(msg: TelegramMessage): RouteResult | null {
     const settings = this.settingsManager.get();
 
-    if (msg.isGroup && !settings.TELEGRAM_ALLOW_GROUPS) {
+    if (msg.isGroup && !settings.channels?.allow_groups) {
       return null;
     }
 

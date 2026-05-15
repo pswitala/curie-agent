@@ -29,42 +29,42 @@ export const PROVIDER_INFO: Record<ProviderName, {
   label: string;
   number: string;
   defaultModel: string;
-  apiKeySetting: string;
+  settingsKey: string;
   requiresKey: boolean;
 }> = {
   anthropic: {
     label: 'Anthropic',
     number: '1',
     defaultModel: 'claude-sonnet-4-6',
-    apiKeySetting: 'MODEL_API_KEY',
+    settingsKey: 'anthropic',
     requiresKey: true,
   },
   openai: {
     label: 'OpenAI',
     number: '2',
     defaultModel: 'gpt-4o',
-    apiKeySetting: 'OPENAI_API_KEY',
+    settingsKey: 'openai',
     requiresKey: true,
   },
   local: {
     label: 'Local (OpenAI-compatible)',
     number: '3',
     defaultModel: 'custom',
-    apiKeySetting: 'MODEL_API_KEY',
+    settingsKey: 'local',
     requiresKey: false,
   },
   openrouter: {
     label: 'OpenRouter',
     number: '4',
     defaultModel: 'anthropic/claude-sonnet-4-6',
-    apiKeySetting: 'OPENROUTER_API_KEY',
+    settingsKey: 'openrouter',
     requiresKey: true,
   },
   ollama: {
     label: 'Ollama (Local)',
     number: '5',
     defaultModel: 'custom',
-    apiKeySetting: 'MODEL_API_KEY',
+    settingsKey: 'local',
     requiresKey: false,
   },
 };
@@ -544,7 +544,7 @@ export function isAlreadyInitialized(): boolean {
 }
 
 export function getExistingProvider(settings: CurieSettings): ProviderName | undefined {
-  const provider = settings.MODEL_PROVIDER?.toLowerCase();
+  const provider = settings.current_provider?.toLowerCase();
   if (provider && PROVIDER_INFO[provider as ProviderName]) {
     return provider as ProviderName;
   }

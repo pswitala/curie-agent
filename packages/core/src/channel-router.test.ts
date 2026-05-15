@@ -26,11 +26,7 @@ describe('ChannelRouter', () => {
       theme: 'tokyo-night',
       statusline: true,
       debug: false,
-      TELEGRAM_BOT_TOKEN: '',
-      TELEGRAM_USER_ID: '',
-      TELEGRAM_CHAT_ID: '',
-      TELEGRAM_ALLOW_GROUPS: false,
-      CHANNEL_TAB_ACTIVE: 'main',
+      channels: { bot_token: '', user_id: '', chat_id: '', allow_groups: false, tab_active: 'main' },
     };
     sentMessages = [];
     router = new ChannelRouter(
@@ -97,8 +93,8 @@ describe('ChannelRouter', () => {
     expect(found).toBeUndefined();
   });
 
-  it('should accept group messages when TELEGRAM_ALLOW_GROUPS is true', () => {
-    settings.TELEGRAM_ALLOW_GROUPS = true;
+  it('should accept group messages when channels.allow_groups is true', () => {
+    settings.channels.allow_groups = true;
     const result = router.onTelegramMessage({
       text: 'Hello group',
       chatId: '99999',
@@ -131,7 +127,7 @@ describe('ChannelRouter', () => {
   });
 
   it('should use chat title for group display name', () => {
-    settings.TELEGRAM_ALLOW_GROUPS = true;
+    settings.channels.allow_groups = true;
     const result = router.onTelegramMessage({
       text: 'Hello',
       chatId: '99999',

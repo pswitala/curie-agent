@@ -41,6 +41,7 @@ interface ChatSurfaceProps {
   inputTokens?: number;
   outputTokens?: number;
   contextWindowSize?: number;
+  contextFillPct?: number;
   project?: string;
   duration?: string;
   costUsd?: number;
@@ -87,6 +88,7 @@ export function ChatSurface({
   inputTokens = 0,
   outputTokens = 0,
   contextWindowSize = 200_000,
+  contextFillPct = 0,
   project = 'homepage-refactor-0422',
   duration = '00:00:00',
   costUsd = 0,
@@ -710,6 +712,10 @@ export function ChatSurface({
         costUsd={costUsd}
         activeTab={currentTab}
         theme={theme}
+        contextFillPct={contextFillPct}
+        contextWindowSize={contextWindowSize}
+        inputTokens={inputTokens}
+        outputTokens={outputTokens}
       />
     </Box>
   );

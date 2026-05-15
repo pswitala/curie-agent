@@ -1,10 +1,12 @@
 import type { CurieSettings } from '../../core/src/settings.js';
+import { SettingsManager } from '../../core/src/settings.js';
 import type { Message } from '../../core/src/turn-loop.js';
 import type { TabId } from './tab-bar.js';
 import { CronManager, pickNextSchedule, scheduleLabel } from '@curie-agent/core';
 
 export interface SlashCommandContext {
   settings: CurieSettings;
+  settingsMgr?: SettingsManager;
   version: string;
   model: string;
   provider: string;
@@ -62,7 +64,7 @@ export interface SlashCommandResult {
     enabled?: boolean;
   } | {
     type: 'heartbeat-set';
-    key: 'HEARTBEAT_INTRADAY' | 'HEARTBEAT_DAILY' | 'HEARTBEAT_WEEKLY' | 'HEARTBEAT_MONTHLY' | 'HEARTBEAT_DREAMING';
+    key: 'heartbeat.intraday' | 'heartbeat.daily' | 'heartbeat.weekly' | 'heartbeat.monthly' | 'heartbeat.dreaming';
     value: string;
   } | {
     type: 'heartbeat-now';
@@ -111,7 +113,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'theme', description: 'Change color theme', usage: '/theme <name>' },
   { name: 'memory', description: 'View memory file sizes or capture a memory', usage: '/memory [status|add]' },
   { name: 'stats', description: 'Daily usage, sessions, streaks', usage: '/stats' },
-  { name: 'context', description: 'Visual grid showing context window usage', usage: '/context [messages|compact [detailed|brief]]' },
+  { name: 'context', description: 'Visual grid showing context window usage, compaction, autocompaction', usage: '/context [auto|messages|compact [detailed|brief]]' },
   { name: 'model', description: 'Switch AI model, set pricing or context window', usage: '/model <model|pricing in;out|window tokens>' },
   { name: 'effort', description: 'Set reasoning effort level', usage: '/effort <low|medium|high|max|auto>' },
   { name: 'mode', description: 'Set approval mode', usage: '/mode <manual|plan|auto-edit|full-auto|yolo>' },
@@ -278,8 +280,9 @@ function formatPricingDisplay(cost: string | undefined): string {
 }
 
 function handleStatus(ctx: SlashCommandContext): SlashCommandResult {
-  const toolsPerCall = ctx.settings.TOOLS_PER_CALL ?? 10;
-  const websearchPerCall = ctx.settings.WEBSEARCH_PER_CALL ?? 5;
+  const toolsPerCall = ctx.settings.tools_per_call ?? 10;
+  const websearchPerCall = ctx.settings.websearch_per_call ?? 5;
+  const modelCost = ctx.settings.providers?.[ctx.settings.current_provider as keyof typeof ctx.settings.providers]?.model_cost;
   const lines = [
     `curie-agent v${ctx.version}`,
     `Model: ${ctx.model}`,
@@ -291,8 +294,8 @@ function handleStatus(ctx: SlashCommandContext): SlashCommandResult {
       : null,
     `Tools per turn: ${toolsPerCall}`,
     `WebSearch per turn: ${websearchPerCall}`,
-    ctx.settings.MODEL_COST
-      ? formatPricingDisplay(ctx.settings.MODEL_COST)
+    modelCost
+      ? formatPricingDisplay(modelCost)
       : null,
   ].filter(Boolean);
   return { type: 'message', message: lines.join('\n') };
@@ -343,12 +346,13 @@ function handleTheme(args: string): SlashCommandResult {
 }
 
 function handleModel(args: string, settings?: CurieSettings): SlashCommandResult {
-  const MODEL_COST_DEFAULT = '(not set)';
   const WINDOW_DEFAULT = 200_000;
+  const getModelCost = (s?: CurieSettings) => s?.providers?.[s.current_provider as keyof typeof s.providers]?.model_cost;
+  const getWindow = (s?: CurieSettings) => s?.providers?.[s.current_provider as keyof typeof s.providers]?.model_context_window;
 
   if (!args) {
-    const cost = settings?.MODEL_COST ?? MODEL_COST_DEFAULT;
-    const window = settings?.MODEL_CONTEXT_WINDOW ?? WINDOW_DEFAULT;
+    const cost = getModelCost(settings) ?? '(not set)';
+    const window = getWindow(settings) ?? WINDOW_DEFAULT;
     return {
       type: 'message',
       message: `Usage: /model <model>\n  /model pricing [in;out]        — set custom per-million pricing (e.g. "0.5;2.0" or "0.5;2.0|200000<1.0;4.0")\n  /model window <tokens>       — set max context window\n\nCurrent: pricing=${cost}  window=${window} tokens`,
@@ -362,7 +366,7 @@ function handleModel(args: string, settings?: CurieSettings): SlashCommandResult
   switch (sub) {
     case 'pricing': {
       if (!rest) {
-        const cost = settings?.MODEL_COST ?? MODEL_COST_DEFAULT;
+        const cost = getModelCost(settings) ?? '(not set)';
         return { type: 'message', message: `Usage: /model pricing <in;out>\n  /model pricing <in;out|threshold<input;out>...\nExample: /model pricing 0.5;2.0\n  /model pricing 0.5;2.0|200000<1.0;4.0\nCurrent: ${cost}` };
       }
       const isValidPricing = validatePricingString(rest);
@@ -385,7 +389,7 @@ function handleModel(args: string, settings?: CurieSettings): SlashCommandResult
 
     case 'window': {
       if (!rest) {
-        const window = settings?.MODEL_CONTEXT_WINDOW ?? WINDOW_DEFAULT;
+        const window = getWindow(settings) ?? WINDOW_DEFAULT;
         return { type: 'message', message: `Usage: /model window <tokens>\nExample: /model window 1000000\nCurrent: ${window}` };
       }
       const windowSize = parseInt(rest, 10);
@@ -605,9 +609,9 @@ function handleChannels(args: string, ctx: SlashCommandContext): SlashCommandRes
 
   switch (sub) {
     case 'list': {
-      const token = ctx.settings.TELEGRAM_BOT_TOKEN;
-      const userId = ctx.settings.TELEGRAM_USER_ID;
-      const chatId = ctx.settings.TELEGRAM_CHAT_ID;
+      const token = ctx.settings.channels?.bot_token;
+      const userId = ctx.settings.channels?.user_id;
+      const chatId = ctx.settings.channels?.chat_id;
       const tokenMask = token && token.length > 8
         ? token.slice(0, 8) + '...'
         : token || '(not set)';
@@ -684,7 +688,7 @@ function handleMcp(args: string, ctx: SlashCommandContext): SlashCommandResult {
   // Parse current MCP servers from settings
   let configs: Record<string, unknown> = {};
   try {
-    const raw = ctx.settings.MCP_SERVERS as string | Record<string, unknown> | undefined;
+    const raw = ctx.settings.mcp_servers as string | Record<string, unknown> | undefined;
     if (typeof raw === 'string' && raw.trim().length > 0) {
       configs = JSON.parse(raw) as Record<string, unknown>;
     } else if (raw && typeof raw === 'object') {
@@ -780,7 +784,7 @@ function handleMcp(args: string, ctx: SlashCommandContext): SlashCommandResult {
       if (Object.keys(env).length > 0) cfg.env = env;
 
       configs[id] = cfg;
-      ctx.settings.MCP_SERVERS = configs;
+      ctx.settings.mcp_servers = configs;
 
       return { type: 'update_mcp', mcpServerId: id, mcpServers: JSON.stringify(configs, null, 2), message: `Added MCP server "${id}":\n\n${JSON.stringify(configs, null, 2)}\n\nRun /mcp reload to connect.` };
     }
@@ -796,7 +800,7 @@ function handleMcp(args: string, ctx: SlashCommandContext): SlashCommandResult {
         return { type: 'message', message: `No MCP server found with ID: ${rest}` };
       }
       delete configs[rest];
-          ctx.settings.MCP_SERVERS = configs;
+          ctx.settings.mcp_servers = configs;
       return { type: 'update_mcp', mcpServerId: rest, message: `Removed MCP server "${rest}". Run /mcp reload to apply.` };
     }
 
@@ -813,8 +817,8 @@ function handleMcp(args: string, ctx: SlashCommandContext): SlashCommandResult {
 }
 
 function handleTools(args: string, settings: CurieSettings): SlashCommandResult {
-  const toolsPerCall = settings.TOOLS_PER_CALL ?? 10;
-  const websearchPerCall = settings.WEBSEARCH_PER_CALL ?? 5;
+  const toolsPerCall = settings.tools_per_call ?? 10;
+  const websearchPerCall = settings.websearch_per_call ?? 5;
 
   if (!args.trim()) {
     return {
@@ -847,7 +851,7 @@ function handleTools(args: string, settings: CurieSettings): SlashCommandResult 
 }
 
 function handleWebsearch(args: string, settings: CurieSettings): SlashCommandResult {
-  const websearchPerCall = settings.WEBSEARCH_PER_CALL ?? 5;
+  const websearchPerCall = settings.websearch_per_call ?? 5;
 
   if (!args.trim()) {
     return {
@@ -1051,11 +1055,81 @@ function handleContext(ctx: SlashCommandContext, args?: string): SlashCommandRes
     };
   }
 
+  // /context auto — autocompaction settings and controls
+  if (sub && (sub === 'auto' || sub.startsWith('auto '))) {
+    const parts = sub.split(/\s+/);
+    const action = parts[0]?.toLowerCase() ?? 'auto';
+    const arg1 = parts[1]?.toLowerCase();
+    const arg2 = parts[2];
+    const s = ctx.settings;
+
+    if (action === 'auto' && !arg1) {
+      // Show current settings
+      const lines = [
+        'Autocompaction Settings:',
+        `  Enabled: ${s.auto_compact?.enabled ?? 'on'}`,
+        `  Context fill threshold: ${s.auto_compact?.threshold ?? 75}%`,
+        `  Warning threshold: ${s.auto_compact?.warn_threshold ?? 60}%`,
+        `  Forced compaction threshold: ${s.auto_compact?.forced_threshold ?? 85}%`,
+        `  Pricing tier warning: ${s.pricing_tier_warn ?? 'on'}`,
+        '',
+        'Usage:',
+        '  /context auto on/off         — enable or disable autocompaction',
+        '  /context auto threshold <N>   — set compaction threshold (%)',
+        '  /context auto warn <N>        — set warning threshold (%)',
+        '  /context auto pricing on/off  — enable/disable pricing tier warnings',
+      ];
+      return { type: 'message', message: lines.join('\n') };
+    }
+
+    if (arg1 === 'on') {
+      ctx.settingsMgr?.update({ auto_compact: { ...s.auto_compact, enabled: 'on' } });
+      return { type: 'message', message: 'Autocompaction enabled.' };
+    }
+
+    if (arg1 === 'off') {
+      ctx.settingsMgr?.update({ auto_compact: { ...s.auto_compact, enabled: 'off' } });
+      return { type: 'message', message: 'Autocompaction disabled.' };
+    }
+
+    if (arg1 === 'threshold' && arg2) {
+      const pct = parseInt(arg2, 10);
+      if (isNaN(pct) || pct < 10 || pct > 99) {
+        return { type: 'message', message: 'Invalid threshold. Use a value between 10 and 99.' };
+      }
+      ctx.settingsMgr?.update({ auto_compact: { ...s.auto_compact, threshold: pct } });
+      return { type: 'message', message: `Compaction threshold set to ${pct}%.` };
+    }
+
+    if (arg1 === 'warn' && arg2) {
+      const pct = parseInt(arg2, 10);
+      if (isNaN(pct) || pct < 5 || pct > 95) {
+        return { type: 'message', message: 'Invalid warning threshold. Use a value between 5 and 95.' };
+      }
+      ctx.settingsMgr?.update({ auto_compact: { ...s.auto_compact, warn_threshold: pct } });
+      return { type: 'message', message: `Warning threshold set to ${pct}%.` };
+    }
+
+    if (arg1 === 'pricing') {
+      if (arg2 === 'on') {
+        ctx.settingsMgr?.update({ pricing_tier_warn: 'on' });
+        return { type: 'message', message: 'Pricing tier warnings enabled.' };
+      }
+      if (arg2 === 'off') {
+        ctx.settingsMgr?.update({ pricing_tier_warn: 'off' });
+        return { type: 'message', message: 'Pricing tier warnings disabled.' };
+      }
+      return { type: 'message', message: 'Usage: /context auto pricing on/off' };
+    }
+
+    return { type: 'message', message: 'Usage: /context auto [on|off|threshold N|warn N|pricing on/off]\nRun "/context auto" without arguments to see current settings.' };
+  }
+
   // Default: context window visual (unchanged behavior)
   const input = ctx.contextWindowInputTokens ?? ctx.inputTokens ?? 0;
   const output = ctx.contextWindowOutputTokens ?? ctx.outputTokens ?? 0;
   const model = ctx.model || 'unknown';
-  const windowSize = ctx.settings.MODEL_CONTEXT_WINDOW ?? ctx.contextWindowSize ?? 200_000;
+  const windowSize = ctx.settings.providers?.[ctx.settings.current_provider as keyof typeof ctx.settings.providers]?.model_context_window ?? ctx.contextWindowSize ?? 200_000;
   const pct = input > 0 ? Math.min(100, Math.round((input / windowSize) * 100)) : 0;
   const filled = Math.round((pct / 100) * 24);
   const bar = '█'.repeat(filled) + '░'.repeat(24 - filled);
@@ -1087,7 +1161,7 @@ function handleProvider(args: string): SlashCommandResult {
   if (!args) {
     return {
       type: 'message',
-      message: `Usage: /provider <name>\nProviders: ${validProviders.join(', ')}\n\nCurrent settings:\n  anthropic: MODEL_API_KEY, MODEL_URL\n  openai: OPENAI_API_KEY, OPENAI_URL\n  google: GOOGLE_API_KEY, GOOGLE_URL\n  local: MODEL_URL, MODEL_API_KEY\n  ollama: MODEL_URL, MODEL_API_KEY\n  openrouter: OPENROUTER_URL, OPENROUTER_API_KEY`,
+      message: `Usage: /provider <name>\nProviders: ${validProviders.join(', ')}\n\nCurrent settings:\n  anthropic: providers.anthropic.api_key, providers.anthropic.url\n  openai: providers.openai.api_key, providers.openai.url\n  google: providers.google.api_key, providers.google.url\n  local: providers.local.url, providers.local.api_key\n  ollama: providers.local.url, providers.local.api_key\n  openrouter: providers.openrouter.api_key, providers.openrouter.url`,
     };
   }
   const provider = args.toLowerCase();
@@ -1108,12 +1182,12 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
   switch (sub) {
     case 'status':
     case '': {
-      const active = ctx.settings.HEARTBEAT === 'on';
-      const intraday = ctx.settings.HEARTBEAT_INTRADAY ?? '';
-      const daily = ctx.settings.HEARTBEAT_DAILY ?? '6:00';
-      const weekly = ctx.settings.HEARTBEAT_WEEKLY ?? 'monday@6:00';
-      const monthly = ctx.settings.HEARTBEAT_MONTHLY ?? '1@6:00';
-      const dreaming = ctx.settings.HEARTBEAT_DREAMING ?? '2:00';
+      const active = ctx.settings.heartbeat?.schedule === 'on';
+      const intraday = ctx.settings.heartbeat?.intraday ?? '';
+      const daily = ctx.settings.heartbeat?.daily ?? '6:00';
+      const weekly = ctx.settings.heartbeat?.weekly ?? 'monday@6:00';
+      const monthly = ctx.settings.heartbeat?.monthly ?? '1@6:00';
+      const dreaming = ctx.settings.heartbeat?.dreaming ?? '2:00';
       const intradayDisplay = intraday ? intraday.split(',').map((s) => s.trim()).join(', ') : '(not set)';
       const picked = pickNextSchedule({ HEARTBEAT_INTRADAY: intraday, HEARTBEAT_DAILY: daily, HEARTBEAT_WEEKLY: weekly, HEARTBEAT_MONTHLY: monthly, HEARTBEAT_DREAMING: dreaming });
       const activeSchedule = picked ? `${picked.type} (${picked.value})` : '(none configured)';
@@ -1133,7 +1207,7 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
 
     case 'intraday': {
       if (!rest) {
-        const current = ctx.settings.HEARTBEAT_INTRADAY ?? '';
+        const current = ctx.settings.heartbeat?.intraday ?? '';
         return {
           type: 'message',
           message: `Usage: /heartbeat intraday <H:MM,...>\nExample: /heartbeat intraday 8:10,10:10,14:20,16:20\nCurrent: ${current || '(not set)'}`,
@@ -1153,7 +1227,7 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
       const value = tokens.join(',');
       return {
         type: 'notification',
-        notification: { type: 'heartbeat-set', key: 'HEARTBEAT_INTRADAY', value },
+        notification: { type: 'heartbeat-set', key: 'heartbeat.intraday', value },
       };
     }
 
@@ -1161,7 +1235,7 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
       if (!rest) {
         return {
           type: 'message',
-          message: `Usage: /heartbeat daily <H:MM>\nExample: /heartbeat daily 6:00\nCurrent: ${ctx.settings.HEARTBEAT_DAILY ?? '6:00'}`,
+          message: `Usage: /heartbeat daily <H:MM>\nExample: /heartbeat daily 6:00\nCurrent: ${ctx.settings.heartbeat?.daily ?? '6:00'}`,
         };
       }
       if (!/^\d{1,2}:\d{2}$/.test(rest)) {
@@ -1175,7 +1249,7 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
       }
       return {
         type: 'notification',
-        notification: { type: 'heartbeat-set', key: 'HEARTBEAT_DAILY', value: rest },
+        notification: { type: 'heartbeat-set', key: 'heartbeat.daily', value: rest },
       };
     }
 
@@ -1183,7 +1257,7 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
       if (!rest) {
         return {
           type: 'message',
-          message: `Usage: /heartbeat weekly <day@H:MM>\nExample: /heartbeat weekly monday@6:00\nCurrent: ${ctx.settings.HEARTBEAT_WEEKLY ?? 'monday@6:00'}`,
+          message: `Usage: /heartbeat weekly <day@H:MM>\nExample: /heartbeat weekly monday@6:00\nCurrent: ${ctx.settings.heartbeat?.weekly ?? 'monday@6:00'}`,
         };
       }
       const atIdx = rest.indexOf('@');
@@ -1200,7 +1274,7 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
       }
       return {
         type: 'notification',
-        notification: { type: 'heartbeat-set', key: 'HEARTBEAT_WEEKLY', value: rest },
+        notification: { type: 'heartbeat-set', key: 'heartbeat.weekly', value: rest },
       };
     }
 
@@ -1208,7 +1282,7 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
       if (!rest) {
         return {
           type: 'message',
-          message: `Usage: /heartbeat monthly <D@H:MM>\nExample: /heartbeat monthly 1@6:00\nCurrent: ${ctx.settings.HEARTBEAT_MONTHLY ?? '1@6:00'}`,
+          message: `Usage: /heartbeat monthly <D@H:MM>\nExample: /heartbeat monthly 1@6:00\nCurrent: ${ctx.settings.heartbeat?.monthly ?? '1@6:00'}`,
         };
       }
       const atIdx = rest.indexOf('@');
@@ -1224,7 +1298,7 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
       }
       return {
         type: 'notification',
-        notification: { type: 'heartbeat-set', key: 'HEARTBEAT_MONTHLY', value: rest },
+        notification: { type: 'heartbeat-set', key: 'heartbeat.monthly', value: rest },
       };
     }
 
@@ -1232,7 +1306,7 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
       if (!rest) {
         return {
           type: 'message',
-          message: `Usage: /heartbeat dreaming <H:MM>\nExample: /heartbeat dreaming 2:00\nCurrent: ${ctx.settings.HEARTBEAT_DREAMING ?? '2:00'}`,
+          message: `Usage: /heartbeat dreaming <H:MM>\nExample: /heartbeat dreaming 2:00\nCurrent: ${ctx.settings.heartbeat?.dreaming ?? '2:00'}`,
         };
       }
       if (!/^\d{1,2}:\d{2}$/.test(rest)) {
@@ -1246,7 +1320,7 @@ function handleHeartbeat(args: string, ctx: SlashCommandContext): SlashCommandRe
       }
       return {
         type: 'notification',
-        notification: { type: 'heartbeat-set', key: 'HEARTBEAT_DREAMING', value: rest },
+        notification: { type: 'heartbeat-set', key: 'heartbeat.dreaming', value: rest },
       };
     }
 

@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 
 import { ChatSurface, handleSlashCommand, COLD_START_BANNER } from '@curie-agent/tui';
 import { getTheme } from '@curie-agent/render';
-import { TurnLoop, SettingsManager, DEFAULT_SETTINGS, CronManager, TelegramGateway, ChannelRegistry, ChannelRouter, HeartbeatExecutor, HeartbeatDelivery, pickNextSchedule, scheduleLabel, type CurieSettings, type ScheduleType, type Message } from '@curie-agent/core';
+import { TurnLoop, SettingsManager, DEFAULT_SETTINGS, CronManager, TelegramGateway, ChannelRegistry, ChannelRouter, HeartbeatExecutor, HeartbeatDelivery, pickNextSchedule, scheduleLabel, TokenMonitor, type CurieSettings, type ScheduleType, type Message, type TokenEvent } from '@curie-agent/core';
 import { listSnapshots, revertTo } from '@curie-agent/core/safety/snapshot.js';
 import { AnthropicProvider, OpenAIProvider, OllamaProvider, GoogleGeminiProvider, OpenRouterProvider } from '@curie-agent/providers';
 import { allTools, setGlobalCwd } from '@curie-agent/tools';
@@ -497,11 +497,13 @@ function formatDuration(ms: number): string {
   return `${h}:${m}:${s}`;
 }
 
+// Import pricing utilities (re-exported from core for backward compatibility)
 import { estimateCost, parseTieredPricing, selectTier } from './pricing.js';
 
-export { estimateCost, parseTieredPricing, selectTier };
+// Re-export pricing utilities from cli for backward compatibility (they come from core via pricing.js)
+export { estimateCost, parseTieredPricing, selectTier } from './pricing.js';
 
-function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeName, system, settings, projects, cronManager: externalCronManager, onReminderHolder, telegramChatIdRef, telegramSubmitRef, telegramGateway, channelRegistry, channelRouter, activeChannelRef, mcpToolsRef, mcpClientsRef, mcpFailedRef, onMcpReconnect, mcpNeedsReconnect, contextWindowSize, resumeSession, resumeSessionId }: AppProps) {
+function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeName, system, settings, projects, cronManager: externalCronManager, onReminderHolder, telegramChatIdRef, telegramSubmitRef, telegramGateway, channelRegistry, channelRouter, activeChannelRef, mcpToolsRef, mcpClientsRef, mcpFailedRef, onMcpReconnect, mcpNeedsReconnect, contextWindowSize: contextWindowSizeProp, resumeSession, resumeSessionId }: AppProps) {
   const [messages, setMessages] = useState<
     Array<{ role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'thinking'; content: string; title?: string }>
   >([]);
@@ -528,6 +530,18 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
   const [currentSystem, setCurrentSystem] = useState(system);
   const [inputTokens, setInputTokens] = useState<number | undefined>(undefined);
   const [outputTokens, setOutputTokens] = useState<number | undefined>(undefined);
+  // Cumulative token tracking for autocompaction
+  const cumulativeInputTokensRef = useRef<number>(0);
+  const contextFillPctRef = useRef<number>(0);
+  const autocompactCountRef = useRef<number>(0);
+  const [contextFillPct, setContextFillPct] = useState<number>(0);
+  // Context window size (reactive — updated when provider changes or user sets it)
+  const [contextWindowSize, setContextWindowSize] = useState<number>(
+    settings?.providers?.[settings.current_provider as keyof typeof settings.providers]?.model_context_window ??
+    contextWindowSizeProp ?? 200_000,
+  );
+  // Token monitor (created once per session)
+  const tokenMonitorRef = useRef<TokenMonitor | null>(null);
   // Keep refs in sync with state so applySlashResult (which has empty deps) reads current values
   useEffect(() => {
     contextWindowInputTokensRef.current = inputTokens;
@@ -574,6 +588,18 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
     settingsMgr.current = mgr;
   }
   const sessionIdRef = useRef<string | null>(null);
+  // Token monitor — initialized from settings, used for autocompaction + pricing warnings
+  if (!tokenMonitorRef.current) {
+    const s = settingsMgr.current!.get();
+    tokenMonitorRef.current = new TokenMonitor({
+      contextWindowSize: s.providers?.[s.current_provider as keyof typeof s.providers]?.model_context_window ?? 200_000,
+      thresholdPct: s.auto_compact?.threshold ?? 75,
+      warnThresholdPct: s.auto_compact?.warn_threshold ?? 60,
+      forcedThresholdPct: s.auto_compact?.forced_threshold ?? 85,
+      pricingTierWarn: s.pricing_tier_warn !== 'off',
+      model: s.providers?.[s.current_provider as keyof typeof s.providers]?.model,
+    });
+  }
   // CronManager instance — created externally, stored here for slash commands
   const cronManagerRef = useRef<CronManager | null>(externalCronManager);
   // TelegramGateway instance — passed from main(), used for response routing
@@ -686,24 +712,29 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
         break;
       case 'update_model':
         setCurrentModel(result.model!);
-        settingsMgr.current!.update({ model: result.model! });
+        settingsMgr.current!.setProviderKey(settingsMgr.current!.getCurrentProvider(), 'model', result.model!);
         push(result.message!);
         break;
 
       case 'update_model_cost':
-        settingsMgr.current!.update({ MODEL_COST: result.modelCost! });
+        settingsMgr.current!.setProviderKey(settingsMgr.current!.getCurrentProvider(), 'model_cost', result.modelCost!);
         push(result.message!);
         break;
 
       case 'update_context_window':
-        settingsMgr.current!.update({ MODEL_CONTEXT_WINDOW: result.contextWindow! });
+        settingsMgr.current!.setProviderKey(settingsMgr.current!.getCurrentProvider(), 'model_context_window', result.contextWindow!);
+        tokenMonitorRef.current?.setContextWindowSize(result.contextWindow!);
+        setContextWindowSize(result.contextWindow!);
+        loopRef.current = null;
         push(result.message!);
         break;
       case 'update_provider': {
         const newProvider = result.provider!;
-        settingsMgr.current!.update({ MODEL_PROVIDER: newProvider });
+        settingsMgr.current!.setCurrentProvider(newProvider);
         // Create new provider and swap into the holder
         const settings = settingsMgr.current!.get();
+        setCurrentModel(settings.model);
+        setContextWindowSize(settings.providers?.[newProvider as keyof typeof settings.providers]?.model_context_window ?? 200_000);
         // eslint-disable-next-line @typescript-eslint/no-use-before-define
         streamProviderHolder.current = createProvider(settings);
         loopRef.current = null;
@@ -713,7 +744,8 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
       }
       case 'update_init': {
         // Legacy: direct API key via /init <key>
-        settingsMgr.current!.update({ MODEL_API_KEY: result.apiKey! });
+        const prov = settingsMgr.current!.get().current_provider || 'anthropic';
+        settingsMgr.current!.setProviderKey(prov, 'api_key', result.apiKey!);
         const settings = settingsMgr.current!.get();
         streamProviderHolder.current = createProvider(settings);
         loopRef.current = null;
@@ -751,12 +783,12 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
         push(result.message!);
         break;
       case 'update_tools_per_call':
-        settingsMgr.current!.update({ TOOLS_PER_CALL: result.toolsPerCall!, WEBSEARCH_PER_CALL: result.websearchPerCall });
+        settingsMgr.current!.update({ tools_per_call: result.toolsPerCall!, websearch_per_call: result.websearchPerCall });
         loopRef.current = null;
         push(result.message!);
         break;
       case 'update_websearch_per_call':
-        settingsMgr.current!.update({ WEBSEARCH_PER_CALL: result.websearchPerCall! });
+        settingsMgr.current!.update({ websearch_per_call: result.websearchPerCall! });
         loopRef.current = null;
         push(result.message!);
         break;
@@ -765,7 +797,7 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
         // but that's a shallow copy from .get() — settingsMgr never sees it.
         // The mcpServers field on the result carries the JSON string to persist.
         if (result.mcpServers) {
-          settingsMgr.current!.update({ MCP_SERVERS: typeof result.mcpServers === 'string' ? JSON.parse(result.mcpServers) : result.mcpServers });
+          settingsMgr.current!.update({ mcp_servers: typeof result.mcpServers === 'string' ? JSON.parse(result.mcpServers) : result.mcpServers });
         }
         loopRef.current = null;
         if (mcpNeedsReconnect) mcpNeedsReconnect.current = true;
@@ -797,14 +829,14 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
         if (note.type === 'heartbeat') {
           if (note.enabled) {
             push('Heartbeat enabled. The agent will run on all configured schedules.');
-            settingsMgr.current!.update({ HEARTBEAT: 'on' });
+            settingsMgr.current!.update({ heartbeat: { ...settingsMgr.current!.get().heartbeat, schedule: 'on' } });
             const settings = settingsMgr.current!.get();
             const picked = pickNextSchedule({
-              HEARTBEAT_INTRADAY: settings.HEARTBEAT_INTRADAY,
-              HEARTBEAT_DAILY: settings.HEARTBEAT_DAILY,
-              HEARTBEAT_WEEKLY: settings.HEARTBEAT_WEEKLY,
-              HEARTBEAT_MONTHLY: settings.HEARTBEAT_MONTHLY,
-              HEARTBEAT_DREAMING: settings.HEARTBEAT_DREAMING,
+              HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
+              HEARTBEAT_DAILY: settings.heartbeat.daily,
+              HEARTBEAT_WEEKLY: settings.heartbeat.weekly,
+              HEARTBEAT_MONTHLY: settings.heartbeat.monthly,
+              HEARTBEAT_DREAMING: settings.heartbeat.dreaming,
             });
             const hasTask = cronManagerRef.current?.listReminders('pending').some((t) => t.type === 'heartbeat');
             if (picked && !hasTask) {
@@ -812,29 +844,40 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
             }
           } else {
             push('Heartbeat disabled.');
-            settingsMgr.current!.update({ HEARTBEAT: 'off' });
+            settingsMgr.current!.update({ heartbeat: { ...settingsMgr.current!.get().heartbeat, schedule: 'off' } });
           }
           break;
         }
 
         // Heartbeat schedule set
         if (note.type === 'heartbeat-set') {
-          settingsMgr.current!.update({ [note.key]: note.value });
+          // Map new key names to nested field names
+          const keyMap: Record<string, 'intraday' | 'daily' | 'weekly' | 'monthly' | 'dreaming'> = {
+            'heartbeat.intraday': 'intraday',
+            'heartbeat.daily': 'daily',
+            'heartbeat.weekly': 'weekly',
+            'heartbeat.monthly': 'monthly',
+            'heartbeat.dreaming': 'dreaming',
+          };
+          const nestedKey = keyMap[note.key];
+          if (nestedKey) {
+            settingsMgr.current!.update({ heartbeat: { ...settingsMgr.current!.get().heartbeat, [nestedKey]: note.value } });
+          }
           // Re-evaluate all four schedules to pick the next earliest
           const settings = settingsMgr.current!.get();
           cronManagerRef.current?.rescheduleFromSettings({
-            HEARTBEAT_INTRADAY: settings.HEARTBEAT_INTRADAY,
-            HEARTBEAT_DAILY: settings.HEARTBEAT_DAILY,
-            HEARTBEAT_WEEKLY: settings.HEARTBEAT_WEEKLY,
-            HEARTBEAT_MONTHLY: settings.HEARTBEAT_MONTHLY,
-            HEARTBEAT_DREAMING: settings.HEARTBEAT_DREAMING,
+            HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
+            HEARTBEAT_DAILY: settings.heartbeat.daily,
+            HEARTBEAT_WEEKLY: settings.heartbeat.weekly,
+            HEARTBEAT_MONTHLY: settings.heartbeat.monthly,
+            HEARTBEAT_DREAMING: settings.heartbeat.dreaming,
           });
           const scheduleLabel: Record<string, string> = {
-            HEARTBEAT_INTRADAY: `intraday: ${note.value}`,
-            HEARTBEAT_DAILY: `daily at ${note.value}`,
-            HEARTBEAT_WEEKLY: `weekly on ${note.value}`,
-            HEARTBEAT_MONTHLY: `monthly on day ${note.value}`,
-            HEARTBEAT_DREAMING: `dreaming at ${note.value}`,
+            'heartbeat.intraday': `intraday: ${note.value}`,
+            'heartbeat.daily': `daily at ${note.value}`,
+            'heartbeat.weekly': `weekly on ${note.value}`,
+            'heartbeat.monthly': `monthly on day ${note.value}`,
+            'heartbeat.dreaming': `dreaming at ${note.value}`,
           };
           push(`Heartbeat schedule updated: ${scheduleLabel[note.key] ?? note.value}`);
           break;
@@ -874,7 +917,7 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
             });
 
             // Also deliver to Telegram if configured
-            const telegramChatId = settings.TELEGRAM_CHAT_ID;
+            const telegramChatId = settings.channels?.chat_id;
             if (telegramChatId && telegramGateway) {
               const delivery = new HeartbeatDelivery({
                 chatId: telegramChatId,
@@ -919,16 +962,16 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
       case 'external': {
         const ext = result.external;
         if (ext === 'channels.set-bot-token') {
-          settingsMgr.current!.update({ TELEGRAM_BOT_TOKEN: result.message! });
+          settingsMgr.current!.update({ channels: { ...settingsMgr.current!.get().channels, bot_token: result.message! } });
           push(`Telegram bot token set. Bot will start polling on next user ID configuration.`);
         } else if (ext === 'channels.set-user-id') {
-          settingsMgr.current!.update({ TELEGRAM_USER_ID: result.message! });
+          settingsMgr.current!.update({ channels: { ...settingsMgr.current!.get().channels, user_id: result.message! } });
           push(`Allowed user ID set. Telegram will only process messages from this user.`);
         } else if (ext === 'channels.set-chat-id') {
-          settingsMgr.current!.update({ TELEGRAM_CHAT_ID: result.message! });
+          settingsMgr.current!.update({ channels: { ...settingsMgr.current!.get().channels, chat_id: result.message! } });
           push(`Telegram chat ID set. Reminders will now send to this chat.`);
         } else if (ext === 'channels.disconnect') {
-          settingsMgr.current!.update({ TELEGRAM_BOT_TOKEN: '', TELEGRAM_USER_ID: '' });
+          settingsMgr.current!.update({ channels: { ...settingsMgr.current!.get().channels, bot_token: '', user_id: '' } });
           push('Telegram integration disconnected.');
           telegramGateway?.stop();
         } else if (ext === 'channels.switch') {
@@ -1149,6 +1192,143 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
     }
   }, []);
 
+  // Autocompaction: compact the session when context fill % exceeds threshold
+  const triggerAutocompaction = useCallback(async (forced: boolean) => {
+    const loop = loopRef.current;
+    if (!loop) return;
+    const provider = streamProviderHolder.current;
+    if (!provider?.complete) return;
+
+    const messages = loop.getMessages() ?? sessionMessagesRef.current;
+    if (messages.length < 2) return;
+
+    // Use brief mode for subsequent compactations, detailed for first
+    const depth = autocompactCountRef.current > 0 ? 'brief' : 'detailed';
+    autocompactCountRef.current += 1;
+
+    const conversationText = messages.map(m => {
+      if (m.role === 'user') return `USER: ${m.content}`;
+      if (m.role === 'assistant') return `ASSISTANT: ${(m.content as any[]).map((b: any) => {
+        if (b.type === 'text') return b.text;
+        if (b.type === 'thinking') return b.thinking;
+        if (b.type === 'tool-use') return `[tool: ${b.name}(${JSON.stringify(b.input).slice(0, 100)})]`;
+        return '';
+      }).join('\n')}`;
+      if (m.role === 'tool') return `TOOL RESULT (${m.toolUseId}): ${m.content.slice(0, 500)}`;
+      return '';
+    }).join('\n');
+
+    const compactionSystem = `You are a conversation compaction engine. Your ONLY job is to output a valid JSON array representing a condensed version of a conversation. You will NEVER write prose, summaries, or commentary. Your entire output must be parseable as a JSON array of Message objects.`;
+    const compactionInstruction = depth === 'brief'
+      ? `REDUCE THIS CONVERSATION TO 2-4 MESSAGES. Keep only the first user request, the last user request, and 1-2 key assistant responses. Output ONLY a JSON array.`
+      : `REDUCE THIS CONVERSATION TO ~50% OF MESSAGES. Keep ALL user messages. Truncate long assistant text (>200 chars) and tool results (>300 chars). NEVER drop entire turns. Output ONLY a JSON array.`;
+
+    const modeLabel = forced ? 'forced' : depth;
+    const pushMsg = `Compacting conversation (${modeLabel})... This will use one AI turn. The agent will continue automatically.`;
+    setChannelMessages(prev => {
+      const ch = prev[activeChannelId] || [];
+      return { ...prev, [activeChannelId]: [...ch, { role: 'assistant', content: pushMsg }] };
+    });
+
+    try {
+      const completeResult = await provider.complete!({
+        messages: [...messages as any, { role: 'user' as const, content: compactionInstruction }],
+        system: compactionSystem,
+        tools: [],
+        model: currentModel,
+      });
+
+      if (!completeResult.text) return;
+
+      // Extract JSON from the LLM response
+      function extractJSON(text: string): string | null {
+        const trimmed = text.trim();
+        try { JSON.parse(trimmed); return trimmed; } catch { /* fall through */ }
+        const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (fenceMatch) {
+          const candidate = fenceMatch[1]!.trim();
+          try { JSON.parse(candidate); return candidate; } catch { /* fall through */ }
+        }
+        let best: string | null = null;
+        for (let i = 0; i < text.length && (!best || best.length < 50); i++) {
+          if (text[i] !== '[') continue;
+          let depth2 = 0;
+          for (let j = i; j < text.length; j++) {
+            if (text[j] === '[') depth2++;
+            if (text[j] === ']') depth2--;
+            if (depth2 === 0) {
+              const candidate = text.slice(i, j + 1);
+              try { JSON.parse(candidate); best = candidate; break; } catch { /* continue */ }
+            }
+          }
+        }
+        return best;
+      }
+
+      const jsonStr = extractJSON(completeResult.text);
+      if (!jsonStr) return;
+
+      const raw = JSON.parse(jsonStr);
+      if (!Array.isArray(raw) || raw.length === 0) return;
+
+      const originalMsgCount = messages.length;
+      const compactedMessages = raw.map((m: any) => {
+        if (m.role === 'assistant' && typeof m.content === 'string') {
+          return { ...m, content: [{ type: 'text' as const, text: m.content }] };
+        }
+        if (m.role === 'tool' && m.name && !m.toolUseId) {
+          const { name, ...rest } = m;
+          return { ...rest, toolUseId: name };
+        }
+        return m;
+      }) as Message[];
+
+      // Scale down context window tokens by compaction ratio
+      const currentInput = contextWindowInputTokensRef.current;
+      const currentOutput = contextWindowOutputTokensRef.current;
+      if (originalMsgCount > 0 && compactedMessages.length > 0 && currentInput != null) {
+        const ratio = compactedMessages.length / originalMsgCount;
+        contextWindowInputTokensRef.current = Math.round(currentInput * ratio);
+      }
+      if (originalMsgCount > 0 && compactedMessages.length > 0 && currentOutput != null) {
+        const ratio = compactedMessages.length / originalMsgCount;
+        contextWindowOutputTokensRef.current = Math.round(currentOutput * ratio);
+      }
+
+      // Build new system prompt
+      const compactedText = compactedMessages.map((m: Message) => {
+        if (m.role === 'user') return `USER: ${m.content}`;
+        if (m.role === 'assistant') {
+          const blocks = Array.isArray(m.content) ? m.content : [{ type: 'text' as const, text: m.content }];
+          return `ASSISTANT: ${blocks.map((b: any) => (b.type === 'text' ? b.text : '')).join('\n')}`;
+        }
+        if (m.role === 'tool') return `TOOL RESULT (${m.toolUseId}): ${m.content}`;
+        return '';
+      }).join('\n');
+      const newSystem = (currentSystem ?? '') + '\n\n# Conversation Summary\n\n' + compactedText;
+
+      // Reset token monitor after compaction
+      tokenMonitorRef.current?.reset();
+
+      // Null out old loop so next turn creates fresh loop with compacted state
+      loopRef.current = null;
+
+      // Update state
+      setCurrentSystem(newSystem);
+      sessionMessagesRef.current = compactedMessages;
+      setChannelMessages((prev) => ({
+        ...prev,
+        [activeChannelId]: compactedMessages as any,
+      }));
+      setMessages(prev => [...prev, { role: 'assistant', content: `Compacted conversation to ${compactedMessages.length} messages (${depth}). The agent will continue with the condensed context.` }]);
+    } catch (err) {
+      setChannelMessages(prev => {
+        const ch = prev[activeChannelId] || [];
+        return { ...prev, [activeChannelId]: [...ch, { role: 'assistant', content: `Compaction failed: ${err instanceof Error ? err.message : String(err)}` }] };
+      });
+    }
+  }, []);
+
   const onSlashCommand = useCallback(async (input: SlashCommandInput) => {
     // Echo the submitted slash command as a user message so the transcript
     // shows what the user typed alongside the assistant's reply.
@@ -1161,6 +1341,7 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
 
     const ctx: SlashCommandContext = {
       settings: settingsMgr.current!.get(),
+      settingsMgr: settingsMgr.current!,
       version: VERSION,
       model: currentModel,
       provider: provider?.name || '(not configured)',
@@ -1295,13 +1476,13 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
 
       if (wizard.phase === 'provider') {
         const choice = input.toLowerCase();
-        const providerMap: Record<string, { name: string; key: string; url: string }> = {
-          '1': { name: 'local', key: 'MODEL_API_KEY', url: 'MODEL_URL' },
-          '2': { name: 'openrouter', key: 'OPENROUTER_API_KEY', url: 'OPENROUTER_URL' },
-          '3': { name: 'openai', key: 'OPENAI_API_KEY', url: 'OPENAI_URL' },
-          '4': { name: 'anthropic', key: 'ANTHROPIC_API_KEY', url: 'ANTHROPIC_URL' },
-          '5': { name: 'google', key: 'GOOGLE_API_KEY', url: 'GOOGLE_URL' },
-          '6': { name: 'ollama', key: 'MODEL_API_KEY', url: 'MODEL_URL' },
+        const providerMap: Record<string, { name: string; providerKey: string }> = {
+          '1': { name: 'local', providerKey: 'local' },
+          '2': { name: 'openrouter', providerKey: 'openrouter' },
+          '3': { name: 'openai', providerKey: 'openai' },
+          '4': { name: 'anthropic', providerKey: 'anthropic' },
+          '5': { name: 'google', providerKey: 'google' },
+          '6': { name: 'ollama', providerKey: 'local' },
         };
         const entry = providerMap[choice];
         if (!entry) {
@@ -1309,17 +1490,12 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
           setMessages((prev) => [...prev, { role: 'assistant', content: 'Invalid choice. Please enter 1-6.\n  1) local\n  2) openrouter\n  3) openai\n  4) anthropic\n  5) google\n  6) ollama' }]);
           return;
         }
-        const updates: Record<string, string> = { MODEL_PROVIDER: entry.name };
-        updates[entry.key] = '';
-        updates[entry.url] = entry.name === 'openrouter' ? 'https://openrouter.ai/api/v1'
-          : entry.name === 'anthropic' ? 'https://api.anthropic.com'
-          : entry.name === 'google' ? 'https://generativelanguage.googleapis.com/v1beta'
-          : `https://api.${entry.name}.com/v1`;
-        settingsMgr.current!.update(updates);
+        settingsMgr.current!.setCurrentProvider(entry.name);
         if (entry.name === 'ollama') {
           // Ollama doesn't need API key — skip to URL
-          wizardRef.current = { phase: 'url', provider: entry.name };
-          pushToChannel(targetChannel, `${entry.name}: What is your Ollama API URL?\n  Default: http://localhost:11434/v1\n  (Press Enter for default):`);
+          settingsMgr.current!.setProviderKey('local', 'url', 'http://localhost:11434/v1');
+          wizardRef.current = { phase: 'model', provider: entry.name };
+          pushToChannel(targetChannel, `${entry.name}: Which model do you want to use?\n  Examples: llama3.3, mistral, phi3, qwen2.5\n  Enter model name:`);
         } else {
           wizardRef.current = { phase: 'apiKey', provider: entry.name };
           pushToChannel(targetChannel, `${entry.name}: Enter your API key:`);
@@ -1328,38 +1504,34 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
       }
 
       if (wizard.phase === 'apiKey') {
-        const keyName = wizard.provider === 'local' || wizard.provider === 'ollama' ? 'MODEL_API_KEY'
-          : wizard.provider === 'openrouter' ? 'OPENROUTER_API_KEY'
-          : wizard.provider === 'openai' ? 'OPENAI_API_KEY'
-          : wizard.provider === 'google' ? 'GOOGLE_API_KEY'
-          : 'ANTHROPIC_API_KEY';
-        settingsMgr.current!.update({ [keyName]: input });
-        if (wizard.provider === 'local') {
-          wizardRef.current = { phase: 'url', provider: wizard.provider };
-          pushToChannel(targetChannel, `API key configured.\nWhat is your local API URL?\n  Default: http://localhost:8080/v1\n  (Press Enter for default):`);
-        } else if (wizard.provider === 'ollama') {
-          settingsMgr.current!.update({ MODEL_URL: 'http://localhost:11434/v1' });
-          wizardRef.current = { phase: 'model', provider: wizard.provider };
-          pushToChannel(targetChannel, `URL configured: http://localhost:11434/v1\nWhich model do you want to use?\n  Examples: llama3.3, mistral, phi3, qwen2.5\n  Enter model name:`);
-        } else if (wizard.provider === 'google') {
-          wizardRef.current = { phase: 'model', provider: wizard.provider };
-          pushToChannel(targetChannel, `API key configured.\nWhich model do you want to use?\n  Examples: gemini-3-flash-latest, gemini-3.1-pro\n  Enter model name:`);
-        } else {
-          wizardRef.current = { phase: 'model', provider: wizard.provider };
-          pushToChannel(targetChannel, `API key configured.\nWhich model do you want to use?\n  Examples: claude-sonnet-4-6, gpt-4o, o1, llama-3.1-405b\n  Enter model name:`);
-        }
+        const prov = wizard.provider === 'ollama' ? 'local' : wizard.provider;
+        settingsMgr.current!.setProviderKey(prov, 'api_key', input);
+        const urlDefaults: Record<string, string> = {
+          openrouter: 'https://openrouter.ai/api/v1',
+          anthropic: 'https://api.anthropic.com',
+          google: 'https://generativelanguage.googleapis.com/v1beta',
+          openai: 'https://api.openai.com/v1',
+          local: 'http://localhost:8080/v1',
+        };
+        const modelExamples: Record<string, string> = {
+          ollama: 'llama3.3, mistral, phi3, qwen2.5',
+          google: 'gemini-3-flash-latest, gemini-3.1-pro',
+          local: 'claude-sonnet-4-6, gpt-4o, o1, llama-3.1-405b',
+          openrouter: 'claude-sonnet-4-6, gpt-4o, o1, llama-3.1-405b',
+          anthropic: 'claude-sonnet-4-6, gpt-4o, o1, llama-3.1-405b',
+        };
+        settingsMgr.current!.setProviderKey(prov, 'url', urlDefaults[wizard.provider] || '');
+        wizardRef.current = { phase: 'model', provider: wizard.provider };
+        pushToChannel(targetChannel, `API key configured.\nWhich model do you want to use?\n  Examples: ${modelExamples[wizard.provider] || 'claude-sonnet-4-6, gpt-4o, o1, llama-3.1-405b'}\n  Enter model name:`);
         return;
       }
 
       if (wizard.phase === 'url') {
-        const defaultUrl = wizard.provider === 'ollama' ? 'http://localhost:11434/v1' : 'http://localhost:8080/v1';
-        const url = input || defaultUrl;
-        settingsMgr.current!.update({ MODEL_URL: url });
-        const modelExamples = wizard.provider === 'ollama'
-          ? 'llama3.3, mistral, gemma-4, qwen3.6'
-          : 'claude-sonnet-4-6, gpt-4o, o1, llama-3.1-405b';
+        const prov = wizard.provider === 'ollama' ? 'local' : wizard.provider;
+        const url = input || (wizard.provider === 'ollama' ? 'http://localhost:11434/v1' : 'http://localhost:8080/v1');
+        settingsMgr.current!.setProviderKey(prov, 'url', url);
         wizardRef.current = { phase: 'model', provider: wizard.provider };
-        pushToChannel(targetChannel, `URL configured: ${url}\nWhich model do you want to use?\n  Examples: ${modelExamples}\n  Enter model name:`);
+        pushToChannel(targetChannel, `URL configured: ${url}\nWhich model do you want to use?\n  Examples: claude-sonnet-4-6, gpt-4o, o1, llama-3.1-405b\n  Enter model name:`);
         return;
       }
 
@@ -1564,6 +1736,35 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
         if (e.type === 'usage') {
           setInputTokens(e.inputTokens);
           setOutputTokens(e.outputTokens);
+
+          // Autocompaction: track cumulative tokens and trigger compaction if needed
+          const monitor = tokenMonitorRef.current;
+          if (monitor) {
+            const settings = settingsMgr.current!.get();
+            const activeProvider = settings.providers?.[settings.current_provider as keyof typeof settings.providers];
+            if (settings.auto_compact?.enabled !== 'off' && activeProvider?.model_cost) {
+              const tiers = parseTieredPricing(activeProvider.model_cost);
+              const events = monitor.addTokens(e.inputTokens, e.outputTokens, tiers);
+
+              for (const evt of events) {
+                if (evt.type.startsWith('context-')) {
+                  // Context-fill trigger
+                  setContextFillPct(monitor.getFillPct());
+                  if (evt.type === 'context-warning') {
+                    loop.eventBus.emit({ type: 'context-warning', id: e.id, message: evt.message, timestamp: Date.now() });
+                  } else if (evt.type === 'context-compaction-needed' || evt.type === 'context-forced-compaction') {
+                    // Trigger autocompaction
+                    triggerAutocompaction(evt.type === 'context-forced-compaction');
+                  }
+                } else if (evt.type === 'tier-warning') {
+                  // Pricing tier warning — informational only
+                  setContextFillPct(monitor.getFillPct());
+                  loop.eventBus.emit({ type: 'context-warning', id: e.id, message: evt.message, timestamp: Date.now() });
+                  monitor.acknowledge(`tier-${evt.threshold}`);
+                }
+              }
+            }
+          }
         }
       }),
       loop.eventBus.subscribe('tool-call', (e: Event) => {
@@ -1627,6 +1828,15 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
       loop.eventBus.subscribe('approval-request', (e: Event) => {
         if (e.type === 'approval-request' && e.decision === 'ask') {
           pendingToolCallIdRef.current = e.toolCallId;
+        }
+      }),
+      loop.eventBus.subscribe('context-warning', (e: Event) => {
+        if (e.type === 'context-warning') {
+          setChannelMessages((prev) => {
+            const chMsgs = prev[targetChannel] || [];
+            return { ...prev, [targetChannel]: [...chMsgs, { role: 'assistant', content: e.message }] };
+          });
+          setMessages((prev) => [...prev, { role: 'assistant', content: e.message }]);
         }
       }),
     ];
@@ -1851,7 +2061,7 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
   }, []);
 
   const project = basename(currentCwd);
-  const cost = estimateCost(currentModel, inputTokens ?? 0, outputTokens ?? 0, settingsMgr.current?.get().MODEL_COST);
+  const cost = estimateCost(currentModel, inputTokens ?? 0, outputTokens ?? 0, settingsMgr.current?.getModelCost());
 
   // Build channel entries for the Channels tab
   const channelList = channelRegistry.list();
@@ -1875,6 +2085,7 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
       inputTokens={inputTokens}
       outputTokens={outputTokens}
       contextWindowSize={contextWindowSize}
+      contextFillPct={contextFillPct}
       project={project}
       duration={duration}
       costUsd={cost}
@@ -1895,7 +2106,7 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
       channels={channelTabEntries}
       onChannelSelect={(channelId) => {
         setActiveChannelId(channelId);
-        settingsMgr.current!.update({ CHANNEL_TAB_ACTIVE: channelId });
+        settingsMgr.current!.update({ channels: { ...settingsMgr.current!.get().channels, tab_active: channelId } });
         setCurrentTab('assistant');
       }}
       pendingApproval={pendingApproval ? {
@@ -1914,24 +2125,21 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function createProvider(settings: CurieSettings): any | null {
-  const providerName =
-    typeof settings.MODEL_PROVIDER === 'string'
-      ? settings.MODEL_PROVIDER.trim().toLowerCase()
-      : 'anthropic';
+  const providerName = (settings.current_provider || 'anthropic').trim().toLowerCase();
 
   if (providerName === 'openai') {
     const openaiKey =
-      (typeof settings.OPENAI_API_KEY === 'string' ? settings.OPENAI_API_KEY.trim() : '') ||
+      (typeof settings.providers?.openai?.api_key === 'string' ? settings.providers.openai.api_key.trim() : '') ||
       process.env.OPENAI_API_KEY ||
       '';
     const openaiUrl =
-      (typeof settings.OPENAI_URL === 'string' ? settings.OPENAI_URL.trim() : '') ||
+      (typeof settings.providers?.openai?.url === 'string' ? settings.providers.openai.url.trim() : '') ||
       process.env.OPENAI_URL ||
       '';
     if (!openaiKey) {
       console.error(
         'curie-agent: no OpenAI API key configured.\n' +
-          '  Run `curie-agent` and use `/init` to configure, or set "OPENAI_API_KEY" in ~/.curie-agent/settings.json.',
+          '  Run `curie-agent` and use `/init` to configure, or set "providers.openai.api_key" in ~/.curie-agent/settings.json.',
       );
       return null;
     }
@@ -1941,17 +2149,17 @@ function createProvider(settings: CurieSettings): any | null {
 
   if (providerName === 'openrouter') {
     const orKey =
-      (typeof settings.OPENROUTER_API_KEY === 'string' ? settings.OPENROUTER_API_KEY.trim() : '') ||
+      (typeof settings.providers?.openrouter?.api_key === 'string' ? settings.providers.openrouter.api_key.trim() : '') ||
       process.env.OPENROUTER_API_KEY ||
       '';
     const orUrl =
-      (typeof settings.OPENROUTER_URL === 'string' ? settings.OPENROUTER_URL.trim() : '') ||
+      (typeof settings.providers?.openrouter?.url === 'string' ? settings.providers.openrouter.url.trim() : '') ||
       process.env.OPENROUTER_URL ||
       'https://openrouter.ai/api/v1';
     if (!orKey) {
       console.error(
         'curie-agent: no OpenRouter API key configured.\n' +
-          '  Run `curie-agent` and use `/init` to configure, or set "OPENROUTER_API_KEY" in ~/.curie-agent/settings.json.',
+          '  Run `curie-agent` and use `/init` to configure, or set "providers.openrouter.api_key" in ~/.curie-agent/settings.json.',
       );
       return null;
     }
@@ -1961,17 +2169,17 @@ function createProvider(settings: CurieSettings): any | null {
 
   if (providerName === 'ollama' || providerName === 'local') {
     const key =
-      (typeof settings.MODEL_API_KEY === 'string' ? settings.MODEL_API_KEY.trim() : '') ||
+      (typeof settings.providers?.local?.api_key === 'string' ? settings.providers.local.api_key.trim() : '') ||
       process.env.MODEL_API_KEY ||
       '';
     const url =
-      (typeof settings.MODEL_URL === 'string' ? settings.MODEL_URL.trim() : '') ||
+      (typeof settings.providers?.local?.url === 'string' ? settings.providers.local.url.trim() : '') ||
       process.env.MODEL_URL ||
       '';
     if (!url) {
       console.error(
         'curie-agent: no local provider URL configured.\n' +
-          '  Run `curie-agent` and use `/init` to configure, or set "MODEL_URL" in ~/.curie-agent/settings.json.',
+          '  Run `curie-agent` and use `/init` to configure, or set "providers.local.url" in ~/.curie-agent/settings.json.',
       );
       return null;
     }
@@ -1982,17 +2190,17 @@ function createProvider(settings: CurieSettings): any | null {
 
   if (providerName === 'google') {
     const googleKey =
-      (typeof settings.GOOGLE_API_KEY === 'string' ? settings.GOOGLE_API_KEY.trim() : '') ||
+      (typeof settings.providers?.google?.api_key === 'string' ? settings.providers.google.api_key.trim() : '') ||
       process.env.GOOGLE_API_KEY ||
       '';
     const googleUrl =
-      (typeof settings.GOOGLE_URL === 'string' ? settings.GOOGLE_URL.trim() : '') ||
+      (typeof settings.providers?.google?.url === 'string' ? settings.providers.google.url.trim() : '') ||
       process.env.GOOGLE_URL ||
       '';
     if (!googleKey) {
       console.error(
         'curie-agent: no Google API key configured.\n' +
-          '  Run `curie-agent` and use `/init` to configure, or set "GOOGLE_API_KEY" in ~/.curie-agent/settings.json.',
+          '  Run `curie-agent` and use `/init` to configure, or set "providers.google.api_key" in ~/.curie-agent/settings.json.',
       );
       return null;
     }
@@ -2002,17 +2210,17 @@ function createProvider(settings: CurieSettings): any | null {
 
   // anthropic (default)
   const fromSettingsKey =
-    typeof settings.ANTHROPIC_API_KEY === 'string' ? settings.ANTHROPIC_API_KEY.trim() : '';
+    typeof settings.providers?.anthropic?.api_key === 'string' ? settings.providers.anthropic.api_key.trim() : '';
   const fromSettingsUrl =
-    typeof settings.ANTHROPIC_URL === 'string' ? settings.ANTHROPIC_URL.trim() : '';
+    typeof settings.providers?.anthropic?.url === 'string' ? settings.providers.anthropic.url.trim() : '';
   const apiKey = fromSettingsKey || process.env.ANTHROPIC_API_KEY || '';
   const baseUrl = fromSettingsUrl || process.env.ANTHROPIC_URL || '';
   if (!apiKey) {
     console.error(
       'curie-agent: no API key configured.\n' +
-        `  Looked at ~/.curie-agent/settings.json (ANTHROPIC_API_KEY = ${fromSettingsKey ? '[set]' : '[missing/empty]'}),\n` +
+        `  Looked at ~/.curie-agent/settings.json (providers.anthropic.api_key = ${fromSettingsKey ? '[set]' : '[missing/empty]'}),\n` +
         `  and ANTHROPIC_API_KEY env var (${process.env.ANTHROPIC_API_KEY ? '[set]' : '[missing]'}).\n` +
-        '  Run `curie-agent` and use `/init` to configure, or set "ANTHROPIC_API_KEY" in ~/.curie-agent/settings.json.',
+        '  Run `curie-agent` and use `/init` to configure, or set "providers.anthropic.api_key" in ~/.curie-agent/settings.json.',
     );
     return null;
   }
@@ -2052,19 +2260,27 @@ async function main() {
   // Initialize cron manager for reminders
   const cronManager = new CronManager();
 
-  // Auto-create unified heartbeat task if HEARTBEAT=on
+  // Auto-create unified heartbeat task if heartbeat.schedule=on
   const hbSettings = cronManager.load();
   const s = settingsManager.load();
-  if (s.HEARTBEAT === 'on' && !hbSettings.tasks.some((t) => t.type === 'heartbeat')) {
+  if (s.heartbeat?.schedule === 'on' && !hbSettings.tasks.some((t) => t.type === 'heartbeat')) {
     const picked = pickNextSchedule({
-      HEARTBEAT_INTRADAY: s.HEARTBEAT_INTRADAY,
-      HEARTBEAT_DAILY: s.HEARTBEAT_DAILY,
-      HEARTBEAT_WEEKLY: s.HEARTBEAT_WEEKLY,
-      HEARTBEAT_MONTHLY: s.HEARTBEAT_MONTHLY,
-      HEARTBEAT_DREAMING: s.HEARTBEAT_DREAMING,
+      HEARTBEAT_INTRADAY: s.heartbeat?.intraday || '',
+      HEARTBEAT_DAILY: s.heartbeat?.daily || '6:00',
+      HEARTBEAT_WEEKLY: s.heartbeat?.weekly || 'monday@6:00',
+      HEARTBEAT_MONTHLY: s.heartbeat?.monthly || '1@6:00',
+      HEARTBEAT_DREAMING: s.heartbeat?.dreaming || '2:00',
     }, Date.now());
     if (picked) {
       cronManager.createHeartbeat('Heartbeat: unified schedule', picked);
+      // Re-evaluate all four schedules so the task picks the earliest
+      cronManager.rescheduleFromSettings({
+        HEARTBEAT_INTRADAY: s.heartbeat?.intraday || '',
+        HEARTBEAT_DAILY: s.heartbeat?.daily || '6:00',
+        HEARTBEAT_WEEKLY: s.heartbeat?.weekly || 'monday@6:00',
+        HEARTBEAT_MONTHLY: s.heartbeat?.monthly || '1@6:00',
+        HEARTBEAT_DREAMING: s.heartbeat?.dreaming || '2:00',
+      });
     }
   } else if (hbSettings.tasks.some((t) => t.type === 'heartbeat')) {
     // Consolidate: if multiple pending heartbeat tasks exist, cancel duplicates
@@ -2139,10 +2355,10 @@ async function main() {
 
   // Create Telegram gateway outside React lifecycle so it stays alive
   let telegramGateway: TelegramGateway | null = null;
-  if (settings.TELEGRAM_BOT_TOKEN && settings.TELEGRAM_USER_ID) {
+  if (settings.channels?.bot_token && settings.channels?.user_id) {
     telegramGateway = new TelegramGateway({
-      botToken: settings.TELEGRAM_BOT_TOKEN,
-      allowedUserId: settings.TELEGRAM_USER_ID,
+      botToken: settings.channels.bot_token,
+      allowedUserId: settings.channels.user_id,
       onUserMessage: (ctx: { text: string; chatId: string; userId: string; isGroup: boolean; chatTitle?: string }) => {
         console.error(`[telegram-gateway] onUserMessage: chatId=${ctx.chatId}, isGroup=${ctx.isGroup}`);
         // Route through ChannelRouter to get the channel for this chat
@@ -2150,7 +2366,7 @@ async function main() {
         if (route) {
           // Store for response routing
           telegramChatIdRef.current = ctx.chatId;
-          settingsManager.update({ TELEGRAM_CHAT_ID: ctx.chatId });
+          settingsManager.update({ channels: { ...settingsManager.get().channels, chat_id: ctx.chatId } });
           // Set active channel so onSubmit knows where to route
           activeChannelRef.current = route.channelId;
           if (telegramSubmitRef.current) {
@@ -2164,11 +2380,11 @@ async function main() {
       },
     });
     telegramGateway.start().catch(console.error);
-    console.error(`[telegram-gateway] Bot started for user ${settings.TELEGRAM_USER_ID}`);
+    console.error(`[telegram-gateway] Bot started for user ${settings.channels?.user_id}`);
   }
 
   // --- MCP server connections ---
-  const mcpServersRaw = settings.MCP_SERVERS;
+  const mcpServersRaw = settings.mcp_servers;
   const mcpToolsRef: React.MutableRefObject<typeof allTools> = { current: [] };
   const mcpClientsRef: React.MutableRefObject<Array<{ serverId: string; isConnected: boolean; tools: ReadonlyArray<{ name: string }> }>> = { current: [] };
   const mcpRawClientsRef: React.MutableRefObject<MCPClient[]> = { current: [] };
@@ -2214,7 +2430,7 @@ async function main() {
 
     // Read fresh settings from disk so we pick up settingsManager updates
     const freshSettings = settingsManager.get();
-    const configs = parseMcpConfigs(freshSettings.MCP_SERVERS);
+    const configs = parseMcpConfigs(freshSettings.mcp_servers);
     if (configs.length > 0) {
       try {
         console.error(`[mcp] Reconnecting to ${configs.length} MCP server(s)...`);
@@ -2331,7 +2547,7 @@ async function main() {
     if (task.type === 'heartbeat' && task.schedule) {
       const scheduleType = task.schedule.type as ScheduleType;
       const settings = settingsManager.load();
-      if (settings.HEARTBEAT !== 'on') {
+      if (settings.heartbeat?.schedule !== 'on') {
         return;
       }
 
@@ -2356,7 +2572,7 @@ async function main() {
         const label = `[${scheduleLabel(task.schedule.type)}] `;
 
         // Deliver to Telegram if configured
-        const tgChatId = settings.TELEGRAM_CHAT_ID || null;
+        const tgChatId = settings.channels?.chat_id || null;
         const tgChat = tgChatId ?? telegramChatIdRef.current;
         if (tgChat && telegramGateway) {
           await telegramGateway.sendMessage(tgChat, label + formatted);
@@ -2380,7 +2596,7 @@ async function main() {
         briefTask.executedScheduleType = scheduleType;
         onReminderHolder.current?.(briefTask);
       } catch (err) {
-        // Heartbeat errors silently ignored — Telegram fallback may surface them
+        console.error('[Heartbeat] Execution failed:', err);
       }
       return;
     }
@@ -2391,7 +2607,7 @@ async function main() {
 
     // Send to Telegram if configured
     const settings = settingsManager.load();
-    const chatId = settings.TELEGRAM_CHAT_ID ?? telegramChatIdRef.current;
+    const chatId = settings.channels?.chat_id ?? telegramChatIdRef.current;
     if (chatId && telegramGateway) {
       const timeStr = new Date(task.scheduledAt).toLocaleString();
       telegramGateway.sendMessage(chatId, `Curie reminder:\nDate: ${timeStr}\n${task.message}`).catch(() => {});

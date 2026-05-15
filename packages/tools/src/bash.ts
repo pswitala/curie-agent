@@ -24,8 +24,8 @@ export const bashTool = createTool(
   'Executes a bash command and returns its output. For shell-only operations.',
   BashSchema,
   async (input, ctx: ToolContext) => {
-    if (ctx.settings.SAFETY_PATH_GUARD !== 'off') {
-      if (!isPathAllowed(ctx.cwd, ctx.cwd, parseAllowlist(ctx.settings.SAFETY_PATH_ALLOWLIST ?? ''))) {
+    if (ctx.settings.safety?.path_guard !== 'off') {
+      if (!isPathAllowed(ctx.cwd, ctx.cwd, parseAllowlist(ctx.settings.safety?.path_allowlist ?? ''))) {
         return { output: null, error: 'Bash: session cwd is outside allowed directories' };
       }
     }

@@ -284,7 +284,7 @@ export class TurnLoop {
         turn++;
 
         // Create git snapshot before each turn (best-effort).
-        if (this.config.settings.SAFETY_SNAPSHOTS !== 'off') {
+        if (this.config.settings.safety?.snapshots !== 'off') {
           await createSnapshot(this._cwd, prompt).catch(() => {
             // Silently ignore — snapshots are recovery, not enforcement
           });
@@ -419,8 +419,8 @@ export class TurnLoop {
           if (this.abort) break;
 
           // --- Tool usage limits ---
-          const totalLimit = this.config.settings.TOOLS_PER_CALL ?? 10;
-          const websearchLimit = this.config.settings.WEBSEARCH_PER_CALL ?? 5;
+          const totalLimit = this.config.settings.tools_per_call ?? 10;
+          const websearchLimit = this.config.settings.websearch_per_call ?? 5;
 
           if (totalToolCalls >= totalLimit) {
             const msg = `Tool call limit reached (${totalLimit} per turn). Skipping remaining tool call(s).`;

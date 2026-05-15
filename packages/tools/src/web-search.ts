@@ -13,11 +13,11 @@ export const webSearchTool = createTool(
   'Search the web using Brave Search API. Returns titles, URLs, and snippets.',
   WebSearchSchema,
   async (input, ctx: ToolContext) => {
-    const apiKey = ctx.settings.BRAVE_SEARCH_API_KEY;
+    const apiKey = ctx.settings.brave_search_api_key;
     if (!apiKey) {
       return {
         output: null,
-        error: 'BRAVE_SEARCH_API_KEY is not configured in settings.json',
+        error: 'brave_search_api_key is not configured in settings.json',
       };
     }
 
