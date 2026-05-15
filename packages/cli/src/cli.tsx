@@ -1605,7 +1605,11 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
      }
 
     if (currentDebug) {
-      console.error(`[debug] prompt: ${text}, channel: ${targetChannel}`);
+      const debugMsg = { role: 'debug' as const, content: `prompt: ${text}, channel: ${targetChannel}` };
+      setChannelMessages(prev => {
+        const ch = prev[targetChannel] || [];
+        return { ...prev, [targetChannel]: [...ch, debugMsg] };
+      });
     }
 
     // Get or create TurnLoop for the target channel
