@@ -27,7 +27,7 @@ curie-agent unifies the best ideas from **Claude Code**, **OpenAI Codex CLI**, *
 - **Multi-platform** — CLI TUI, React web dashboard (planned)
 - **Safe by default** — Codex-style approval tiers (`plan`, `edit`, `auto`, `yolo`) with path guard, command guard, and git snapshots
 - **Thinking streaming** — Real-time thinking-delta events with `Ctrl+O` toggle in TUI
-- **Extensible** — MCP client, skills, hooks, subagents, slash commands
+- **Extensible** — MCP client, skills runtime, hooks, subagents, slash commands
 - **Memory** — Persistent markdown memory files (wiki engine with SQLite + vector search on the way)
 - **Pricing awareness** — Tiered pricing, context fill tracking, cost estimation
 - **Open-source** — Apache-2.0, local-first, no cloud SaaS
@@ -71,6 +71,7 @@ curie-agent continue                     # Resume most recent session
 | `/memory [status\|add]` | View memory or capture a note |
 | `/model pricing` | Tiered pricing configuration |
 | `/task <create|list|delete>` | Task scheduling |
+| `/skill [name]` | List or show available skills |
 | `/init` | Run interactive setup wizard |
 | `/snapshots` | List git snapshots |
 | `/revert [index]` | Revert to git snapshot |
@@ -101,9 +102,9 @@ curie-agent is built as a **pnpm + Turborepo** monorepo.
 | `@curie-agent/protocol` | Shared zod schemas for events, JSON-RPC methods, tool definitions |
 | `@curie-agent/providers` | Provider interface with Anthropic, OpenAI, Google Gemini, Ollama, OpenRouter adapters |
 | `@curie-agent/render` | Rich-style TUI primitives (Panel, Table, Markdown, SyntaxBlock, Progress, Traceback, 8 themes) |
-| `@curie-agent/tools` | Read, Edit, Write, Glob, Grep, Bash, Reminder, WebSearch, WebFetch, taskTool |
+| `@curie-agent/tools` | Read, Edit, Write, Glob, Grep, Bash, Reminder, WebSearch, WebFetch, taskTool, Skill |
 | `@curie-agent/mcp` | MCP client (stdio transport, tool discovery); server deferred to Phase 3 |
-| `@curie-agent/tui` | Ink TUI components: ChatSurface, StatusLine, TabBar (5 tabs), Mascot, 26 slash commands, init wizard, thinking streaming (Ctrl+O) |
+| `@curie-agent/tui` | Ink TUI components: ChatSurface, StatusLine, TabBar (5 tabs), Mascot, 27 slash commands, init wizard, thinking streaming (Ctrl+O) |
 | `@curie-agent/cli` | CLI entrypoint (`curie-agent` binary), full TUI app, multi-provider, session management |
 
 ```bash
@@ -115,13 +116,13 @@ pnpm turbo build
 ## Architecture
 
 ```
-  TUI (Ink) — 5 tabs, 26 slash commands, thinking streaming
+  TUI (Ink) — 5 tabs, 27 slash commands, thinking streaming
       |
   Agent Core — turn loop, permission engine, safety guards
       |
   Providers (Anthropic · OpenAI · Gemini · Ollama · OpenRouter)
       |
-  Tools (Read · Edit · Write · Glob · Grep · Bash · WebSearch · WebFetch · taskTool)
+  Tools (Read · Edit · Write · Glob · Grep · Bash · WebSearch · WebFetch · taskTool · Skill)
 ```
 
 *Daemon, web dashboard, and orchestra (multi-session) are planned for Phase 5 / Phase 7a.*
@@ -132,19 +133,16 @@ pnpm turbo build
 
 **Phase 1** — Provider layer (Anthropic streaming), built-in tools (Read, Edit, Write, Glob, Grep, Bash), permission engine with approval prompts, Ink TUI with status line + scrollback, theming, mascot banner, CLI entrypoint, session save/resume, headless mode, session management.
 
-**Phase 1.a** — 26 slash commands, TUI with 5 tabs (assistant, channels, stats, projects, agents), /init interactive setup wizard, effort/mode/approval pickers, MCP client (stdio), Telegram Gateway, Channel Registry/Router, CronManager, HeartbeatExecutor/Delivery, SettingsManager (persisted to `~/.curie-agent/settings.json`), thinking streaming (Ctrl+O toggle), pricing tiering (`/model pricing`, cumulative cost tracking), `/task` command (TaskExecutor + BatchTurnLoop).
+**Phase 1.a** — 27 slash commands, TUI with 5 tabs (assistant, channels, stats, projects, agents), /init interactive setup wizard, effort/mode/approval pickers, MCP client (stdio), Telegram Gateway, Channel Registry/Router, CronManager, HeartbeatExecutor/Delivery, SettingsManager (persisted to `~/.curie-agent/settings.json`), thinking streaming (Ctrl+O toggle), pricing tiering (`/model pricing`, cumulative cost tracking), `/task` command (TaskExecutor + BatchTurnLoop).
 
 **Phase 2** — OpenAI, Google Gemini, Ollama, OpenRouter provider adapters. Safety: path guard, command guard, git snapshots, approval tiers enforcement. TokenMonitor (context fill %, pricing tier alerts), tiered pricing format with cost estimation.
 
+**Phase 3** — Skills runtime: Claude-Code-compatible `~/.curie-agent/skills/<name>/SKILL.md` discovery, frontmatter parsing, system prompt injection, `Skill` tool, `/skill` slash command.
+
 ## What's next
 
-1. **Codex config import** — Read `~/.codex/config.toml`, migrate approval rules + model prefs
-2. **MCP server** — expose curie-agent tools, sessions, wiki, channels to other agents (Phase 3)
-3. **Skills runtime** — `~/.curie-agent/skills/<name>/SKILL.md`, Claude-Code-compatible (Phase 3)
-4. **Subagents** — `.curie-agent/agents/*.md` format, worktree isolation (Phase 3)
-5. **Hooks** — pre/post ToolUse, UserPrompt, Stop, Compact, SessionStart, ChannelMessage (Phase 3)
-6. **Plugin API** — npm packages exporting `curie-agent-plugin` entrypoint (Phase 3)
-7. **Wiki engine** — `@curie-agent/wiki` package with SQLite/sqlite-vec (Phase 4)
+1. **Subagents** — `.curie-agent/agents/*.md` format, worktree isolation (Phase 3)
+2. **Wiki engine** — `@curie-agent/wiki` package with SQLite/sqlite-vec (Phase 4)
 
 ## Tech stack
 
@@ -153,7 +151,7 @@ pnpm turbo build
 - **TUI**: Ink (React for CLIs)
 - **Storage**: better-sqlite3 + sqlite-vec (planned)
 - **Schema/IPC**: zod + JSON-RPC 2.0
-- **Tests**: vitest (31 test files across 8 packages)
+- **Tests**: vitest (29 test files across 8 packages)
 
 ## License
 

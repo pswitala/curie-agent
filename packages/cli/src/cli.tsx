@@ -17,7 +17,7 @@ import { getTheme } from '@curie-agent/render';
 import { TurnLoop, SettingsManager, DEFAULT_SETTINGS, CronManager, TelegramGateway, ChannelRegistry, ChannelRouter, HeartbeatExecutor, HeartbeatDelivery, TaskExecutor, scheduleLabel, TokenMonitor, type CurieSettings, type ScheduleType, type Message, type TokenEvent } from '@curie-agent/core';
 import { listSnapshots, revertTo } from '@curie-agent/core/safety/snapshot.js';
 import { AnthropicProvider, OpenAIProvider, OllamaProvider, GoogleGeminiProvider, OpenRouterProvider } from '@curie-agent/providers';
-import { allTools, setGlobalCwd } from '@curie-agent/tools';
+import { allTools, setGlobalCwd, discoverAllSkills, formatSkillsForPrompt, listSkills } from '@curie-agent/tools';
 import { createMcpTools, MCPClient, type MCPConfig } from '@curie-agent/mcp';
 import type { Event, CronTask } from '@curie-agent/core';
 import type { SlashCommandInput, SlashCommandResult, SlashCommandContext, ProjectEntry } from '@curie-agent/tui';
@@ -391,6 +391,12 @@ function loadAgentPrompt(cwd: string) {
   const projectPath = resolve(cwd, '.curie-agent', 'AGENTS.md');
   if (existsSync(projectPath)) {
     parts.push(`# Project overrides (${projectPath})\n\n${readFileSync(projectPath, 'utf-8')}`);
+  }
+
+  // 4b. Available Skills — metadata for all discovered skills.
+  const skills = discoverAllSkills(cwd);
+  if (skills.length > 0) {
+    parts.push(formatSkillsForPrompt(skills));
   }
 
   // 5. Current time.
@@ -1395,6 +1401,7 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
       thinkingBudget: ({ low: 2000, medium: 6000, high: 16000, max: 32000, auto: 0 })[currentEffort ?? 'auto'] ?? 0,
       listSnapshots: (cwd: string) => listSnapshots(cwd),
       revertTo: (cwd: string, sha: string) => revertTo(cwd, sha),
+      listSkills: (cwd: string) => listSkills(cwd),
     };
     const result = await handleSlashCommand(input.command, input.args, ctx);
     await applySlashResult(result, input.args);

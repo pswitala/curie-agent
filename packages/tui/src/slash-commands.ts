@@ -3,6 +3,7 @@ import { SettingsManager } from '../../core/src/settings.js';
 import type { Message } from '../../core/src/turn-loop.js';
 import type { TabId } from './tab-bar.js';
 import { CronManager, pickNextSchedule, scheduleLabel } from '@curie-agent/core';
+import { readFileSync } from 'node:fs';
 
 export interface SlashCommandContext {
   settings: CurieSettings;
@@ -34,6 +35,8 @@ export interface SlashCommandContext {
   listSnapshots?: (cwd: string) => Array<{ sha: string; timestamp: string; cwd: string; label: string; changedFiles: number }>;
   /** Revert to a snapshot SHA (provided by CLI for /revert). */
   revertTo?: (cwd: string, sha: string) => Promise<{ success: boolean; error?: string }>;
+  /** List discovered skills (provided by CLI for /skill). */
+  listSkills?: (cwd: string) => Array<{ name: string; description: string; source: string; filePath: string }>;
 }
 
 export interface SlashCommandResult {
@@ -135,6 +138,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'tools', description: 'View/set tool call limits per turn', usage: '/tools [tools_per_call [websearch_per_call]]', category: 'Tools' },
   { name: 'websearch', description: 'View/set web search+fetch limit per turn', usage: '/websearch [count]', category: 'Tools' },
   { name: 'mcp', description: 'Manage MCP server connections', usage: '/mcp <list|add|remove|reload>', category: 'Tools' },
+  { name: 'skill', description: 'List or show available skills', usage: '/skill [name]', category: 'Tools' },
   // Communication
   { name: 'channels', description: 'Manage Telegram channel config', usage: '/channels <list|set-bot-token|set-user-id|set-chat-id|disconnect>', category: 'Communication' },
   // Safety
@@ -244,11 +248,77 @@ export async function handleSlashCommand(
     case 'revert':
       return handleRevert(args, ctx);
 
+    case 'skill':
+      return handleSkill(args, ctx);
+
     default:
       return {
         type: 'message',
         message: `Unknown command: /${cmd}. Type /help for available commands.`,
       };
+  }
+}
+
+function handleSkill(args: string, ctx: SlashCommandContext): SlashCommandResult {
+  const listSkillsFn = ctx.listSkills;
+  if (!listSkillsFn) {
+    return { type: 'message', message: 'Skills discovery is not available in this context.' };
+  }
+
+  const skills = listSkillsFn(ctx.cwd);
+
+  if (!args.trim()) {
+    if (skills.length === 0) {
+      return {
+        type: 'message',
+        message: [
+          'No skills found.',
+          '',
+          'Skills are SKILL.md files in:',
+          '  ~/.curie-agent/skills/         (global)',
+          '  <cwd>/.curie-agent/skills/  (project)',
+          '',
+          'Directory format: skill-name/SKILL.md',
+          'Flat format:      skill-name-SKILL.md',
+        ].join('\n'),
+      };
+    }
+    const lines = [`Available Skills (${skills.length}):`];
+    for (const s of skills) {
+      const source = s.source === 'project' ? '[project]' : '[global]';
+      const desc = s.description.length > 80 ? s.description.slice(0, 77) + '...' : s.description;
+      lines.push(`  ${s.name} ${source}`);
+      lines.push(`    ${desc}`);
+    }
+    lines.push('');
+    lines.push('Use /skill <name> to see full details.');
+    return { type: 'message', message: lines.join('\n') };
+  }
+
+  const name = args.trim().toLowerCase();
+  const skill = skills.find(s => s.name.toLowerCase() === name);
+  if (!skill) {
+    const available = skills.map(s => s.name).join(', ');
+    return { type: 'message', message: `Skill "${name}" not found. Available: ${available}` };
+  }
+
+  try {
+    const content = readFileSync(skill.filePath, 'utf-8');
+    const bodyStart = content.indexOf('---', 3);
+    const body = bodyStart > 0 ? content.slice(bodyStart + 3).trim() : content;
+    return {
+      type: 'message',
+      message: [
+        `## ${skill.name} (${skill.source})`,
+        `Description: ${skill.description}`,
+        `Source: ${skill.filePath}`,
+        '',
+        '---',
+        body,
+      ].join('\n'),
+    };
+  } catch {
+    return { type: 'message', message: `Could not read skill file: ${skill.filePath}` };
   }
 }
 

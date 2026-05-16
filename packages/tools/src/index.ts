@@ -9,6 +9,7 @@ export { reminderTool } from './reminder.js';
 export { taskTool } from './task.js';
 export { webSearchTool } from './web-search.js';
 export { webFetchTool } from './web-fetch.js';
+export { skillTool, discoverAllSkills, formatSkillsForPrompt, listSkills, parseFrontmatter, type ParsedSkill } from './skill.js';
 
 import { readTool } from './read.js';
 import { editTool } from './edit.js';
@@ -20,5 +21,6 @@ import { reminderTool } from './reminder.js';
 import { taskTool } from './task.js';
 import { webSearchTool } from './web-search.js';
 import { webFetchTool } from './web-fetch.js';
+import { skillTool } from './skill.js';
 
-export const allTools = [readTool, editTool, writeTool, globTool, grepTool, bashTool, reminderTool, taskTool, webSearchTool, webFetchTool];
+export const allTools = [readTool, editTool, writeTool, globTool, grepTool, bashTool, reminderTool, taskTool, webSearchTool, webFetchTool, skillTool];
