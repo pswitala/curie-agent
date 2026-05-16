@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 
 import { ChatSurface, handleSlashCommand, COLD_START_BANNER } from '@curie-agent/tui';
 import { getTheme } from '@curie-agent/render';
-import { TurnLoop, SettingsManager, DEFAULT_SETTINGS, CronManager, TelegramGateway, ChannelRegistry, ChannelRouter, HeartbeatExecutor, HeartbeatDelivery, TaskExecutor, pickNextSchedule, scheduleLabel, TokenMonitor, type CurieSettings, type ScheduleType, type Message, type TokenEvent } from '@curie-agent/core';
+import { TurnLoop, SettingsManager, DEFAULT_SETTINGS, CronManager, TelegramGateway, ChannelRegistry, ChannelRouter, HeartbeatExecutor, HeartbeatDelivery, TaskExecutor, scheduleLabel, TokenMonitor, type CurieSettings, type ScheduleType, type Message, type TokenEvent } from '@curie-agent/core';
 import { listSnapshots, revertTo } from '@curie-agent/core/safety/snapshot.js';
 import { AnthropicProvider, OpenAIProvider, OllamaProvider, GoogleGeminiProvider, OpenRouterProvider } from '@curie-agent/providers';
 import { allTools, setGlobalCwd } from '@curie-agent/tools';
@@ -508,6 +508,19 @@ import { estimateCost, parseTieredPricing, selectTier } from './pricing.js';
 // Re-export pricing utilities from cli for backward compatibility (they come from core via pricing.js)
 export { estimateCost, parseTieredPricing, selectTier } from './pricing.js';
 
+function messagesToDisplay(messages: Message[]): Array<{ role: 'user' | 'assistant' | 'tool'; content: string }> {
+  return messages.map(m => {
+    if (m.role === 'assistant' && Array.isArray(m.content)) {
+      const text = m.content
+        .filter(b => b.type === 'text')
+        .map(b => b.text)
+        .join('\n');
+      return { role: 'assistant', content: text || '[tool calls]' };
+    }
+    return { ...m, content: String(m.content ?? '') };
+  });
+}
+
 function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeName, system, settings, projects, cronManager: externalCronManager, onReminderHolder, onDebugHolder, telegramChatIdRef, telegramSubmitRef, telegramGateway, channelRegistry, channelRouter, activeChannelRef, mcpToolsRef, mcpClientsRef, mcpFailedRef, onMcpReconnect, mcpNeedsReconnect, contextWindowSize: contextWindowSizeProp, resumeSession, resumeSessionId }: AppProps) {
   const [messages, setMessages] = useState<
     Array<{ role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'task' | 'debug' | 'thinking'; content: string; title?: string }>
@@ -856,20 +869,19 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
             push('Heartbeat enabled. The agent will run on all configured schedules.');
             settingsMgr.current!.update({ heartbeat: { ...settingsMgr.current!.get().heartbeat, schedule: 'on' } });
             const settings = settingsMgr.current!.get();
-            const picked = pickNextSchedule({
+            cronManagerRef.current?.rescheduleFromSettings({
               HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
               HEARTBEAT_DAILY: settings.heartbeat.daily,
               HEARTBEAT_WEEKLY: settings.heartbeat.weekly,
               HEARTBEAT_MONTHLY: settings.heartbeat.monthly,
               HEARTBEAT_DREAMING: settings.heartbeat.dreaming,
             });
-            const hasTask = cronManagerRef.current?.listReminders('pending').some((t) => t.type === 'heartbeat');
-            if (picked && !hasTask) {
-              cronManagerRef.current?.createHeartbeat('Heartbeat: unified schedule', picked);
-            }
           } else {
             push('Heartbeat disabled.');
             settingsMgr.current!.update({ heartbeat: { ...settingsMgr.current!.get().heartbeat, schedule: 'off' } });
+            for (const task of cronManagerRef.current!.listReminders('pending')) {
+              if (task.type === 'heartbeat') cronManagerRef.current!.cancelReminder(task.id);
+            }
           }
           break;
         }
@@ -1205,10 +1217,8 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
           sessionMessagesRef.current = compactedMessages;
           setChannelMessages((prev) => ({
             ...prev,
-            [activeChannelId]: compactedMessages as any,
+            [activeChannelId]: messagesToDisplay(compactedMessages),
           }));
-
-          push(summaryText);
         } catch (err) {
           push(`Compaction failed: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -1343,7 +1353,7 @@ function App({ provider, streamProviderHolder, model, approvalMode, cwd, themeNa
       sessionMessagesRef.current = compactedMessages;
       setChannelMessages((prev) => ({
         ...prev,
-        [activeChannelId]: compactedMessages as any,
+        [activeChannelId]: messagesToDisplay(compactedMessages),
       }));
       setMessages(prev => [...prev, { role: 'assistant', content: `Compacted conversation to ${compactedMessages.length} messages (${depth}). The agent will continue with the condensed context.` }]);
     } catch (err) {
@@ -2289,38 +2299,16 @@ async function main() {
   // Initialize cron manager for reminders
   const cronManager = new CronManager();
 
-  // Auto-create unified heartbeat task if heartbeat.schedule=on
-  const hbSettings = cronManager.load();
+  // Auto-create or re-evaluate heartbeat task if heartbeat.schedule=on
   const s = settingsManager.load();
-  if (s.heartbeat?.schedule === 'on' && !hbSettings.tasks.some((t) => t.type === 'heartbeat')) {
-    const picked = pickNextSchedule({
+  if (s.heartbeat?.schedule === 'on') {
+    cronManager.rescheduleFromSettings({
       HEARTBEAT_INTRADAY: s.heartbeat?.intraday || '',
       HEARTBEAT_DAILY: s.heartbeat?.daily || '6:00',
       HEARTBEAT_WEEKLY: s.heartbeat?.weekly || 'monday@6:00',
       HEARTBEAT_MONTHLY: s.heartbeat?.monthly || '1@6:00',
       HEARTBEAT_DREAMING: s.heartbeat?.dreaming || '2:00',
-    }, Date.now());
-    if (picked) {
-      cronManager.createHeartbeat('Heartbeat: unified schedule', picked);
-      // Re-evaluate all four schedules so the task picks the earliest
-      cronManager.rescheduleFromSettings({
-        HEARTBEAT_INTRADAY: s.heartbeat?.intraday || '',
-        HEARTBEAT_DAILY: s.heartbeat?.daily || '6:00',
-        HEARTBEAT_WEEKLY: s.heartbeat?.weekly || 'monday@6:00',
-        HEARTBEAT_MONTHLY: s.heartbeat?.monthly || '1@6:00',
-        HEARTBEAT_DREAMING: s.heartbeat?.dreaming || '2:00',
-      });
-    }
-  } else if (hbSettings.tasks.some((t) => t.type === 'heartbeat')) {
-    // Consolidate: if multiple pending heartbeat tasks exist, cancel duplicates
-    const hbTasks = hbSettings.tasks.filter((t) => t.type === 'heartbeat' && t.status === 'pending');
-    if (hbTasks.length > 1) {
-      hbTasks.sort((a, b) => a.scheduledAt - b.scheduledAt);
-      for (const dup of hbTasks.slice(1)) {
-        dup.status = 'cancelled';
-      }
-      cronManager.save();
-    }
+    });
   }
 
   // Mutable holder for the reminder notification callback.
