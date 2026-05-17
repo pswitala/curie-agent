@@ -43,10 +43,15 @@ export class HeartbeatDelivery {
     errors: string[];
     sessionId: string;
   }): string {
+    let body = result.text.trim();
+    if (!body || body.includes('HEARTBEAT_OK')) {
+      body = 'All checks completed. No urgent notifications or priority actions require attention at this time.';
+    }
+
     const lines = [
       `*Heartbeat Brief*`,
       '',
-      result.text,
+      body,
       '',
       `_Tool calls: ${result.toolCalls} | Session: ${result.sessionId.slice(0, 8)}_`,
     ];

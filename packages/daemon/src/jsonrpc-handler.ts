@@ -174,20 +174,41 @@ export class JsonRpcHandler {
           const value = params?.value;
           if (!key) return this.paramError('key');
           if (value === undefined) return this.paramError('value');
-          this.settingsManager.update({ [key]: value } as never);
+
+          const settings = this.settingsManager.get();
+          if (key.includes('.')) {
+            const parts = key.split('.');
+            let current: any = settings;
+            for (let i = 0; i < parts.length - 1; i++) {
+              const part = parts[i];
+              if (part) {
+                if (current[part] === undefined || typeof current[part] !== 'object') {
+                  current[part] = {};
+                }
+                current = current[part];
+              }
+            }
+            const lastPart = parts[parts.length - 1];
+            if (lastPart) {
+              current[lastPart] = value;
+            }
+            this.settingsManager.update(settings);
+          } else {
+            this.settingsManager.update({ [key]: value } as never);
+          }
           this.settingsManager.save();
 
           if (key.startsWith('heartbeat') && this.daemonApp) {
-            const settings = this.settingsManager.get();
-            if (settings.heartbeat?.schedule === 'on') {
+            const updatedSettings = this.settingsManager.get();
+            if (updatedSettings.heartbeat?.schedule === 'on') {
               this.daemonApp.cronManager.rescheduleFromSettings({
-                HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
-                HEARTBEAT_DAILY: settings.heartbeat.daily,
-                HEARTBEAT_WEEKLY: settings.heartbeat.weekly,
-                HEARTBEAT_MONTHLY: settings.heartbeat.monthly,
-                HEARTBEAT_DREAMING: settings.heartbeat.dreaming,
+                HEARTBEAT_INTRADAY: updatedSettings.heartbeat.intraday,
+                HEARTBEAT_DAILY: updatedSettings.heartbeat.daily,
+                HEARTBEAT_WEEKLY: updatedSettings.heartbeat.weekly,
+                HEARTBEAT_MONTHLY: updatedSettings.heartbeat.monthly,
+                HEARTBEAT_DREAMING: updatedSettings.heartbeat.dreaming,
               });
-            } else if (settings.heartbeat?.schedule === 'off') {
+            } else if (updatedSettings.heartbeat?.schedule === 'off') {
               const pendingHbs = this.daemonApp.cronManager.listReminders('pending').filter(t => t.type === 'heartbeat');
               for (const t of pendingHbs) {
                 this.daemonApp.cronManager.cancelReminder(t.id);

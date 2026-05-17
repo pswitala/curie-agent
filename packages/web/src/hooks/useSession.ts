@@ -45,9 +45,12 @@ export function useSession(sessionId: string | null) {
     if (!ws || !sessionId) return;
 
     const handleEvent = (event: WsEvent) => {
-      // Filter: only process events for this session
-      const evtSessionId = (event as any).sessionId || event.id;
-      if (evtSessionId && evtSessionId !== sessionId) return;
+      // Allow global heartbeat-brief events to pass through to all sessions
+      if (event.type !== 'heartbeat-brief') {
+        // Filter: only process events for this session
+        const evtSessionId = (event as any).sessionId || event.id;
+        if (evtSessionId && evtSessionId !== sessionId) return;
+      }
 
       setEvents(prev => {
         // Avoid duplicates from WebSocket + history load overlap
@@ -63,7 +66,7 @@ export function useSession(sessionId: string | null) {
     };
 
     const unsubscribes: Array<() => void> = [];
-    const eventTypes = ['user-prompt', 'assistant-delta', 'assistant-stop', 'tool-call', 'tool-result', 'error', 'status', 'usage', 'thinking-delta'] as const;
+    const eventTypes = ['user-prompt', 'assistant-delta', 'assistant-stop', 'tool-call', 'tool-result', 'error', 'status', 'usage', 'thinking-delta', 'heartbeat-brief'] as const;
     for (const eventType of eventTypes) {
       unsubscribes.push(ws.on(eventType, handleEvent));
     }
