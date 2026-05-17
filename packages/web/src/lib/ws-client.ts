@@ -28,6 +28,7 @@ export class WsClient {
     this.ws.onopen = () => {
       this.connected = true;
       this.reconnectDelay = 1000;
+      this.dispatch({ type: 'connection-status', id: 'status', timestamp: Date.now(), connected: true });
     };
 
     this.ws.onmessage = (event: MessageEvent) => {
@@ -42,11 +43,13 @@ export class WsClient {
     this.ws.onclose = () => {
       this.connected = false;
       this.ws = null;
+      this.dispatch({ type: 'connection-status', id: 'status', timestamp: Date.now(), connected: false });
       this.scheduleReconnect();
     };
 
     this.ws.onerror = () => {
       this.connected = false;
+      this.dispatch({ type: 'connection-status', id: 'status', timestamp: Date.now(), connected: false });
     };
   }
 

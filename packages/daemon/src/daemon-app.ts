@@ -4,7 +4,7 @@ import type {
   EventBus, Event, SessionStore, SettingsManager,
   CurieSettings, ProviderStream, Tool,
 } from '@curie-agent/core';
-import { CronManager, TelegramGateway, HeartbeatExecutor, HeartbeatDelivery, TaskExecutor } from '@curie-agent/core';
+import { CronManager, TelegramGateway, HeartbeatExecutor, HeartbeatDelivery, TaskExecutor, computeNextFire } from '@curie-agent/core';
 import type { ScheduleType, CronTask } from '@curie-agent/core';
 import type { ProviderFactory } from './server.js';
 import { ApprovalTracker } from './approval-tracker.js';
@@ -80,6 +80,19 @@ export class DaemonApp {
       });
 
       this.telegramGateway.start();
+    }
+
+    // Ensure heartbeat is correctly scheduled if enabled
+    this.cronManager.load();
+    if (settings.heartbeat?.schedule === 'on') {
+      const hb = settings.heartbeat;
+      this.cronManager.rescheduleFromSettings({
+        HEARTBEAT_INTRADAY: hb.intraday,
+        HEARTBEAT_DAILY: hb.daily,
+        HEARTBEAT_WEEKLY: hb.weekly,
+        HEARTBEAT_MONTHLY: hb.monthly,
+        HEARTBEAT_DREAMING: hb.dreaming,
+      });
     }
 
     // Start cron checker
@@ -232,6 +245,8 @@ export class DaemonApp {
   /** Start the cron checker (heartbeat + reminders). */
   private startCronChecker(intervalMs = 60_000): void {
     this.checkerTimer = setInterval(async () => {
+      this.cronManager.load();
+      this.cronManager.pruneOld(Date.now() - (7 * 24 * 60 * 60 * 1000));
       const tasks = this.cronManager.listReminders('pending');
       const now = Date.now();
 
@@ -239,10 +254,23 @@ export class DaemonApp {
         if (!task.scheduledAt || task.scheduledAt > now) continue;
 
         if (task.type === 'heartbeat' && task.schedule) {
-          await this.executeHeartbeat(task);
+          // Update and persist scheduledAt before firing to prevent multiple runs.
+          // Heartbeat tasks stay pending so they fire repeatedly.
+          const oldScheduledAt = task.scheduledAt;
+          task.scheduledAt = computeNextFire(task.schedule, now);
+          this.cronManager.save();
+
+          // Fire asynchronously in background
+          this.executeHeartbeat(task, oldScheduledAt).catch(err => {
+            console.error('[DaemonApp] heartbeat run error:', err);
+          });
         } else if (task.type === 'task') {
           await this.executeTask(task);
         } else if (task.type === 'reminder') {
+          task.status = 'fired';
+          task.completedAt = Date.now();
+          this.cronManager.save();
+
           this.eventBus.emit({
             type: 'cron-task-fired',
             id: crypto.randomUUID(),
@@ -265,15 +293,13 @@ export class DaemonApp {
   }
 
   /** Execute a heartbeat task. */
-  private async executeHeartbeat(task: CronTask): Promise<void> {
+  private async executeHeartbeat(task: CronTask, oldScheduledAt?: number): Promise<void> {
     if (!this.createProvider) return;
 
     try {
       const settings = this.settingsManager.get();
       const provider = this.createProvider(settings);
       const scheduleType = task.schedule?.type as ScheduleType;
-
-      this.cronManager.updateTaskStatus(task.id, 'executing');
 
    const executor = new HeartbeatExecutor({
         provider,
@@ -287,8 +313,6 @@ export class DaemonApp {
 
       const result = await executor.execute();
       const formatted = HeartbeatDelivery.formatBrief(result);
-
-      this.cronManager.updateTaskStatus(task.id, 'completed');
 
       // Emit heartbeat-brief event
       this.eventBus.emit({
@@ -306,7 +330,6 @@ export class DaemonApp {
         await this.telegramGateway.sendMessage(settings.channels.chat_id, formatted);
       }
     } catch (err) {
-      this.cronManager.updateTaskStatus(task.id, 'failed');
       console.error('[heartbeat] Execution failed:', err);
     }
   }

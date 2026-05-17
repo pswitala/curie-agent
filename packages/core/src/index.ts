@@ -20,7 +20,7 @@ export type { RouteResult } from './channel-router.js';
 export { HeartbeatExecutor } from './heartbeat-executor.js';
 export type { HeartbeatExecutorConfig, HeartbeatResult } from './heartbeat-executor.js';
 export type { ScheduleType, CronTask, CronTaskType, CronTaskStatus } from './cron-manager.js';
-export { pickNextSchedule, scheduleLabel } from './cron-manager.js';
+export { pickNextSchedule, scheduleLabel, computeNextFire } from './cron-manager.js';
 export { HeartbeatDelivery } from './heartbeat-delivery.js';
 export type { HeartbeatDeliveryConfig } from './heartbeat-delivery.js';
 export { TaskExecutor } from './task-executor.js';
@@ -30,3 +30,5 @@ export type { BatchResult } from './heartbeat-executor.js';
 export { TokenMonitor, parseTieredPricing, selectTier, estimateCost, type PriceTier } from './token-monitor.js';
 export type { TokenMonitorConfig, TokenEvent } from './token-monitor.js';
 export { withDateContext, formatDate } from './context.js';
+export { listSnapshots, revertTo } from './safety/snapshot.js';
+

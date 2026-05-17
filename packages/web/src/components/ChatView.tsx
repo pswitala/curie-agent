@@ -12,6 +12,7 @@ interface Props {
   activeSessionId: string | null;
   onNewChat?: () => void;
   onCreateSession?: (sessionId: string) => void;
+  onClearCmdResult?: () => void;
 }
 
 function ThinkingBlock({ content }: { content: string }) {
@@ -47,6 +48,47 @@ function ThinkingBlock({ content }: { content: string }) {
             </pre>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ToolGroupBlock({ toolCalls }: { toolCalls: ToolCallEntry[] }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="px-5 py-1 animate-fadeIn">
+      <div className="border border-b2 rounded-lg overflow-hidden mb-1">
+        <div
+          className="flex items-center gap-2 px-3 py-2 bg-s2 cursor-pointer select-none hover:bg-s2/50 transition-colors duration-100"
+          onClick={() => setExpanded(!expanded)}
+        >
+          <div className="w-[14px] h-[14px] rounded-[3px] bg-s4 flex items-center justify-center">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth="1.5">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+            </svg>
+          </div>
+          <span className="text-[11.5px] font-medium text-text font-mono">
+            {toolCalls.length} tool call{toolCalls.length > 1 ? 's' : ''}
+          </span>
+          <div className="flex-1" />
+          <svg
+            width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            className={`text-muted transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </div>
+        {expanded && toolCalls.map((tc, j) => (
+          <div key={j} className="px-3 py-2.5 border-t border-b1 bg-s1/50 first:border-t-0">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[11.5px] font-semibold text-fg font-mono">{tc.name}</span>
+              <span className="text-xs text-muted font-mono truncate max-w-[250px]">{tc.args}</span>
+            </div>
+            <pre className="text-[11px] text-muted font-mono leading-[1.5] overflow-x-auto whitespace-pre-wrap">{tc.input ? escapeHtml(JSON.stringify(tc.input, null, 2)) : ''}</pre>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -100,18 +142,26 @@ function eventToMessage(event: WsEvent): MessageEntry | null {
   }
 }
 
-export default function ChatView({ cmdResult, rpc, className, activeSessionId, onNewChat, onCreateSession }: Props) {
+export default function ChatView({ cmdResult, rpc, className, activeSessionId, onNewChat, onCreateSession, onClearCmdResult }: Props) {
   const { ws, connected } = useApi();
   const { events } = useSession(activeSessionId);
   const [typing, setTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [localCmd, setLocalCmd] = useState('');
   const chatRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!connected && !error) {
-      setError('Disconnected from daemon. Check that the daemon is running.');
+    if (connected) {
+      setError(prev => prev === 'Disconnected from daemon. Check that the daemon is running.' ? null : prev);
+    } else {
+      // Delay showing the disconnection error slightly to avoid a visual flash
+      // on initial connect/handshake which typically completes in <200ms.
+      const timer = setTimeout(() => {
+        setError('Disconnected from daemon. Check that the daemon is running.');
+      }, 1000);
+      return () => clearTimeout(timer);
     }
-  }, [connected, error]);
+  }, [connected]);
 
   // The server returns the new sessionId immediately via rpc.sessionSend.
   // We no longer listen to global user-prompt events here because it causes
@@ -169,8 +219,10 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
   useEffect(() => {
     if (cmdResult) {
       console.log('Command palette result:', cmdResult);
+      setLocalCmd(cmdResult);
+      onClearCmdResult?.();
     }
-  }, [cmdResult]);
+  }, [cmdResult, onClearCmdResult]);
 
   const handleSend = useCallback(async (text: string) => {
     if (!rpc) {
@@ -241,32 +293,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
             if (msg.type === 'tool-group') {
               const tg = msg as MessageEntry & { toolCalls: ToolCallEntry[] };
               if (tg.toolCalls.length > 0) {
-                return (
-                  <div key={i} className="px-5 py-1 animate-fadeIn">
-                    <div className="border border-b2 rounded-lg overflow-hidden mb-1">
-                      <div className="flex items-center gap-2 px-3 py-2 bg-s2 border-b border-b1">
-                        <div className="w-[14px] h-[14px] rounded-[3px] bg-s4 flex items-center justify-center">
-                          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth="1.5">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                            <polyline points="14 2 14 8 20 8" />
-                          </svg>
-                        </div>
-                        <span className="text-[11.5px] font-medium text-text font-mono">
-                          {tg.toolCalls.length} tool call{tg.toolCalls.length > 1 ? 's' : ''}
-                        </span>
-                      </div>
-                      {tg.toolCalls.map((tc, j) => (
-                        <div key={j} className="px-3 py-1.5 border-b border-b1/50 last:border-b-0">
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <span className="text-[11.5px] font-medium text-text font-mono">{tc.name}</span>
-                            <span className="text-xs text-muted font-mono truncate max-w-[200px]">{tc.args}</span>
-                          </div>
-                          <div className="text-[11px] text-muted font-mono leading-[1.5]">{escapeHtml(JSON.stringify(tc.input))}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
+                return <ToolGroupBlock key={i} toolCalls={tg.toolCalls} />;
               }
             }
 
@@ -317,7 +344,11 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
             New Chat
           </button>
         </div>
-        <ChatInput onSend={handleSend} />
+        <ChatInput
+          onSend={handleSend}
+          cmdInput={localCmd}
+          onClearCmdInput={() => setLocalCmd('')}
+        />
       </div>
     </div>
   );

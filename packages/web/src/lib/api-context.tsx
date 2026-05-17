@@ -37,11 +37,17 @@ export function ApiProvider({ children }: ApiProviderProps) {
     setContext({ rpc, ws, connected: false });
 
     ws.connect();
+
+    const unsubscribe = ws.on('connection-status', (evt) => {
+      setContext(prev => ({ ...prev, connected: !!(evt as any).connected }));
+    });
+
     const checkInterval = setInterval(() => {
       setContext(prev => ({ ...prev, connected: ws.isConnected() }));
     }, 2000);
 
     return () => {
+      unsubscribe();
       clearInterval(checkInterval);
       ws.disconnect();
     };

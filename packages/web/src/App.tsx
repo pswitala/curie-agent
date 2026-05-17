@@ -76,6 +76,10 @@ function AppContent() {
     setCmdOpen(false);
   }, []);
 
+  const handleClearCmdResult = useCallback(() => {
+    setCmdResult('');
+  }, []);
+
   const renderNavIcon = (item: { view: View; icon: string }) => (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
       <path d={item.icon} />
@@ -169,6 +173,7 @@ function AppContent() {
           {activeView === 'assistant' && (
             <ChatView
               cmdResult={cmdResult}
+              onClearCmdResult={handleClearCmdResult}
               rpc={rpc}
               className="absolute inset-0"
               activeSessionId={activeSessionId}

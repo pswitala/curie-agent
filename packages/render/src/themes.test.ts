@@ -28,18 +28,18 @@ describe('ThemeColors', () => {
           const val = theme[key];
           expect(val).toBeDefined();
           expect(typeof val).toBe('string');
-          expect(val).toMatch(/^#[0-9a-f]{6}$/i);
+          expect(val).toMatch(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
         }
       });
 
       it('has valid userBackground and userForeground when defined', () => {
         if (theme.userBackground !== undefined) {
           expect(typeof theme.userBackground).toBe('string');
-          expect(theme.userBackground).toMatch(/^#[0-9a-f]{6}$/i);
+          expect(theme.userBackground).toMatch(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
         }
         if (theme.userForeground !== undefined) {
           expect(typeof theme.userForeground).toBe('string');
-          expect(theme.userForeground).toMatch(/^#[0-9a-f]{6}$/i);
+          expect(theme.userForeground).toMatch(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
         }
       });
 

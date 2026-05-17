@@ -1,14 +1,30 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
 interface Props {
   onSend: (text: string) => void;
+  cmdInput?: string;
+  onClearCmdInput?: () => void;
 }
 
 const CHIPS = ['/status', '/context', '/memory', '/heartbeat', '/snapshots'];
 
-export default function ChatInput({ onSend }: Props) {
+export default function ChatInput({ onSend, cmdInput, onClearCmdInput }: Props) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (cmdInput) {
+      setValue(cmdInput);
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          // Put cursor at the end of the text
+          textareaRef.current.selectionStart = textareaRef.current.selectionEnd = cmdInput.length;
+        }
+      }, 50);
+      onClearCmdInput?.();
+    }
+  }, [cmdInput, onClearCmdInput]);
 
   const grow = useCallback(() => {
     const el = textareaRef.current;
