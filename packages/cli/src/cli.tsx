@@ -735,6 +735,7 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
         }
         case 'theme': {
           const theme = args.trim();
+          await rpcRef.current.configSet('theme', theme);
           setCurrentTheme(theme);
           setMessages(prev => [...prev, { role: 'system', content: `Theme switched to: ${theme}` }]);
           break;

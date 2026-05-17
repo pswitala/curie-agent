@@ -197,6 +197,13 @@ export class JsonRpcHandler {
             this.settingsManager.update({ [key]: value } as never);
           }
           this.settingsManager.save();
+          this.sharedEventBus.emit({
+            type: 'config-changed',
+            id: Math.random().toString(36).substring(7),
+            timestamp: Date.now(),
+            key,
+            value,
+          } as any);
 
           if (key.startsWith('heartbeat') && this.daemonApp) {
             const updatedSettings = this.settingsManager.get();
@@ -231,6 +238,8 @@ export class JsonRpcHandler {
             model: cfg.model,
             url: cfg.url,
             configured: !!cfg.api_key,
+            model_cost: cfg.model_cost || '',
+            model_context_window: cfg.model_context_window || 131072,
           }));
           break;
         }
@@ -586,7 +595,7 @@ Usage: \`/model pricing <in;out>\` (e.g., \`/model pricing 2.50;10.00\`).`);
               emitDelta(`Invalid pricing format: "${rest}". Must be in the format: \`input_cost;output_cost\` (e.g., \`3.00;15.00\`).`);
             } else {
               pConfig.model_cost = rest;
-              this.settingsManager.save();
+              this.settingsManager.update(settings);
               emitDelta(`Pricing updated for provider \`${provider}\`! Cost: **${rest}**`);
             }
           } else if (sub === 'window') {
@@ -599,13 +608,21 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                 emitDelta(`Invalid window value: "${rest}". Must be at least 1,000.`);
               } else {
                 pConfig.model_context_window = val;
-                this.settingsManager.save();
+                this.settingsManager.update(settings);
                 emitDelta(`Model context window capacity set to **${val.toLocaleString()}** tokens.`);
               }
             }
           } else {
+            settings.model_override = args;
             settings.model = args;
-            this.settingsManager.save();
+            this.settingsManager.update(settings);
+            this.sharedEventBus.emit({
+              type: 'config-changed',
+              id: Math.random().toString(36).substring(7),
+              timestamp: Date.now(),
+              key: 'model',
+              value: args,
+            } as any);
             emitDelta(`Successfully switched model to: **${args}**`);
           }
           break;
@@ -623,9 +640,41 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
               emitDelta(`Unknown provider: "${args}". Valid options are: ${valid.join(', ')}`);
             } else {
               settings.current_provider = provider;
-              this.settingsManager.save();
+              settings.model_override = undefined;
+              this.settingsManager.update(settings);
+              this.sharedEventBus.emit({
+                type: 'config-changed',
+                id: Math.random().toString(36).substring(7),
+                timestamp: Date.now(),
+                key: 'current_provider',
+                value: provider,
+              } as any);
               emitDelta(`Successfully switched provider to: **${provider}**`);
             }
+          }
+          break;
+        }
+
+        case 'theme': {
+          const settings = this.settingsManager.get();
+          const validThemes = ['tokyo-night', 'nord', 'dracula', 'solarized', 'gruvbox', 'black', 'white', 'grey'];
+          const theme = args.toLowerCase().trim();
+          if (!args) {
+            emitDelta(`Current theme is: \`${settings.theme || 'nord'}\`. Use \`/theme <name>\` to switch.
+* Valid themes: \`tokyo-night | nord | dracula | solarized | gruvbox | black | white | grey\``);
+          } else if (!validThemes.includes(theme)) {
+            emitDelta(`Unknown theme: "${args}". Valid options are: ${validThemes.join(', ')}`);
+          } else {
+            settings.theme = theme;
+            this.settingsManager.update(settings);
+            this.sharedEventBus.emit({
+              type: 'config-changed',
+              id: Math.random().toString(36).substring(7),
+              timestamp: Date.now(),
+              key: 'theme',
+              value: theme,
+            } as any);
+            emitDelta(`Successfully switched theme to: **${theme}**`);
           }
           break;
         }
@@ -639,7 +688,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
             emitDelta(`Invalid mode: \`${args}\`. Supported modes: manual, plan, auto-edit, yolo.`);
           } else {
             settings.mode = args.toLowerCase() as any;
-            this.settingsManager.save();
+            this.settingsManager.update(settings);
             emitDelta(`Successfully switched approval mode to: **${args.toLowerCase()}**`);
           }
           break;
@@ -654,7 +703,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
             emitDelta(`Invalid effort: \`${args}\`. Supported effort levels: low, medium, high, max, auto.`);
           } else {
             settings.effort = args.toLowerCase() as any;
-            this.settingsManager.save();
+            this.settingsManager.update(settings);
             emitDelta(`Successfully switched reasoning effort to: **${args.toLowerCase()}**`);
           }
           break;

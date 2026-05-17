@@ -1,5 +1,6 @@
 import { useConfig } from '../hooks/useConfig.js';
 import type { SessionInfo } from '../hooks/useSession.js';
+import type { WsEvent } from '../lib/ws-client.js';
 
 type View = 'assistant' | 'channels' | 'stats' | 'projects' | 'agents';
 
@@ -11,6 +12,7 @@ interface Props {
   activeSessionId: string | null;
   onNewChat: () => void;
   onSelectSession: (sessionId: string) => void;
+  events?: WsEvent[];
 }
 
 const NAV_ITEMS: { view: View; label: string; icon: string }[] = [
@@ -33,9 +35,77 @@ function getRelativeTime(ms: number): string {
   return `${Math.floor(ms / 86400_000)}d ago`;
 }
 
+function formatTokenCount(n: number): string {
+  if (n < 1000) return String(n);
+  return `${(n / 1000).toFixed(1)}k`;
+}
+
+function estimateCostClient(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+  customCost?: string,
+): number {
+  if (customCost) {
+    if (!customCost.includes('|')) {
+      const [inStr = '', outStr = ''] = customCost.split(';');
+      const inC = parseFloat(inStr);
+      const outC = parseFloat(outStr);
+      if (!isNaN(inC) && !isNaN(outC)) {
+        return (inputTokens * inC + outputTokens * outC) / 1_000_000;
+      }
+    } else {
+      const rawTiers = customCost.split('|').map(s => s.trim());
+      const tiers: Array<{ threshold?: number; in: number; out: number }> = [];
+      const [inStr = '', outStr = ''] = rawTiers[0]?.split(';') ?? ['', ''];
+      const baseIn = parseFloat(inStr);
+      const baseOut = parseFloat(outStr);
+      if (!isNaN(baseIn) && !isNaN(baseOut)) {
+        tiers.push({ in: baseIn, out: baseOut });
+        for (let i = 1; i < rawTiers.length; i++) {
+          const tier = rawTiers[i]!;
+          const pipeIdx = tier.indexOf('<');
+          if (pipeIdx !== -1) {
+            const threshold = parseInt(tier.substring(0, pipeIdx).trim(), 10);
+            const rest = tier.substring(pipeIdx + 1).trim();
+            const [tierInStr = '', tierOutStr = ''] = rest.split(';');
+            const tierIn = parseFloat(tierInStr);
+            const tierOut = parseFloat(tierOutStr);
+            if (!isNaN(threshold) && !isNaN(tierIn) && !isNaN(tierOut)) {
+              tiers.push({ threshold, in: tierIn, out: tierOut });
+            }
+          }
+        }
+      }
+      if (tiers.length > 0) {
+        let rate = [tiers[0]!.in, tiers[0]!.out];
+        const total = inputTokens + outputTokens;
+        for (const t of tiers) {
+          if (t.threshold !== undefined && total >= t.threshold) {
+            rate = [t.in, t.out];
+          }
+        }
+        return (inputTokens * rate[0]! + outputTokens * rate[1]!) / 1_000_000;
+      }
+    }
+  }
+  const pricing: Record<string, { in: number; out: number }> = {
+    'opus': { in: 15, out: 75 },
+    'sonnet': { in: 3, out: 15 },
+    'haiku': { in: 0.8, out: 4 },
+    'gpt-4o': { in: 2.5, out: 10 },
+    'gpt-4': { in: 5, out: 15 },
+    'qwen': { in: 0.112, out: 0.224 },
+  };
+  const key = Object.keys(pricing).find(k => model.toLowerCase().includes(k)) || 'sonnet';
+  const p = pricing[key]!;
+  return (inputTokens * p.in + outputTokens * p.out) / 1_000_000;
+}
+
 export default function Sidebar({
   activeView, onNavigate, connected,
   sessions, activeSessionId, onNewChat, onSelectSession,
+  events = [],
 }: Props) {
   const { providers, get, set } = useConfig();
   const currentProvider = get('current_provider') as string | undefined;
@@ -43,7 +113,7 @@ export default function Sidebar({
 
   const activeProvider = providers.find(p => p.name === currentProvider && p.configured)
     || providers.find(p => p.configured)
-    || { name: 'none', model: '' };
+    || { name: 'none', model: '', url: '', configured: false, model_cost: '' };
 
   const cycleProvider = () => {
     const configured = providers.filter(p => p.configured);
@@ -53,6 +123,20 @@ export default function Sidebar({
     set('current_provider', next.name);
     if (next.model) set('model', next.model);
   };
+
+  const usageEvents = events.filter(e => e.type === 'usage') as any[];
+  const totalTokens = usageEvents.reduce((acc, curr) => acc + (curr.inputTokens || 0) + (curr.outputTokens || 0), 0);
+  const latestUsage = usageEvents[usageEvents.length - 1];
+  const contextTokens = latestUsage ? (latestUsage.inputTokens || 0) : 0;
+  const customCost = activeProvider.model_cost || undefined;
+  const cost = usageEvents.reduce((acc, curr) => {
+    return acc + estimateCostClient(
+      model || activeProvider.model || '',
+      curr.inputTokens || 0,
+      curr.outputTokens || 0,
+      customCost
+    );
+  }, 0);
 
   return (
     <aside className="w-[232px] bg-s1 border-r border-b1 flex flex-col overflow-hidden shrink-0">
@@ -122,10 +206,11 @@ export default function Sidebar({
       </div>
 
       {/* Footer */}
-      <div className="border-t border-b1 px-3 py-2.5">
+      <div className="border-t border-b1 px-3 py-2.5 space-y-2">
         <div
           className="flex items-center gap-2 px-1 py-1.5 rounded-[6px] cursor-pointer hover:bg-s2 transition-colors duration-100"
           onClick={cycleProvider}
+          title="Click to cycle configured providers"
         >
           <div className={`w-[6px] h-[6px] rounded-full shrink-0 ${connected ? 'bg-green' : 'bg-muted2'}`} />
           <div className="flex-1 min-w-0">
@@ -133,6 +218,27 @@ export default function Sidebar({
             <div className="text-[10.5px] text-muted font-mono truncate">{model || activeProvider.model || ''}</div>
           </div>
         </div>
+
+        {activeSessionId && (
+          <div className="px-2 py-2 bg-s2 rounded-[6px] border border-b1 text-[11px] font-mono space-y-1 select-none">
+            <div className="flex justify-between text-muted2 border-b border-b1 pb-1 mb-1 text-[10px]">
+              <span>Session:</span>
+              <span className="text-fg font-semibold">{activeSessionId.slice(0, 8)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted">Total Tok:</span>
+              <span className="text-text">{formatTokenCount(totalTokens)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted">Active Ctx:</span>
+              <span className="text-text">{formatTokenCount(contextTokens)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted">Cost:</span>
+              <span className="text-green font-semibold">${cost.toFixed(4)}</span>
+            </div>
+          </div>
+        )}
       </div>
     </aside>
   );

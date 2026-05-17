@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { marked } from 'marked';
 import { useApi } from '../lib/api-context.js';
-import { useSession } from '../hooks/useSession.js';
 import ChatInput from './ChatInput.js';
 import type { JsonRpcClient } from '../lib/jsonrpc-client.js';
 import type { WsEvent } from '../lib/ws-client.js';
@@ -14,6 +13,8 @@ interface Props {
   onNewChat?: () => void;
   onCreateSession?: (sessionId: string) => void;
   onClearCmdResult?: () => void;
+  events: WsEvent[];
+  addLiveEvent: (event: WsEvent) => void;
 }
 
 function ThinkingBlock({ content }: { content: string }) {
@@ -200,9 +201,8 @@ function eventToMessage(event: WsEvent): MessageEntry | null {
   }
 }
 
-export default function ChatView({ cmdResult, rpc, className, activeSessionId, onNewChat, onCreateSession, onClearCmdResult }: Props) {
+export default function ChatView({ cmdResult, rpc, className, activeSessionId, onNewChat, onCreateSession, onClearCmdResult, events, addLiveEvent }: Props) {
   const { ws, connected } = useApi();
-  const { events, addLiveEvent } = useSession(activeSessionId);
   const [typing, setTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [localCmd, setLocalCmd] = useState('');
@@ -553,22 +553,11 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
             <div className="text-[11px] text-red font-mono">{error}</div>
           </div>
         )}
-        <div className="flex items-center justify-between px-5 pt-2">
-          <button
-            className="flex items-center gap-1 bg-transparent border border-b2 rounded px-2.5 py-1 text-muted text-xs hover:border-b3 hover:text-fg transition-colors duration-100"
-            onClick={onNewChat}
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            New Chat
-          </button>
-        </div>
         <ChatInput
           onSend={handleSend}
           cmdInput={localCmd}
           onClearCmdInput={() => setLocalCmd('')}
+          onNewChat={onNewChat}
         />
       </div>
     </div>

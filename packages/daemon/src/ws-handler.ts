@@ -49,7 +49,7 @@ export class WsHandler {
       // New event types not yet in core Event type — subscribe as unknown
       const newEventTypes: Array<string> = [
         'cron-task-fired', 'heartbeat-brief', 'channel-updated',
-        'mcp-status', 'daemon-ready',
+        'mcp-status', 'daemon-ready', 'config-changed',
       ];
 
       for (const type of eventTypes) {

@@ -8,6 +8,8 @@ import ProjectsView from './components/ProjectsView.js';
 import AgentsView from './components/AgentsView.js';
 import CommandPalette from './components/CommandPalette.js';
 import { useWebSessions } from './hooks/useWebSessions.js';
+import { useSession } from './hooks/useSession.js';
+import { useConfig } from './hooks/useConfig.js';
 
 type View = 'assistant' | 'channels' | 'stats' | 'projects' | 'agents';
 
@@ -31,6 +33,7 @@ const NAV_ITEMS: { view: View; label: string; icon: string }[] = [
 
 function AppContent() {
   const { rpc, connected } = useApi();
+  const { get } = useConfig();
   const [activeView, setActiveView] = useState<View>('assistant');
   const [mode, setMode] = useState<'manual' | 'plan' | 'auto-edit' | 'yolo'>('auto-edit');
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -39,6 +42,13 @@ function AppContent() {
   const [isMobile, setIsMobile] = useState(false);
 
   const { sessions, refetch } = useWebSessions();
+  const { events, addLiveEvent } = useSession(activeSessionId);
+
+  const theme = (get('theme') as string) || 'nord';
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -98,6 +108,7 @@ function AppContent() {
           activeSessionId={activeSessionId}
           onNewChat={handleNewChat}
           onSelectSession={handleSelectSession}
+          events={events}
         />
       )}
 
@@ -179,6 +190,8 @@ function AppContent() {
               activeSessionId={activeSessionId}
               onNewChat={handleNewChat}
               onCreateSession={handleCreateSession}
+              events={events}
+              addLiveEvent={addLiveEvent}
             />
           )}
           {activeView === 'channels' && <ChannelsView rpc={rpc} className="absolute inset-0" />}

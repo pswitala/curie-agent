@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { createTool, type ToolContext } from './tool.js';
+import { createTool, expandPath, type ToolContext } from './tool.js';
 
 const GlobSchema = z.object({
   pattern: z.string().describe('The glob pattern to match files against'),
@@ -46,7 +46,7 @@ export const globTool = createTool(
   'Fast file pattern matching. Gitignore-aware file pattern matching.',
   GlobSchema,
   async (input, ctx: ToolContext) => {
-    const searchDir = input.path ? path.resolve(ctx.cwd, input.path) : ctx.cwd;
+    const searchDir = input.path ? path.resolve(ctx.cwd, expandPath(input.path)) : ctx.cwd;
     const gitignorePatterns = readGitignore(ctx.cwd);
 
     const results: string[] = [];

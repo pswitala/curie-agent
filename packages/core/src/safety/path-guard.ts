@@ -45,7 +45,7 @@ export function isPathAllowed(
   const t = normalize(targetPath);
   const c = normalize(cwd);
   if (startsWith(t, c)) return true;
-  if (startsWith(t, curieAgentDir())) return true;
+  if (startsWith(t, normalize(curieAgentDir()))) return true;
   return allowlist.some(a => startsWith(t, normalize(a)));
 }
 

@@ -6,14 +6,16 @@ export interface ProviderInfo {
   model: string;
   url: string;
   configured: boolean;
+  model_cost?: string;
+  model_context_window?: number;
 }
 
 export function useConfig() {
-  const { rpc } = useApi();
+  const { rpc, ws } = useApi();
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
 
-  useEffect(() => {
+  const fetchConfig = useCallback(() => {
     if (!rpc) return;
 
     // Fetch providers
@@ -23,13 +25,31 @@ export function useConfig() {
       })
       .catch(() => {});
 
-    // Fetch model
-    rpc.configGet('model')
-      .then((model: any) => {
-        setSettings(prev => ({ ...prev, model }));
-      })
-      .catch(() => {});
+    // Fetch model, current_provider and theme settings
+    Promise.all([
+      rpc.configGet('model').catch(() => null),
+      rpc.configGet('current_provider').catch(() => null),
+      rpc.configGet('theme').catch(() => null),
+    ]).then(([model, current_provider, theme]) => {
+      setSettings(prev => ({
+        ...prev,
+        model: model !== null ? model : prev.model,
+        current_provider: current_provider !== null ? current_provider : prev.current_provider,
+        theme: theme !== null ? theme : prev.theme,
+      }));
+    }).catch(() => {});
   }, [rpc]);
+
+  useEffect(() => {
+    fetchConfig();
+  }, [fetchConfig]);
+
+  useEffect(() => {
+    if (!ws) return;
+    return ws.on('config-changed', () => {
+      fetchConfig();
+    });
+  }, [ws, fetchConfig]);
 
   const get = useCallback((key: string): unknown => {
     return settings[key];

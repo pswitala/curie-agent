@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { createTool, type ToolContext } from './tool.js';
+import { createTool, expandPath, type ToolContext } from './tool.js';
 
 const GrepSchema = z.object({
   pattern: z.string().describe('The regular expression pattern to search for'),
@@ -29,7 +29,7 @@ export const grepTool = createTool(
   'Content search with regex support. Searches file contents for matching patterns.',
   GrepSchema,
   async (input, ctx: ToolContext) => {
-    const searchPath = input.path ? path.resolve(ctx.cwd, input.path) : ctx.cwd;
+    const searchPath = input.path ? path.resolve(ctx.cwd, expandPath(input.path)) : ctx.cwd;
     const regexFlags = input['-i'] ? 'gi' : 'g';
     const pattern = input.pattern ?? '';
     const regex = new RegExp(pattern, regexFlags);

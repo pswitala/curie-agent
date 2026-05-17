@@ -4,11 +4,12 @@ interface Props {
   onSend: (text: string) => void;
   cmdInput?: string;
   onClearCmdInput?: () => void;
+  onNewChat?: () => void;
 }
 
 const CHIPS = ['/status', '/context', '/memory', '/heartbeat', '/snapshots'];
 
-export default function ChatInput({ onSend, cmdInput, onClearCmdInput }: Props) {
+export default function ChatInput({ onSend, cmdInput, onClearCmdInput, onNewChat }: Props) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -54,10 +55,22 @@ export default function ChatInput({ onSend, cmdInput, onClearCmdInput }: Props) 
   }, []);
 
   return (
-    <div className="border-t border-b1 px-5 py-3.5 bg-s1">
+    <div className="px-5 py-3 bg-transparent">
       <div className="bg-s2 border border-b2 rounded-[10px] focus-within:border-b3 transition-colors duration-150">
         {/* Chips */}
         <div className="flex flex-wrap gap-1 px-3 pt-2">
+          {onNewChat && (
+            <button
+              className="flex items-center gap-0.5 bg-transparent border border-b2 rounded px-1.5 py-0.5 text-xs text-muted hover:border-b3 hover:text-fg transition-colors duration-100 cursor-pointer select-none font-medium"
+              onClick={onNewChat}
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              New
+            </button>
+          )}
           {CHIPS.map((chip) => (
             <button
               key={chip}
