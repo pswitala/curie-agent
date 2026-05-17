@@ -16,6 +16,8 @@ export interface TaskExecutorConfig {
   maxTurns?: number;
   /** The task instruction/prompt. */
   instruction: string;
+  /** System prompt for the task turn loop. */
+  system?: string;
 }
 
 export interface TaskResult {
@@ -36,7 +38,7 @@ export class TaskExecutor {
     const context = this.gatherContext();
     const prompt = this.buildPrompt(this.config.instruction, context);
 
-    const batchResult = await new BatchTurnLoop({
+   const batchResult = await new BatchTurnLoop({
       provider: this.config.provider,
       model: this.config.model,
       tools: this.config.tools,
@@ -44,7 +46,7 @@ export class TaskExecutor {
       settings: this.config.settings,
       effort: this.config.effort,
       maxTurns: this.config.maxTurns ?? 50,
-      system: `You are executing a scheduled task. Complete the task instruction using available tools. Deliver the results to the user.`,
+      system: this.config.system || `You are executing a scheduled task. Complete the task instruction using available tools. Deliver the results to the user.`,
     }).run(prompt);
 
     return {

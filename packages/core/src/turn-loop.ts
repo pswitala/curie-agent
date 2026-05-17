@@ -3,6 +3,7 @@ import { SessionStore, type SessionInfo } from './session-store.js';
 import { PermissionEngine, type ApprovalMode } from './permission.js';
 import type { CurieSettings } from './settings.js';
 import { createSnapshot } from './safety/snapshot.js';
+import { withDateContext } from './context.js';
 
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'max' | 'auto';
 
@@ -319,7 +320,7 @@ export class TurnLoop {
           messages: streamMessages as any,
           tools: self.config.tools.map((t) => t.definition),
           model: self.config.model,
-          system: self.config.system,
+          system: withDateContext(self.config.system),
           signal: abortCtrl.signal,
           effort: self.config.effort,
         });

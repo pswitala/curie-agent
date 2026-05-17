@@ -94,6 +94,8 @@ export class OllamaProvider implements Provider {
 
       const pendingTools = new Map<number, { id: string; name: string; inputStr: string }>();
       let lastUsage: OpenAI.CompletionUsage | null = null;
+      let inThinkBlock = false;
+      let accumulatedThinking = '';
 
       for await (const chunk of sdkStream) {
         if (args.signal?.aborted) {
@@ -107,8 +109,39 @@ export class OllamaProvider implements Provider {
         const choice = chunk.choices?.[0];
         if (!choice) continue;
 
-        if (choice.delta?.content) {
-          yield { type: 'text-delta', text: choice.delta.content };
+        if (choice.delta?.content && typeof choice.delta.content === 'string') {
+          const content = choice.delta.content;
+          
+          if (!inThinkBlock && content.includes('<think>')) {
+            const parts = content.split('<think>');
+            if (parts[0]) yield { type: 'text-delta', text: parts[0] };
+            inThinkBlock = true;
+            
+            const rest = parts.slice(1).join('<think>');
+            if (rest.includes('</think>')) {
+              const thinkParts = rest.split('</think>');
+              yield { type: 'thinking-delta', text: thinkParts[0] || '' };
+              accumulatedThinking += (thinkParts[0] || '');
+              inThinkBlock = false;
+              if (thinkParts[1]) yield { type: 'text-delta', text: thinkParts[1] };
+            } else {
+              yield { type: 'thinking-delta', text: rest };
+              accumulatedThinking += rest;
+            }
+          } else if (inThinkBlock) {
+            if (content.includes('</think>')) {
+              const parts = content.split('</think>');
+              yield { type: 'thinking-delta', text: parts[0] || '' };
+              accumulatedThinking += (parts[0] || '');
+              inThinkBlock = false;
+              if (parts[1]) yield { type: 'text-delta', text: parts[1] };
+            } else {
+              yield { type: 'thinking-delta', text: content };
+              accumulatedThinking += content;
+            }
+          } else {
+            yield { type: 'text-delta', text: content };
+          }
         }
 
         if (choice.delta?.tool_calls) {
@@ -133,6 +166,10 @@ export class OllamaProvider implements Provider {
           }
         } catch { /* empty input on parse failure */ }
         yield { type: 'tool-call', id: pending.id, name: pending.name, input };
+      }
+
+      if (accumulatedThinking) {
+        yield { type: 'thinking-block', thinking: accumulatedThinking, signature: '' };
       }
 
       if (lastUsage) {

@@ -29,8 +29,13 @@ function startsWith(haystack: string, prefix: string): boolean {
   return a === b || a.startsWith(b + path.sep);
 }
 
+/** The ~/.curie-agent directory — always allowed. */
+export function curieAgentDir(): string {
+  return path.join(homedir(), '.curie-agent');
+}
+
 /**
- * Check whether `targetPath` is inside `cwd` or any path in `allowlist`.
+ * Check whether `targetPath` is inside `cwd`, `~/.curie-agent`, or any path in `allowlist`.
  */
 export function isPathAllowed(
   targetPath: string,
@@ -40,6 +45,7 @@ export function isPathAllowed(
   const t = normalize(targetPath);
   const c = normalize(cwd);
   if (startsWith(t, c)) return true;
+  if (startsWith(t, curieAgentDir())) return true;
   return allowlist.some(a => startsWith(t, normalize(a)));
 }
 

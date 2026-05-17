@@ -124,6 +124,51 @@ export const ContextWarningEvent = z.object({
   timestamp: z.number(),
 });
 
+export const CronTaskFiredEvent = z.object({
+  type: z.literal('cron-task-fired'),
+  id: z.string(),
+  taskId: z.string(),
+  taskType: z.enum(['reminder', 'heartbeat', 'task']),
+  message: z.string(),
+  timestamp: z.number(),
+});
+
+export const HeartbeatBriefEvent = z.object({
+  type: z.literal('heartbeat-brief'),
+  id: z.string(),
+  scheduleType: z.enum(['intraday', 'daily', 'weekly', 'monthly', 'dreaming']),
+  formattedText: z.string(),
+  toolCalls: z.number(),
+  errors: z.array(z.string()),
+  timestamp: z.number(),
+});
+
+export const ChannelUpdatedEvent = z.object({
+  type: z.literal('channel-updated'),
+  id: z.string(),
+  channelId: z.string(),
+  channelType: z.enum(['cli', 'telegram']),
+  displayName: z.string(),
+  sessionId: z.string(),
+  timestamp: z.number(),
+});
+
+export const McpStatusEvent = z.object({
+  type: z.literal('mcp-status'),
+  id: z.string(),
+  serverId: z.string(),
+  connected: z.boolean(),
+  tools: z.array(z.string()),
+  timestamp: z.number(),
+});
+
+export const DaemonReadyEvent = z.object({
+  type: z.literal('daemon-ready'),
+  id: z.string(),
+  version: z.string(),
+  timestamp: z.number(),
+});
+
 export const EventSchema = z.discriminatedUnion('type', [
   UserPromptEvent,
   AssistantDeltaEvent,
@@ -140,6 +185,11 @@ export const EventSchema = z.discriminatedUnion('type', [
   StatusEvent,
   SessionResumedEvent,
   ContextWarningEvent,
+  CronTaskFiredEvent,
+  HeartbeatBriefEvent,
+  ChannelUpdatedEvent,
+  McpStatusEvent,
+  DaemonReadyEvent,
 ]);
 
 export type Event = z.infer<typeof EventSchema>;

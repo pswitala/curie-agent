@@ -17,6 +17,11 @@ export {
   StatusEvent,
   SessionResumedEvent,
   ContextWarningEvent,
+  CronTaskFiredEvent,
+  HeartbeatBriefEvent,
+  ChannelUpdatedEvent,
+  McpStatusEvent,
+  DaemonReadyEvent,
 } from './event-schemas.js';
 export type { Event } from './event-schemas.js';
 
@@ -53,6 +58,17 @@ export {
   ProviderListSchema,
   ConfigGetSchema,
   ConfigSetSchema,
+  DaemonStatusSchema,
+  DaemonShutdownSchema,
+  CronListSchema,
+  CronCreateSchema,
+  CronCancelSchema,
+  CronClearSchema,
+  HeartbeatRunSchema,
+  HeartbeatStatusSchema,
+  ChannelListSchema,
+  ChannelGetSchema,
+  McpListSchema,
 } from './methods.js';
 
 export {

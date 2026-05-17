@@ -12,30 +12,14 @@
     "src"
   ],
   "exclude": [
-    "**/*.test.ts",
-    "**/*.test.tsx"
+    "**/*.test.ts"
   ],
   "references": [
     {
       "path": "../core"
     },
     {
-      "path": "../daemon"
-    },
-    {
-      "path": "../mcp"
-    },
-    {
-      "path": "../render"
-    },
-    {
-      "path": "../providers"
-    },
-    {
-      "path": "../tools"
-    },
-    {
-      "path": "../tui"
+      "path": "../protocol"
     }
   ]
 }

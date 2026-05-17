@@ -39,6 +39,7 @@
   "pnpm": {
     "overrides": {
       "@curie-agent/core": "workspace:^0.1.2",
+      "@curie-agent/daemon": "workspace:^0.1.2",
       "@curie-agent/protocol": "workspace:^0.1.2",
       "@curie-agent/providers": "workspace:^0.1.2",
       "@curie-agent/render": "workspace:^0.1.2",

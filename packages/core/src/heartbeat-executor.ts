@@ -17,6 +17,8 @@ export interface HeartbeatExecutorConfig {
   maxTurns?: number;
   /** Which HEARTBEAT.md section to execute (times|daily|weekly|monthly). */
   scheduleType?: ScheduleType;
+  /** System prompt for the heartbeat turn loop. */
+  system?: string;
 }
 
 export interface HeartbeatResult {
@@ -145,7 +147,7 @@ export class HeartbeatExecutor {
       settings: this.config.settings,
       effort: this.config.effort,
       maxTurns: this.config.maxTurns ?? 30,
-      system: `You are running a Heartbeat cycle. Follow the instructions in the prompt carefully. Use tools to gather data, analyze, and produce the final Heartbeat Brief.`,
+      system: this.config.system || `You are running a Heartbeat cycle. Follow the instructions in the prompt carefully. Use tools to gather data, analyze, and produce the final Heartbeat Brief.`,
     }).run(prompt);
 
     return {
