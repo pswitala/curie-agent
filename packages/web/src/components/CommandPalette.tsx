@@ -10,7 +10,7 @@ const CMDS: [string, string][] = [
   ['/status', 'Show version, model, provider, tokens, CWD'],
   ['/help', 'List all available commands'],
   ['/model [name]', 'Switch model · opus / sonnet / haiku / gpt4o'],
-  ['/mode <mode>', 'Set approval mode · manual|plan|auto-edit|yolo'],
+  ['/mode <mode>', 'Set approval mode · plan|edit|auto|yolo'],
   ['/theme [name]', 'Change color theme'],
   ['/debug [on|off]', 'Toggle debug logging'],
   ['/effort [level]', 'Set reasoning effort · low|medium|high|max'],

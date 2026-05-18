@@ -42,6 +42,7 @@ export class DaemonApp {
   public mcpStatus: McpConnectionStatus[] = [];
 
   private checkerTimer: ReturnType<typeof setInterval> | null = null;
+  private unsubscribes: Array<() => void> = [];
 
   constructor(
     private eventBus: EventBus,
@@ -95,6 +96,30 @@ export class DaemonApp {
       });
     }
 
+    // Subscribe to configuration changes to auto-reschedule cron
+    this.unsubscribes.push(
+      this.eventBus.subscribe('config-changed' as any, () => {
+        this.cronManager.load();
+        const freshSettings = this.settingsManager.get();
+        if (freshSettings.heartbeat?.schedule === 'on') {
+          const hb = freshSettings.heartbeat;
+          this.cronManager.rescheduleFromSettings({
+            HEARTBEAT_INTRADAY: hb.intraday,
+            HEARTBEAT_DAILY: hb.daily,
+            HEARTBEAT_WEEKLY: hb.weekly,
+            HEARTBEAT_MONTHLY: hb.monthly,
+            HEARTBEAT_DREAMING: hb.dreaming,
+          });
+        } else {
+          // Cancel pending heartbeat task if heartbeat is disabled
+          const pendingHb = this.cronManager.listReminders('pending').find(t => t.type === 'heartbeat');
+          if (pendingHb) {
+            this.cronManager.cancelReminder(pendingHb.id);
+          }
+        }
+      })
+    );
+
     // Start cron checker
     this.startCronChecker();
 
@@ -110,6 +135,10 @@ export class DaemonApp {
   /** Stop all subsystems. */
   async stop(): Promise<void> {
     this.stopCronChecker();
+    for (const unsub of this.unsubscribes) {
+      unsub();
+    }
+    this.unsubscribes = [];
     this.telegramGateway?.stop();
     this.channelManager.cleanup();
     this.approvalTracker.clear();
@@ -186,8 +215,8 @@ export class DaemonApp {
         sessionId,
         resume: !!sessionId,
         system: this.systemPrompt,
-        onApprovalAsk: async (req) => {
-          const toolCallId = crypto.randomUUID();
+        onApprovalAsk: async (req: { toolCallId?: string; name: string; input: Record<string, unknown>; reason: string }) => {
+          const toolCallId = req.toolCallId || crypto.randomUUID();
           // Send approval request to Telegram
           if (this.telegramGateway) {
             this.telegramGateway.sendApprovalRequest(
@@ -200,6 +229,7 @@ export class DaemonApp {
             sessionId, channelId,
           });
         },
+        type: 'telegram',
       }, this.sessionStore);
 
       // Bridge events to shared bus
@@ -271,14 +301,38 @@ export class DaemonApp {
           task.completedAt = Date.now();
           this.cronManager.save();
 
-          this.eventBus.emit({
+          const event = {
             type: 'cron-task-fired',
             id: crypto.randomUUID(),
             taskId: task.id,
             taskType: 'reminder',
             message: task.message,
             timestamp: Date.now(),
-          } as unknown as Event);
+            sessionId: task.sessionId,
+          } as unknown as Event;
+
+          this.eventBus.emit(event);
+
+          // 1. Notify Web UI (save event into session store history)
+          const targetSessionId = task.sessionId || this.sessionStore.list().sort((a, b) => b.updatedAt - a.updatedAt)[0]?.id;
+          if (targetSessionId) {
+            try {
+              this.sessionStore.appendEvent(targetSessionId, {
+                ...event,
+                sessionId: targetSessionId,
+              } as any);
+            } catch (err) {
+              console.error('[DaemonApp] failed to append reminder event to sessionStore:', err);
+            }
+          }
+
+          // 2. Notify Telegram
+          const settings = this.settingsManager.get();
+          if (settings.channels?.user_id) {
+            this.sendTelegram(settings.channels.user_id, `🔔 **Reminder:** ${task.message}`).catch(err => {
+              console.error('[DaemonApp] failed to send reminder to telegram:', err);
+            });
+          }
         }
       }
     }, intervalMs);

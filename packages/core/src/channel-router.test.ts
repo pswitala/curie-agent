@@ -15,7 +15,11 @@ describe('ChannelRouter', () => {
     const path = require('node:path');
     const channelsFile = path.join(require('node:os').homedir(), '.curie-agent', 'channels.json');
     if (fs.existsSync(channelsFile)) {
-      fs.unlinkSync(channelsFile);
+      try {
+        fs.unlinkSync(channelsFile);
+      } catch (err) {
+        // Ignore file lock EPERM errors on running Windows dev setups
+      }
     }
 
     registry = new ChannelRegistry();

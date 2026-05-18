@@ -33,6 +33,7 @@ export interface ChannelsConfig {
 
 export interface HeartbeatConfig {
   schedule: 'on' | 'off';
+  mode: 'plan' | 'edit' | 'auto' | 'yolo';
   intraday: string;
   daily: string;
   weekly: string;
@@ -167,7 +168,7 @@ export const DEFAULT_SETTINGS: CurieSettings = {
   tools_per_call: 10,
   websearch_per_call: 5,
   brave_search_api_key: '',
-  heartbeat: { schedule: 'off', intraday: '', daily: '6:00', weekly: 'monday@6:00', monthly: '1@6:00', dreaming: '2:00' },
+  heartbeat: { schedule: 'off', mode: 'yolo', intraday: '', daily: '6:00', weekly: 'monday@6:00', monthly: '1@6:00', dreaming: '2:00' },
   mcp_servers: {},
   safety: { path_guard: 'on', path_allowlist: '', command_guard: 'on', snapshots: 'on' },
   auto_compact: { enabled: 'on', threshold: 75, warn_threshold: 60, forced_threshold: 85 },
@@ -181,9 +182,6 @@ function migrateMode(raw: unknown): CurieSettings['mode'] {
   if (typeof raw !== 'string') return DEFAULT_SETTINGS.mode;
   switch (raw) {
     case 'plan': case 'edit': case 'auto': case 'yolo': return raw;
-    case 'auto-edit': return 'edit';
-    case 'manual': return 'auto';
-    case 'full-auto': return 'yolo';
     default: return DEFAULT_SETTINGS.mode;
   }
 }
@@ -199,7 +197,7 @@ function pickString(parsed: Record<string, unknown>, ...keys: string[]): string 
   for (const [k, v] of Object.entries(parsed)) {
     if (typeof v !== 'string' || v.length === 0) continue;
     if (targets.has(normalize(k))) return v;
-  }
+  } 
   return undefined;
 }
 
@@ -329,6 +327,7 @@ export function migrateFlatToNested(parsed: Record<string, unknown>): CurieSetti
     brave_search_api_key: pickString(parsed, 'BRAVE_SEARCH_API_KEY', 'brave_search_api_key', 'BRAVE_API_KEY') || '',
     heartbeat: {
       schedule: (pickString(parsed, 'HEARTBEAT', 'heartbeat') || 'off') as 'on' | 'off',
+      mode: migrateMode(pickString(parsed, 'HEARTBEAT_MODE', 'heartbeat_mode', 'heartbeat.mode')) || 'yolo',
       intraday: pickString(parsed, 'HEARTBEAT_INTRADAY', 'HEARTBEAT_TIMES', 'HEARTBEAT_HOURLY', 'heartbeat_intraday', 'heartbeat_times') || DEFAULT_SETTINGS.heartbeat.intraday,
       daily: pickString(parsed, 'HEARTBEAT_DAILY', 'heartbeat_daily') || DEFAULT_SETTINGS.heartbeat.daily,
       weekly: pickString(parsed, 'HEARTBEAT_WEEKLY', 'heartbeat_weekly') || DEFAULT_SETTINGS.heartbeat.weekly,
@@ -534,6 +533,7 @@ export function parseNestedSettings(parsed: Record<string, unknown>): CurieSetti
   const rawHeartbeat = parsed.heartbeat as Record<string, string | undefined> | undefined;
   const heartbeatConfig: HeartbeatConfig = {
     schedule: (getString(['heartbeat.schedule', 'HEARTBEAT']) || (rawHeartbeat?.schedule as string) || 'off') as 'on' | 'off',
+    mode: migrateMode(getString(['heartbeat.mode']) || rawHeartbeat?.mode) || 'yolo',
     intraday: getString(['heartbeat.intraday', 'HEARTBEAT_INTRADAY', 'HEARTBEAT_TIMES', 'HEARTBEAT_HOURLY']) || (rawHeartbeat?.intraday as string) || DEFAULT_SETTINGS.heartbeat.intraday,
     daily: getString(['heartbeat.daily', 'HEARTBEAT_DAILY']) || (rawHeartbeat?.daily as string) || DEFAULT_SETTINGS.heartbeat.daily,
     weekly: getString(['heartbeat.weekly', 'HEARTBEAT_WEEKLY']) || (rawHeartbeat?.weekly as string) || DEFAULT_SETTINGS.heartbeat.weekly,

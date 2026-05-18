@@ -25,6 +25,7 @@ export interface ToolResult {
 export interface ToolContext {
   cwd: string;
   settings: CurieSettings;
+  sessionId?: string;
 }
 
 export function expandPath(p: string): string {
@@ -67,6 +68,11 @@ const KEY_ALIASES: Record<string, string> = {
   regex: 'regex', // already matched
   // Bash
   command: 'command', // already matched
+  // Reminder / Task
+  scheduledAt: 'scheduled_at',
+  // WebSearch
+  blockedDomains: 'blocked_domains',
+  allowedDomains: 'allowed_domains',
 };
 
 export function createTool<Schema extends z.ZodObject<z.ZodRawShape>>(
@@ -87,7 +93,7 @@ export function createTool<Schema extends z.ZodObject<z.ZodRawShape>>(
   return {
     definition: def,
     validate: (raw) => schema.parse(raw),
-    async execute(input: Record<string, unknown>, settings: CurieSettings, toolCwd?: string) {
+    async execute(input: Record<string, unknown>, settings: CurieSettings, toolCwd?: string, sessionId?: string) {
       // Normalize input: strip null/undefined values and map camelCase
       // key aliases to their snake_case equivalents. LLMs (especially local
       // models) frequently normalize snake_case schema keys to camelCase.
@@ -102,7 +108,7 @@ export function createTool<Schema extends z.ZodObject<z.ZodRawShape>>(
       }
       try {
         const parsed = schema.parse(normalized) as z.infer<Schema>;
-        return execute(parsed, { cwd: toolCwd ?? cwd ?? _globalCwd ?? '', settings });
+        return execute(parsed, { cwd: toolCwd ?? cwd ?? _globalCwd ?? '', settings, sessionId });
       } catch (err) {
         if (err instanceof z.ZodError) {
           const details = err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');

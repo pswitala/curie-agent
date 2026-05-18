@@ -132,6 +132,37 @@ function HeartbeatBlock({ event }: { event: any }) {
   );
 }
 
+function ReminderBlock({ message, time }: { message: string; time: string }) {
+  return (
+    <div className="px-5 py-1.5 animate-fadeIn">
+      <div className="p-3.5 rounded-xl border border-blue-500/20 bg-blue-500/5 backdrop-blur-md shadow-lg max-w-[480px] flex gap-3 transition-all duration-200 hover:border-blue-500/35 relative overflow-hidden group">
+        {/* Decorative dynamic pulse background indicator */}
+        <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/10 rounded-full filter blur-xl opacity-50 group-hover:scale-125 transition-transform duration-500" />
+        
+        {/* Ringing Bell Icon with pulse animation */}
+        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 shrink-0 relative">
+          <span className="absolute inset-0 rounded-lg bg-blue-500/20 animate-ping opacity-75" style={{ animationDuration: '2s' }} />
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-wiggle">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+        </div>
+
+        {/* Content details */}
+        <div className="flex-1 min-w-0 flex flex-col justify-center">
+          <div className="flex items-center justify-between gap-2 mb-1 select-none">
+            <span className="font-bold text-blue-400 text-xs tracking-wide uppercase">Reminder Fired</span>
+            <span className="text-[10px] text-muted font-mono">{time}</span>
+          </div>
+          <div className="text-[13px] text-text leading-relaxed font-semibold">
+            {message}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
@@ -159,12 +190,143 @@ interface ToolCallEntry {
   input: Record<string, unknown>;
 }
 
+interface ApprovalBlockProps {
+  toolCallId: string;
+  name: string;
+  input: Record<string, unknown>;
+  decision: string;
+  events: WsEvent[];
+  rpc: JsonRpcClient | null;
+  mode?: string;
+}
+
+function ApprovalBlock({ toolCallId, name, input, decision, events, rpc, mode }: ApprovalBlockProps) {
+  const [deciding, setDeciding] = useState(false);
+  const [localDecision, setLocalDecision] = useState<'allow' | 'deny' | null>(null);
+
+  // Find if there is already a decision in the session history
+  const decisionEvent = events.find(
+    (e) => e.type === 'approval-decision' && (e as any).toolCallId === toolCallId
+  ) as any;
+
+  const resolvedDecision = decisionEvent ? decisionEvent.decision : localDecision;
+  const isPending = decision === 'ask' && !resolvedDecision;
+
+  const handleDecide = async (choice: 'allow' | 'deny') => {
+    if (!rpc) return;
+    setDeciding(true);
+    try {
+      await rpc.approvalDecide(toolCallId, choice);
+      setLocalDecision(choice);
+    } catch (err) {
+      console.error('Failed to submit tool approval decision:', err);
+    } finally {
+      setDeciding(false);
+    }
+  };
+
+  if (!isPending) {
+    const isApproved = resolvedDecision === 'allow';
+    return (
+      <div className="px-5 py-1.5 flex items-center gap-2.5 animate-fadeIn select-none">
+        <div className={`flex items-center justify-center w-5 h-5 rounded-full ${
+          isApproved ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
+        } shrink-0`}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+            {isApproved ? (
+              <polyline points="20 6 9 17 4 12" />
+            ) : (
+              <>
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </>
+            )}
+          </svg>
+        </div>
+        <div className="flex items-baseline gap-1.5 text-xs text-muted">
+          <span className="font-semibold text-fg">
+            {isApproved ? 'Authorized' : 'Blocked'}
+          </span>
+          <span>action:</span>
+          <code className="font-mono bg-s3 border border-b1 px-1.5 py-0.5 rounded text-[11px] text-fg">{name}</code>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === 'auto') {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fadeIn">
+      <div className="w-full max-w-[480px] p-6 rounded-2xl border border-b2 bg-s2/95 backdrop-blur-md shadow-2xl transition-all duration-200 transform scale-100 animate-scaleIn">
+        {/* Header */}
+        <div className="flex items-start gap-4 border-b border-b1 pb-4 mb-4">
+          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-yellow-500/10 text-yellow-500 shrink-0">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <span className="font-bold text-fg text-base block mb-0.5">Authorization Required</span>
+            <span className="text-[12px] text-muted">The agent requires permission to run this action.</span>
+          </div>
+        </div>
+
+        {/* Action Detail */}
+        <div className="mb-4">
+          <div className="text-[9px] text-muted2 font-mono uppercase tracking-wider mb-1.5 select-none">Action / Tool</div>
+          <div className="flex items-center">
+            <code className="font-mono bg-s3 border border-b1 px-2.5 py-1 rounded-lg text-xs text-fg font-semibold">{name}</code>
+          </div>
+        </div>
+
+        {/* Input arguments rendering */}
+        <div className="bg-s1 rounded-xl border border-b1 p-4 mb-6 max-h-[220px] overflow-y-auto scrollbar-thin">
+          <div className="text-[9px] text-muted2 font-mono uppercase tracking-wider mb-1.5 select-none">Arguments</div>
+          <pre className="font-mono text-[11.5px] text-text overflow-x-auto m-0 leading-normal">
+            {JSON.stringify(input, null, 2)}
+          </pre>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => handleDecide('allow')}
+            disabled={deciding}
+            className="flex-1 py-2 px-4 rounded-xl bg-green-600 hover:bg-green-500 text-white font-semibold text-[13px] shadow-lg shadow-green-600/10 hover:shadow-green-600/20 transition-all duration-150 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            Approve Action
+          </button>
+          <button
+            onClick={() => handleDecide('deny')}
+            disabled={deciding}
+            className="py-2 px-5 rounded-xl bg-s3 border border-b2 hover:bg-s4 text-fg hover:text-text hover:border-b3 font-semibold text-[13px] transition-all duration-150 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+            Deny
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type MessageEntry =
   | { type: 'thinking'; content: string; key: string }
   | { type: 'user'; content: string; time: string }
   | { type: 'assistant'; content: string; time: string }
   | { type: 'tool-group'; content: ''; time: ''; toolCalls: ToolCallEntry[] }
-  | { type: 'heartbeat-brief'; content: string; time: string; event: any };
+  | { type: 'heartbeat-brief'; content: string; time: string; event: any }
+  | { type: 'approval-request'; toolCallId: string; name: string; input: Record<string, unknown>; decision: string; mode?: string; time: string }
+  | { type: 'reminder-fired'; message: string; taskId: string; time: string };
 
 function eventToMessage(event: WsEvent): MessageEntry | null {
   switch (event.type) {
@@ -196,6 +358,38 @@ function eventToMessage(event: WsEvent): MessageEntry | null {
         toolCalls: [{ name, args, input }],
       };
     }
+    case 'approval-request': {
+      const toolCallId = (event as any).toolCallId;
+      const name = (event as any).name || 'tool';
+      const input = (event as any).input || {};
+      const decision = (event as any).decision;
+      const mode = (event as any).mode;
+      return {
+        type: 'approval-request',
+        toolCallId,
+        name,
+        input,
+        decision,
+        mode,
+        time: formatTime(event.timestamp),
+      };
+    }
+    case 'cron-task-fired': {
+      const message = (event as any).message || '';
+      const taskId = (event as any).taskId || '';
+      return {
+        type: 'reminder-fired',
+        message,
+        taskId,
+        time: formatTime(event.timestamp),
+      };
+    }
+    case 'context-warning':
+      return {
+        type: 'assistant',
+        content: (event as any).message || '',
+        time: formatTime(event.timestamp),
+      };
     default:
       return null;
   }
@@ -229,16 +423,31 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
     const msg = eventToMessage(event);
     if (!msg) return msgs;
 
-    if (msg.type === 'thinking' && msgs.length > 0 && msgs[msgs.length - 1].type === 'thinking') {
-      msgs[msgs.length - 1].content += msg.content;
+    if (msg.type === 'thinking' && msgs.length > 0) {
+      const last = msgs[msgs.length - 1];
+      if (last.type === 'thinking') {
+        last.content += msg.content;
+      } else {
+        msgs.push(msg);
+      }
     }
-    else if (msg.type === 'assistant' && msgs.length > 0 && msgs[msgs.length - 1].type === 'assistant') {
-      msgs[msgs.length - 1].content += msg.content;
+    else if (msg.type === 'assistant' && msgs.length > 0) {
+      const last = msgs[msgs.length - 1];
+      if (last.type === 'assistant') {
+        last.content += msg.content;
+      } else {
+        msgs.push(msg);
+      }
     }
-    else if (msg.type === 'tool-group' && msgs.length > 0 && msgs[msgs.length - 1].type === 'tool-group') {
+    else if (msg.type === 'tool-group' && msgs.length > 0) {
       const tg = msg as MessageEntry & { toolCalls: ToolCallEntry[] };
-      const last = msgs[msgs.length - 1] as MessageEntry & { toolCalls: ToolCallEntry[] };
-      last.toolCalls.push(...tg.toolCalls);
+      const last = msgs[msgs.length - 1];
+      if (last.type === 'tool-group') {
+        const lastTg = last as MessageEntry & { toolCalls: ToolCallEntry[] };
+        lastTg.toolCalls.push(...tg.toolCalls);
+      } else {
+        msgs.push(msg);
+      }
     }
     else {
       msgs.push(msg);
@@ -446,6 +655,133 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
             }
           }
           return;
+        } else if (command === 'cron') {
+          // Echo user command
+          addLiveEvent({
+            type: 'user-prompt',
+            id: `local-prompt-${Date.now()}`,
+            timestamp: Date.now(),
+            text: text,
+          });
+
+          const action = args.toLowerCase();
+          const parts = action.split(/\s+/);
+          const sub = parts[0] || 'list';
+          const rest = parts.slice(1).join(' ').trim();
+
+          if (sub === 'list' || !sub) {
+            try {
+              const list = await rpc.cronList() as any[];
+              if (!list || list.length === 0) {
+                addLiveEvent({
+                  type: 'assistant-delta',
+                  id: `local-cron-list-${Date.now()}`,
+                  timestamp: Date.now(),
+                  text: 'No reminders scheduled.',
+                });
+              } else {
+                const items = list.map((t: any, i: number) => {
+                  const timeStr = new Date(t.scheduledAt).toLocaleString();
+                  const statusEmoji = t.status === 'pending' ? '⏳'
+                    : t.status === 'fired' ? '🔔'
+                    : t.status === 'executing' ? '⚙️'
+                    : t.status === 'completed' ? '✅'
+                    : t.status === 'failed' ? '❌'
+                    : '❌';
+                  const typeLabel = t.type === 'heartbeat'
+                    ? `Heartbeat: ${t.schedule ? `[${t.schedule.type.toUpperCase()}] ` : ''}`
+                    : t.type === 'task'
+                      ? 'Task: '
+                      : 'Reminder: ';
+                  return `${i + 1}. ${statusEmoji} ${typeLabel}${t.message} (Scheduled: ${timeStr}, ID: \`${t.id}\`)`;
+                }).join('\n');
+                addLiveEvent({
+                  type: 'assistant-delta',
+                  id: `local-cron-list-${Date.now()}`,
+                  timestamp: Date.now(),
+                  text: `### Active Reminders:\n${items}`,
+                });
+              }
+              setTyping(false);
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              addLiveEvent({
+                type: 'error',
+                id: `local-err-${Date.now()}`,
+                timestamp: Date.now(),
+                message: `Failed to fetch reminders: ${errMsg}`,
+              });
+              setTyping(false);
+            }
+          } else if (sub === 'delete' || sub === 'cancel') {
+            if (!rest) {
+              addLiveEvent({
+                type: 'assistant-delta',
+                id: `local-cron-del-${Date.now()}`,
+                timestamp: Date.now(),
+                text: 'Usage: `/cron delete <id>`',
+              });
+              setTyping(false);
+            } else {
+              try {
+                const res = await rpc.cronCancel(rest) as any;
+                if (res?.cancelled) {
+                  addLiveEvent({
+                    type: 'assistant-delta',
+                    id: `local-cron-del-${Date.now()}`,
+                    timestamp: Date.now(),
+                    text: `Reminder \`${rest}\` cancelled.`,
+                  });
+                } else {
+                  addLiveEvent({
+                    type: 'assistant-delta',
+                    id: `local-cron-del-${Date.now()}`,
+                    timestamp: Date.now(),
+                    text: `No reminder found with ID: \`${rest}\``,
+                  });
+                }
+                setTyping(false);
+              } catch (err) {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                addLiveEvent({
+                  type: 'error',
+                  id: `local-err-${Date.now()}`,
+                  timestamp: Date.now(),
+                  message: `Failed to delete reminder: ${errMsg}`,
+                });
+                setTyping(false);
+              }
+            }
+          } else if (sub === 'clear') {
+            try {
+              const res = await rpc.cronClear() as any;
+              addLiveEvent({
+                type: 'assistant-delta',
+                id: `local-cron-clear-${Date.now()}`,
+                timestamp: Date.now(),
+                text: `Successfully cleared ${res?.removed || 0} completed reminder(s).`,
+              });
+              setTyping(false);
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              addLiveEvent({
+                type: 'error',
+                id: `local-err-${Date.now()}`,
+                timestamp: Date.now(),
+                message: `Failed to clear reminders: ${errMsg}`,
+              });
+              setTyping(false);
+            }
+          } else {
+            addLiveEvent({
+              type: 'assistant-delta',
+              id: `local-cron-err-${Date.now()}`,
+              timestamp: Date.now(),
+              text: `Unknown cron subcommand. Supported: \`/cron list\`, \`/cron delete <id>\`, \`/cron clear\`.`,
+            });
+            setTyping(false);
+          }
+          return;
         }
       }
     }
@@ -454,7 +790,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
     // Server returns sessionId immediately and runs TurnLoop in background.
     const sendId = activeSessionId || '';
     try {
-      const result = await rpc.sessionSend(sendId, text) as { sessionId?: string; status?: string };
+      const result = await rpc.sessionSend(sendId, text, 'webui') as { sessionId?: string; status?: string };
       // If server created a new session, set it as active (fallback for race condition)
       if (result?.sessionId && !activeSessionId) {
         ws?.subscribe(result.sessionId);
@@ -513,9 +849,28 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
                }
              }
 
-             if (msg.type === 'heartbeat-brief') {
+              if (msg.type === 'approval-request') {
+                return (
+                  <ApprovalBlock
+                    key={i}
+                    toolCallId={msg.toolCallId}
+                    name={msg.name}
+                    input={msg.input}
+                    decision={msg.decision}
+                    events={events}
+                    rpc={rpc}
+                    mode={(msg as any).mode}
+                  />
+                );
+              }
+
+              if (msg.type === 'heartbeat-brief') {
                const hb = msg as MessageEntry & { event: any };
                return <HeartbeatBlock key={i} event={hb.event} />;
+             }
+
+             if (msg.type === 'reminder-fired') {
+               return <ReminderBlock key={i} message={msg.message} time={msg.time} />;
              }
 
              return (

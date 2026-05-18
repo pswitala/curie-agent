@@ -51,8 +51,8 @@ export class DaemonRpcClient {
     return this.request('session.get', { id });
   }
 
-  async sessionSend(id: string, text: string): Promise<unknown> {
-    return this.request('session.send', { id, text });
+  async sessionSend(id: string, text: string, type?: string): Promise<unknown> {
+    return this.request('session.send', { id, text, type });
   }
 
   async sessionCancel(id: string): Promise<unknown> {

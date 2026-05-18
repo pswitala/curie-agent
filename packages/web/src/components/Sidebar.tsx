@@ -181,7 +181,7 @@ export default function Sidebar({
               onClick={() => onSelectSession(s.id)}
               title={formatSessionLabel(s)}
             >
-              {s.provider}
+              {s.name || s.provider} ({s.type || 'webui'})
             </button>
           ))}
         </div>

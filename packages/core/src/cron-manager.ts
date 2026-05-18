@@ -31,6 +31,8 @@ export interface CronTask {
   createdAt: number;
   /** Populated when a task finishes execution. */
   completedAt?: number;
+  /** Optional metadata to route notifications to the originating session. */
+  sessionId?: string;
 }
 
 export interface CronFile {
@@ -263,7 +265,7 @@ export class CronManager {
     saveCronFile(this.data, this.filePath);
   }
 
-  createReminder(message: string, scheduledAt: number): CronTask {
+  createReminder(message: string, scheduledAt: number, sessionId?: string): CronTask {
     const task: CronTask = {
       id: crypto.randomUUID(),
       type: 'reminder',
@@ -271,6 +273,7 @@ export class CronManager {
       message,
       status: 'pending',
       createdAt: Date.now(),
+      sessionId,
     };
     this.data.tasks.push(task);
     this.save();

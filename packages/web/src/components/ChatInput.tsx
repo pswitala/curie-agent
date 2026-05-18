@@ -55,7 +55,7 @@ export default function ChatInput({ onSend, cmdInput, onClearCmdInput, onNewChat
   }, []);
 
   return (
-    <div className="px-5 py-3 bg-transparent">
+    <div className="px-5 pt-3 pb-7 md:pb-3 bg-transparent">
       <div className="bg-s2 border border-b2 rounded-[10px] focus-within:border-b3 transition-colors duration-150">
         {/* Chips */}
         <div className="flex flex-wrap gap-1 px-3 pt-2">

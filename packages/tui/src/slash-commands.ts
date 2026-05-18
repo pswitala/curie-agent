@@ -119,7 +119,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'provider', description: 'Switch AI provider', usage: '/provider <anthropic|openai|google|local|ollama|openrouter>', category: 'Model & Provider' },
   { name: 'model', description: 'Switch AI model, set pricing or context window', usage: '/model <model|pricing in;out|window tokens>', category: 'Model & Provider' },
   { name: 'effort', description: 'Set reasoning effort level', usage: '/effort <low|medium|high|max|auto>', category: 'Model & Provider' },
-  { name: 'mode', description: 'Set approval mode', usage: '/mode <manual|plan|auto-edit|full-auto|yolo>', category: 'Model & Provider' },
+  { name: 'mode', description: 'Set approval mode', usage: '/mode <plan|edit|auto|yolo>', category: 'Model & Provider' },
   // Display
   { name: 'theme', description: 'Change color theme', usage: '/theme <name>', category: 'Display' },
   { name: 'debug', description: 'Toggle debug logging', usage: '/debug [on|off]', category: 'Display' },

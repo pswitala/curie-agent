@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { EventBus, type Event } from './event-bus.js';
 import { SessionStore, type SessionInfo } from './session-store.js';
 import { PermissionEngine, type ApprovalMode } from './permission.js';
@@ -28,7 +29,7 @@ export interface ProviderStream {
 
 export interface Tool {
   definition: { name: string; description: string; inputSchema: unknown };
-  execute: (input: Record<string, unknown>, settings: any, cwd?: string) => Promise<{ output: unknown; error?: string }>;
+  execute: (input: Record<string, unknown>, settings: any, cwd?: string, sessionId?: string) => Promise<{ output: unknown; error?: string }>;
 }
 
 export type ProviderEvent =
@@ -58,7 +59,9 @@ export interface TurnLoopConfig {
   /** If set, use this session ID for resume (overrides channel session). */
   resumeSessionId?: string;
   /** Called when a tool call needs interactive approval. Return true to allow, false to deny. */
-  onApprovalAsk?: (req: { name: string; input: Record<string, unknown>; reason: string }) => Promise<boolean>;
+  onApprovalAsk?: (req: { toolCallId?: string; name: string; input: Record<string, unknown>; reason: string }) => Promise<boolean>;
+  /** Optional session type / entrypoint (e.g. webui, tui, telegram, heartbeat) */
+  type?: string;
 }
 
 export interface TurnLoopResult {
@@ -234,6 +237,12 @@ export class TurnLoop {
       const loaded = this.store.load(effectiveSessionId);
       if (loaded) {
         session = loaded;
+        if (this.config.type && !session.type) {
+          session.type = this.config.type;
+          try {
+            fs.writeFileSync(this.store.metadataPath(session.id), JSON.stringify(session, null, 2) + '\n');
+          } catch {}
+        }
       } else {
         // Session ID was provided but doesn't exist on disk yet
         // (e.g. ChannelRouter generates a placeholder before TurnLoop creates it)
@@ -241,6 +250,7 @@ export class TurnLoop {
           this.config.cwd,
           this.config.model,
           this.config.provider.name,
+          this.config.type,
         );
         this.activeSessionId = session.id;
       }
@@ -249,6 +259,7 @@ export class TurnLoop {
         this.config.cwd,
         this.config.model,
         this.config.provider.name,
+        this.config.type,
       );
     }
     this.activeSessionId ??= session.id;
@@ -453,6 +464,7 @@ export class TurnLoop {
             name: tc.name,
             input: tc.input,
             decision: permResult.decision,
+            mode: this.permission.mode,
             timestamp: Date.now(),
           });
 
@@ -479,12 +491,12 @@ export class TurnLoop {
                 decisionBy = 'llm';
               } else {
                 // LLM denied — ask user for final decision
-                approved = await ask({ name: tc.name, input: tc.input, reason: harm.reason });
+                approved = await ask({ toolCallId: tc.id, name: tc.name, input: tc.input, reason: harm.reason });
                 decisionBy = 'user';
               }
             } else {
               approved = ask
-                ? await ask({ name: tc.name, input: tc.input, reason: permResult.reason })
+                ? await ask({ toolCallId: tc.id, name: tc.name, input: tc.input, reason: permResult.reason })
                 : true; // no callback wired — treat as allow to preserve old behavior
               decisionBy = approved ? 'user' : 'user';
             }
@@ -516,7 +528,7 @@ export class TurnLoop {
           }
 
           try {
-            const result = await tool.execute(tc.input, this.config.settings, this.config.cwd);
+            const result = await tool.execute(tc.input, this.config.settings, this.config.cwd, this.config.sessionId);
             emit({ type: 'tool-result', id: session.id, toolCallId: tc.id, output: result.output, error: result.error, timestamp: Date.now() });
             const outputStr = result.error ? `Error: ${result.error}` : JSON.stringify(result.output);
             const decisionLabel = toolDecisionBy === 'llm' ? 'LLM-approved' : toolDecisionBy === 'user' ? 'Approved by user' : 'Auto Approved';

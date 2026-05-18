@@ -699,7 +699,7 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
     setStatus('working');
 
     try {
-      await rpcRef.current.sessionSend(sessionIdRef.current, text);
+      await rpcRef.current.sessionSend(sessionIdRef.current, text, 'tui');
       // Response will arrive via WebSocket events
     } catch (err) {
       setMessages(prev => [...prev, {
@@ -834,7 +834,7 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
           // Strip --mode and --effort flags from args
           const prompt = args.replace(/--mode\s+\S+\s*/g, '').replace(/--effort\s+\S+\s*/g, '').trim();
           try {
-            await rpcRef.current.sessionSend(sessionIdRef.current, `/agent ${prompt}`);
+            await rpcRef.current.sessionSend(sessionIdRef.current, `/agent ${prompt}`, 'tui');
           } catch {
             setMessages(prev => [...prev, { role: 'system', content: `Agent started: "${prompt}"` }]);
           }

@@ -5,7 +5,7 @@ export type Event =
   | { type: 'assistant-stop'; id: string; timestamp: number }
   | { type: 'tool-call'; id: string; toolCallId: string; name: string; input: Record<string, unknown>; thoughtSignature?: string; timestamp: number }
   | { type: 'tool-result'; id: string; toolCallId: string; output: unknown; error?: string; timestamp: number }
-  | { type: 'approval-request'; id: string; toolCallId: string; name: string; input: Record<string, unknown>; decision?: 'allow' | 'deny' | 'ask'; timestamp: number }
+  | { type: 'approval-request'; id: string; toolCallId: string; name: string; input: Record<string, unknown>; decision?: 'allow' | 'deny' | 'ask'; mode?: string; timestamp: number }
   | { type: 'approval-decision'; id: string; toolCallId: string; decision: 'allow' | 'deny'; by?: string; timestamp: number }
   | { type: 'usage'; id: string; inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; timestamp: number }
   | { type: 'error'; id: string; message: string; code?: string; timestamp: number }

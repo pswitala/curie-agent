@@ -203,6 +203,12 @@
     background: var(--b2);
     border-radius: 2px;
   }
+  .border-b-b1-10 {
+    border-bottom: 1px solid color-mix(in srgb, var(--b1) 10%, transparent);
+  }
+  .border-b-b1-40 {
+    border-bottom: 1px solid color-mix(in srgb, var(--b1) 40%, transparent);
+  }
 }
 
 @keyframes tdot {
@@ -285,4 +291,36 @@
   border-radius: 0;
   color: var(--text);
   font-size: 12px;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-scaleIn {
+  animation: scaleIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  15% { transform: rotate(-15deg); }
+  30% { transform: rotate(12deg); }
+  45% { transform: rotate(-10deg); }
+  60% { transform: rotate(8deg); }
+  75% { transform: rotate(-4deg); }
+}
+
+.animate-wiggle {
+  animation: wiggle 1s ease-in-out infinite;
+  transform-origin: top center;
 }

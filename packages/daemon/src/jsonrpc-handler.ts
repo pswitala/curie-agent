@@ -34,7 +34,7 @@ export class JsonRpcHandler {
   constructor(
     private sessionStore: SessionStore,
     private settingsManager: SettingsManager,
-    private sharedEventBus: EventBus,
+    private sharedEventBus?: EventBus,
     private createProvider?: ProviderFactory,
     private tools: Tool[] = [],
     private daemonApp?: DaemonApp,
@@ -65,9 +65,165 @@ export class JsonRpcHandler {
           break;
         }
 
+        case Method.SESSION_STATS: {
+          const sessions = this.sessionStore.list();
+          const todayStr = new Date().toDateString();
+          const todaySessions = sessions.filter(s => new Date(s.createdAt).toDateString() === todayStr);
+
+          const hourly = Array.from({ length: 24 }, (_, i) => ({
+            hour: i,
+            inputTokens: 0,
+            outputTokens: 0,
+            toolCalls: 0,
+            messages: 0,
+          }));
+
+          const entrypoints: Record<string, number> = {
+            webui: 0,
+            tui: 0,
+            telegram: 0,
+            heartbeat: 0,
+          };
+
+          const toolCallsCount: Record<string, number> = {};
+
+          let totalTokens = 0;
+          let totalInputTokens = 0;
+          let totalOutputTokens = 0;
+          let totalToolCalls = 0;
+          let totalMessages = 0;
+          let totalCost = 0;
+
+          // Estimate cost using the pricing model
+          const estimateCost = (model: string, inputTokens: number, outputTokens: number, customCost?: string): number => {
+            if (customCost) {
+              if (!customCost.includes('|')) {
+                const [inStr = '', outStr = ''] = customCost.split(';');
+                const inC = parseFloat(inStr);
+                const outC = parseFloat(outStr);
+                if (!isNaN(inC) && !isNaN(outC)) {
+                  return (inputTokens * inC + outputTokens * outC) / 1_000_000;
+                }
+              } else {
+                const rawTiers = customCost.split('|').map(s => s.trim());
+                const tiers: Array<{ threshold?: number; in: number; out: number }> = [];
+                const [inStr = '', outStr = ''] = rawTiers[0]?.split(';') ?? ['', ''];
+                const baseIn = parseFloat(inStr);
+                const baseOut = parseFloat(outStr);
+                if (!isNaN(baseIn) && !isNaN(baseOut)) {
+                  tiers.push({ in: baseIn, out: baseOut });
+                  for (let i = 1; i < rawTiers.length; i++) {
+                    const tier = rawTiers[i]!;
+                    const pipeIdx = tier.indexOf('<');
+                    if (pipeIdx !== -1) {
+                      const threshold = parseInt(tier.substring(0, pipeIdx).trim(), 10);
+                      const rest = tier.substring(pipeIdx + 1).trim();
+                      const [tierInStr = '', tierOutStr = ''] = rest.split(';');
+                      const tierIn = parseFloat(tierInStr);
+                      const tierOut = parseFloat(tierOutStr);
+                      if (!isNaN(threshold) && !isNaN(tierIn) && !isNaN(tierOut)) {
+                        tiers.push({ threshold, in: tierIn, out: tierOut });
+                      }
+                    }
+                  }
+                }
+                if (tiers.length > 0) {
+                  let rate = [tiers[0]!.in, tiers[0]!.out];
+                  const total = inputTokens + outputTokens;
+                  for (const t of tiers) {
+                    if (t.threshold !== undefined && total >= t.threshold) {
+                      rate = [t.in, t.out];
+                    }
+                  }
+                  return (inputTokens * rate[0]! + outputTokens * rate[1]!) / 1_000_000;
+                }
+              }
+            }
+            const pricing: Record<string, { in: number; out: number }> = {
+              'opus': { in: 15, out: 75 },
+              'sonnet': { in: 3, out: 15 },
+              'haiku': { in: 0.8, out: 4 },
+              'gpt-4o': { in: 2.5, out: 10 },
+              'gpt-4': { in: 5, out: 15 },
+              'qwen': { in: 0.112, out: 0.224 },
+            };
+            const key = Object.keys(pricing).find(k => model.toLowerCase().includes(k)) || 'sonnet';
+            const p = pricing[key]!;
+            return (inputTokens * p.in + outputTokens * p.out) / 1_000_000;
+          };
+
+          const providersConfig = this.settingsManager.get().providers;
+
+          for (const s of todaySessions) {
+            const typeKey = s.type || 'webui';
+            entrypoints[typeKey] = (entrypoints[typeKey] || 0) + 1;
+
+            const events = this.sessionStore.loadEvents(s.id);
+            const providerCfg = providersConfig[s.provider as keyof typeof providersConfig];
+            const customCost = providerCfg?.model_cost || undefined;
+
+            for (const e of events) {
+              const eventDate = new Date(e.timestamp);
+              if (eventDate.toDateString() !== todayStr) continue;
+
+              const hour = eventDate.getHours();
+              if (hour < 0 || hour > 23) continue;
+
+              const bucket = hourly[hour];
+              if (bucket) {
+                if (e.type === 'usage' && 'inputTokens' in e && 'outputTokens' in e) {
+                  const inT = Number(e.inputTokens) || 0;
+                  const outT = Number(e.outputTokens) || 0;
+                  bucket.inputTokens += inT;
+                  bucket.outputTokens += outT;
+                  totalInputTokens += inT;
+                  totalOutputTokens += outT;
+                  totalTokens += inT + outT;
+
+                  const eventCost = estimateCost(s.model, inT, outT, customCost);
+                  totalCost += eventCost;
+                } else if (e.type === 'tool-call') {
+                  bucket.toolCalls += 1;
+                  totalToolCalls += 1;
+
+                  if ('name' in e && typeof e.name === 'string') {
+                    toolCallsCount[e.name] = (toolCallsCount[e.name] || 0) + 1;
+                  }
+                } else if (e.type === 'user-prompt') {
+                  bucket.messages += 1;
+                  totalMessages += 1;
+                }
+              }
+            }
+          }
+
+          const topTools = Object.entries(toolCallsCount)
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 10);
+
+          result = {
+            summary: {
+              totalSessionsToday: todaySessions.length,
+              totalSessions: sessions.length,
+              totalTokens,
+              totalInputTokens,
+              totalOutputTokens,
+              totalToolCalls,
+              totalMessages,
+              totalCost,
+            },
+            hourly,
+            entrypoints,
+            topTools,
+          };
+          break;
+        }
+
         case Method.SESSION_SEND: {
           const sessionId = this.getStringParam(params, 'id');
           const text = this.getStringParam(params, 'text');
+          const type = this.getStringParam(params, 'type');
           if (!text) return this.paramError('text');
 
           if (!this.createProvider) {
@@ -80,11 +236,17 @@ export class JsonRpcHandler {
               process.cwd(),
               this.settingsManager.get().model_override || this.settingsManager.get().model,
               this.settingsManager.get().current_provider || 'unknown',
+              type || 'webui',
             ).id;
 
-            this.executeSlashCommand(targetSessionId, text).catch(err => {
-              console.error(`[jsonrpc] error executing slash command ${text}:`, err);
-            });
+            // Wait 150ms to guarantee that the client has completed the HTTP roundtrip,
+            // received the sessionId, and successfully subscribed to WebSocket events
+            // before any synchronous slash command output is emitted.
+            setTimeout(() => {
+              this.executeSlashCommand(targetSessionId, text).catch(err => {
+                console.error(`[jsonrpc] error executing slash command ${text}:`, err);
+              });
+            }, 150);
 
             result = { sessionId: targetSessionId, status: 'started' };
             break;
@@ -99,16 +261,17 @@ export class JsonRpcHandler {
               process.cwd(),
               settings.model_override || settings.model,
               settings.current_provider || 'unknown',
+              type || 'webui',
             );
             // Start turn loop in background — events stream via WS
             if (this.daemonApp) {
-              this.daemonApp.channelManager.send(session.id, text).then(res => {
+              this.daemonApp.channelManager.send(session.id, text, undefined, type || 'webui').then(res => {
                 console.log(`[jsonrpc] session.send completed sessionId=${session.id} status=${res.status}`);
               }).catch(err => {
                 console.error(`[jsonrpc] session.send error sessionId=${session.id}:`, err);
               });
             } else {
-              this.handleSend(session.id, text).then(res => {
+              this.handleSend(session.id, text, type || 'webui').then(res => {
                 console.log(`[jsonrpc] session.send completed sessionId=${session.id} status=${res.status}`);
               }).catch(err => {
                 console.error(`[jsonrpc] session.send error sessionId=${session.id}:`, err);
@@ -120,13 +283,13 @@ export class JsonRpcHandler {
           console.log(`[jsonrpc] session.send id=${sessionId} text="${text.slice(0, 50)}"`);
           // Start turn loop in background — events stream via WS
           if (this.daemonApp) {
-            this.daemonApp.channelManager.send(sessionId, text).then(res => {
+            this.daemonApp.channelManager.send(sessionId, text, undefined, type || 'webui').then(res => {
               console.log(`[jsonrpc] session.send completed id=${sessionId} status=${res.status}`);
             }).catch(err => {
               console.error(`[jsonrpc] session.send error id=${sessionId}:`, err);
             });
           } else {
-            this.handleSend(sessionId, text).then(res => {
+            this.handleSend(sessionId, text, type || 'webui').then(res => {
               console.log(`[jsonrpc] session.send completed id=${sessionId} status=${res.status}`);
             }).catch(err => {
               console.error(`[jsonrpc] session.send error id=${sessionId}:`, err);
@@ -197,7 +360,7 @@ export class JsonRpcHandler {
             this.settingsManager.update({ [key]: value } as never);
           }
           this.settingsManager.save();
-          this.sharedEventBus.emit({
+          this.sharedEventBus?.emit({
             type: 'config-changed',
             id: Math.random().toString(36).substring(7),
             timestamp: Date.now(),
@@ -400,7 +563,7 @@ export class JsonRpcHandler {
     }
   }
 
-  private async handleSend(sessionId: string, text: string): Promise<Record<string, unknown>> {
+  private async handleSend(sessionId: string, text: string, type?: string): Promise<Record<string, unknown>> {
     if (!this.createProvider) {
       return { status: 'error: no provider configured' };
     }
@@ -421,6 +584,7 @@ export class JsonRpcHandler {
       sessionId: sessionId,
       resume: !!sessionId,
       system: this.systemPrompt,
+      type,
     }, this.sessionStore);
 
     // Store the loop for potential cancellation
@@ -437,12 +601,13 @@ export class JsonRpcHandler {
     const unsubscribes: Array<() => void> = [];
     for (const type of eventTypes) {
       unsubscribes.push(loop.eventBus.subscribe(type, (event: Event) => {
-        this.sharedEventBus.emit({ ...event, sessionId } as Event & { sessionId?: string });
+        this.sharedEventBus?.emit({ ...event, sessionId } as Event & { sessionId?: string });
       }));
     }
 
     try {
       const result = await loop.run(text);
+      await this.checkContextThresholds(sessionId);
       return { status: 'completed', sessionId: result.sessionId, events: result.events.length };
     } catch (err) {
       return { status: 'error', error: err instanceof Error ? err.message : 'unknown' };
@@ -479,7 +644,7 @@ export class JsonRpcHandler {
       timestamp: Date.now(),
       text,
     } as any;
-    this.sharedEventBus.emit({ ...promptEvent, sessionId } as any);
+    this.sharedEventBus?.emit({ ...promptEvent, sessionId } as any);
     this.sessionStore.appendEvent(sessionId, { ...promptEvent, sessionId } as any);
 
     // Helpers to emit response
@@ -490,7 +655,7 @@ export class JsonRpcHandler {
         timestamp: Date.now(),
         text: chunk,
       } as any;
-      this.sharedEventBus.emit({ ...deltaEvent, sessionId } as any);
+      this.sharedEventBus?.emit({ ...deltaEvent, sessionId } as any);
       this.sessionStore.appendEvent(sessionId, { ...deltaEvent, sessionId } as any);
     };
 
@@ -500,7 +665,7 @@ export class JsonRpcHandler {
         id: crypto.randomUUID(),
         timestamp: Date.now(),
       } as any;
-      this.sharedEventBus.emit({ ...stopEvent, sessionId } as any);
+      this.sharedEventBus?.emit({ ...stopEvent, sessionId } as any);
       this.sessionStore.appendEvent(sessionId, { ...stopEvent, sessionId } as any);
     };
 
@@ -522,7 +687,7 @@ export class JsonRpcHandler {
   * \`/model pricing <in;out>\` — Customize pricing format per million tokens.
   * \`/model window <tokens>\` — Adjust model context window capacity.
 * \`/effort <low|medium|high|max|auto>\` — Set reasoning effort level.
-* \`/mode <manual|plan|auto-edit|yolo>\` — Set agent approval mode.
+* \`/mode <plan|edit|auto|yolo>\` — Set agent approval mode.
 * \`/tools <max_tools> [max_websearch]\` — Configure dynamic tool limit per turn.
 * \`/websearch <limit>\` — Configure maximum web search limits per turn.
 
@@ -559,7 +724,7 @@ export class JsonRpcHandler {
 * **Version:** \`0.2.4\`
 * **Active Model:** \`${settings.model}\`
 * **Active Provider:** \`${provider}\`
-* **Approval Mode:** \`${settings.mode || 'auto-edit'}\`
+* **Approval Mode:** \`${settings.mode || 'auto'}\`
 * **Reasoning Effort:** \`${settings.effort || 'auto'}\`
 * **Workspace CWD:** \`${process.cwd()}\`
 * **Tools per Turn Limit:** \`${settings.tools_per_call || 10}\`
@@ -616,7 +781,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
             settings.model_override = args;
             settings.model = args;
             this.settingsManager.update(settings);
-            this.sharedEventBus.emit({
+            this.sharedEventBus?.emit({
               type: 'config-changed',
               id: Math.random().toString(36).substring(7),
               timestamp: Date.now(),
@@ -642,7 +807,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
               settings.current_provider = provider;
               settings.model_override = undefined;
               this.settingsManager.update(settings);
-              this.sharedEventBus.emit({
+              this.sharedEventBus?.emit({
                 type: 'config-changed',
                 id: Math.random().toString(36).substring(7),
                 timestamp: Date.now(),
@@ -667,7 +832,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
           } else {
             settings.theme = theme;
             this.settingsManager.update(settings);
-            this.sharedEventBus.emit({
+            this.sharedEventBus?.emit({
               type: 'config-changed',
               id: Math.random().toString(36).substring(7),
               timestamp: Date.now(),
@@ -681,11 +846,11 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
 
         case 'mode': {
           const settings = this.settingsManager.get();
-          const valid = ['manual', 'plan', 'auto-edit', 'yolo'];
+          const valid = ['plan', 'edit', 'auto', 'yolo'];
           if (!args) {
-            emitDelta(`Current approval mode is: \`${settings.mode || 'auto-edit'}\`. Use \`/mode <manual|plan|auto-edit|yolo>\` to switch.`);
+            emitDelta(`Current approval mode is: \`${settings.mode || 'auto'}\`. Use \`/mode <plan|edit|auto|yolo>\` to switch.`);
           } else if (!valid.includes(args.toLowerCase())) {
-            emitDelta(`Invalid mode: \`${args}\`. Supported modes: manual, plan, auto-edit, yolo.`);
+            emitDelta(`Invalid mode: \`${args}\`. Supported modes: plan, edit, auto, yolo.`);
           } else {
             settings.mode = args.toLowerCase() as any;
             this.settingsManager.update(settings);
@@ -927,9 +1092,19 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
             } else {
               emitDelta(`Usage: \`/context auto [on|off|threshold N|warn N|pricing on/off]\``);
             }
+          } else if (sub === 'compact') {
+            emitDelta(`### ⚡ Manual Compaction Triggered\n\nAnalyzing conversation history and building summary...`);
+            try {
+              const summary = await this.runAutomaticCompaction(sessionId, 'detailed');
+              emitDelta(`\n\n⚡ **Manual Compaction Executed Successfully!**\n\nConversation history has been summarized, reducing the active context usage to just ~500 tokens. The agent will continue seamlessly!\n\n**Restored Context Summary:**\n\n${summary}`);
+            } catch (err) {
+              emitDelta(`\n\n❌ **Compaction Failed**: ${err instanceof Error ? err.message : String(err)}`);
+            }
           } else {
-            const activeLoop = [...this.turnLoops.values()][0];
-            const history = activeLoop?.eventBus.history() || [];
+            const activeLoop = this.turnLoops.get(sessionId);
+            const history = activeLoop
+              ? activeLoop.eventBus.history()
+              : (this.sessionStore.loadEvents(sessionId) || []);
             const usageEvents = history.filter((e: any) => e.type === 'usage');
             let input = 0;
             let output = 0;
@@ -974,7 +1149,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
             emitDelta(`Failed to parse reminder time. Please format like: \`in 2 hours call developer\` or \`tomorrow at 9:00 am meeting\`.`);
             break;
           }
-          this.daemonApp.cronManager.createReminder(parsed.message, parsed.scheduledAt);
+          this.daemonApp.cronManager.createReminder(parsed.message, parsed.scheduledAt, sessionId);
           emitDelta(`Reminder scheduled! **"${parsed.message}"** at ${new Date(parsed.scheduledAt).toLocaleString()}`);
           break;
         }
@@ -1038,7 +1213,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
           }
           const settings = this.settingsManager.get();
           if (!settings.heartbeat) {
-            settings.heartbeat = { schedule: 'off', daily: '6:00', weekly: 'monday@6:00', monthly: '1@6:00', dreaming: '2:00', intraday: '' };
+            settings.heartbeat = { schedule: 'off', mode: 'yolo', daily: '6:00', weekly: 'monday@6:00', monthly: '1@6:00', dreaming: '2:00', intraday: '' };
           }
 
           const parts = args.trim().split(/\s+/);
@@ -1405,5 +1580,144 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
       if (isNaN(threshold) || isNaN(tierIn) || isNaN(tierOut) || threshold < 0 || tierIn < 0 || tierOut < 0) return false;
     }
     return true;
+  }
+
+  private async runAutomaticCompaction(sessionId: string, depth: 'detailed' | 'brief'): Promise<string> {
+    if (!this.createProvider) {
+      throw new Error('No provider configured');
+    }
+
+    const settings = this.settingsManager.get();
+    const provider = this.createProvider(settings);
+    const model = settings.model_override || settings.model;
+
+    const events = this.sessionStore.loadEvents(sessionId) || [];
+    if (events.length === 0) {
+      throw new Error('No events to compact');
+    }
+
+    // Build human-readable transcript
+    let transcriptParts: string[] = [];
+    for (const e of events) {
+      if (e.type === 'user-prompt' && (e as any).text) {
+        transcriptParts.push(`User: ${(e as any).text}`);
+      } else if (e.type === 'assistant-delta' && (e as any).text) {
+        const lastIdx = transcriptParts.length - 1;
+        if (lastIdx >= 0 && transcriptParts[lastIdx]?.startsWith('Assistant:')) {
+          transcriptParts[lastIdx] += (e as any).text;
+        } else {
+          transcriptParts.push(`Assistant: ${(e as any).text}`);
+        }
+      }
+    }
+    const transcript = transcriptParts.join('\n\n');
+    if (!transcript.trim()) {
+      throw new Error('No conversational history found to compact');
+    }
+
+    const systemPrompt = `You are a conversation summarizer. Summarize the provided dialogue in a dense, detailed, high-fidelity paragraph or two. Focus on capturing the original goals, what was accomplished, any modified files or configurations, current settings, and what the pending next steps are. Ensure all key technical details (like file paths, specific code adjustments, command names) are preserved. Do not add any conversational intros or outros; output ONLY the raw summary text.`;
+    const prompt = `Please summarize this conversation history:\n\n${transcript}`;
+
+    const summary = await provider.check(prompt, { model, system: systemPrompt });
+    const cleanSummary = summary.trim();
+
+    // Overwrite events log
+    const eventsPath = this.sessionStore.eventsPath(sessionId);
+    const newEvents = [
+      {
+        type: 'session-start',
+        id: crypto.randomUUID(),
+        model,
+        provider: settings.current_provider || 'unknown',
+        cwd: process.cwd(),
+        timestamp: Date.now(),
+      },
+      {
+        type: 'user-prompt',
+        id: crypto.randomUUID(),
+        text: `This is a continuation of a compacted conversation. Here is the high-fidelity summary of our session so far:\n\n${cleanSummary}\n\nLet's continue!`,
+        cwd: process.cwd(),
+        timestamp: Date.now() + 1,
+      },
+      {
+        type: 'assistant-delta',
+        id: crypto.randomUUID(),
+        text: `Got it! I have fully restored our conversation summary and details. Let let me know what you would like to do next!`,
+        timestamp: Date.now() + 2,
+      },
+      {
+        type: 'assistant-stop',
+        id: crypto.randomUUID(),
+        timestamp: Date.now() + 3,
+      }
+    ];
+
+    const data = newEvents.map((e) => JSON.stringify(e)).join('\n') + '\n';
+    writeFileSync(eventsPath, data, 'utf-8');
+
+    return cleanSummary;
+  }
+
+  private async checkContextThresholds(sessionId: string): Promise<void> {
+    const settings = this.settingsManager.get();
+    const history = this.sessionStore.loadEvents(sessionId) || [];
+    const usageEvents = history.filter((e: any) => e.type === 'usage');
+    let input = 0;
+    let output = 0;
+    for (const e of usageEvents) {
+      input += (e as any).inputTokens || 0;
+      output += (e as any).outputTokens || 0;
+    }
+
+    if (input === 0) return; // No token data yet
+
+    const windowSize = settings.providers?.[settings.current_provider as any]?.model_context_window ?? 200000;
+    const pct = Math.min(100, Math.round((input / windowSize) * 100));
+
+    const autoCompact = settings.auto_compact || { enabled: 'on', threshold: 80, warn_threshold: 60, forced_threshold: 85 };
+    const warnThresh = autoCompact.warn_threshold ?? 60;
+    const compactThresh = autoCompact.threshold ?? 80;
+    const forcedThresh = autoCompact.forced_threshold ?? 85;
+    const enabled = autoCompact.enabled ?? 'on';
+
+    if (pct >= forcedThresh && enabled === 'on') {
+      try {
+        const summary = await this.runAutomaticCompaction(sessionId, 'detailed');
+        const successMessage = `⚡ **Auto-Compaction Executed Successfully!**\n\nContext usage was at **${pct}%** (forced threshold: **${forcedThresh}%**).\nWe have summarized the conversation, reducing the history size down to just ~500 tokens. The agent will continue seamlessly!\n\n**Restored Context Summary:**\n\n${summary}`;
+        
+        const warningEvent = {
+          type: 'context-warning',
+          id: crypto.randomUUID(),
+          message: successMessage,
+          timestamp: Date.now(),
+        };
+        this.sharedEventBus?.emit({ ...warningEvent, sessionId } as any);
+        this.sessionStore.appendEvent(sessionId, { ...warningEvent, sessionId } as any);
+      } catch (err) {
+        console.error('[compaction] Auto-compaction failed:', err);
+      }
+    } else if (pct >= compactThresh) {
+      const suggestMessage = `⚠️ **Context Fill High (${pct}%)**\n\nYour context fill is at **${pct}%** (Threshold: **${compactThresh}%**). Suggesting conversation compaction.\n\nType \`/context compact\` to run compaction, summarize history, and free memory immediately!`;
+      
+      const warningEvent = {
+        type: 'context-warning',
+        id: crypto.randomUUID(),
+        message: suggestMessage,
+        timestamp: Date.now(),
+      };
+      this.sharedEventBus?.emit({ ...warningEvent, sessionId } as any);
+      this.sessionStore.appendEvent(sessionId, { ...warningEvent, sessionId } as any);
+    } else if (pct >= warnThresh) {
+      const warnMessage = `⚠️ **Context Warning (${pct}%)**\n\nContext window is **${pct}%** full (Warning threshold: **${warnThresh}%**).`;
+      
+      const warningEvent = {
+        type: 'context-warning',
+        id: crypto.randomUUID(),
+        message: warnMessage,
+        timestamp: Date.now(),
+      };
+      this.sharedEventBus?.emit({ ...warningEvent, sessionId } as any);
+      this.sessionStore.appendEvent(sessionId, { ...warningEvent, sessionId } as any);
+    }
   }
 }

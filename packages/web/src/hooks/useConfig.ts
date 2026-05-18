@@ -25,17 +25,19 @@ export function useConfig() {
       })
       .catch(() => {});
 
-    // Fetch model, current_provider and theme settings
+    // Fetch model, current_provider, theme and mode settings
     Promise.all([
       rpc.configGet('model').catch(() => null),
       rpc.configGet('current_provider').catch(() => null),
       rpc.configGet('theme').catch(() => null),
-    ]).then(([model, current_provider, theme]) => {
+      rpc.configGet('mode').catch(() => null),
+    ]).then(([model, current_provider, theme, mode]) => {
       setSettings(prev => ({
         ...prev,
         model: model !== null ? model : prev.model,
         current_provider: current_provider !== null ? current_provider : prev.current_provider,
         theme: theme !== null ? theme : prev.theme,
+        mode: mode !== null ? mode : prev.mode,
       }));
     }).catch(() => {});
   }, [rpc]);

@@ -21,7 +21,7 @@ const TITLES: Record<View, string> = {
   agents: 'Agents',
 };
 
-const MODES = ['manual', 'plan', 'auto-edit', 'yolo'] as const;
+const MODES = ['plan', 'edit', 'auto', 'yolo'] as const;
 
 const NAV_ITEMS: { view: View; label: string; icon: string }[] = [
   { view: 'assistant', label: 'Assistant', icon: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' },
@@ -33,9 +33,9 @@ const NAV_ITEMS: { view: View; label: string; icon: string }[] = [
 
 function AppContent() {
   const { rpc, connected } = useApi();
-  const { get } = useConfig();
+  const { get, set } = useConfig();
   const [activeView, setActiveView] = useState<View>('assistant');
-  const [mode, setMode] = useState<'manual' | 'plan' | 'auto-edit' | 'yolo'>('auto-edit');
+  const activeMode = (get('mode') as string) || 'auto';
   const [cmdOpen, setCmdOpen] = useState(false);
   const [cmdResult, setCmdResult] = useState('');
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -90,14 +90,14 @@ function AppContent() {
     setCmdResult('');
   }, []);
 
-  const renderNavIcon = (item: { view: View; icon: string }) => (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+  const renderNavIcon = (item: { view: View; icon: string }, size = 18) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
       <path d={item.icon} />
     </svg>
   );
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-bg text-text font-sans text-[13.5px]">
+    <div className="flex h-dvh w-screen overflow-hidden bg-bg text-text font-sans text-[13.5px]">
       {/* Sidebar — hidden on mobile */}
       {!isMobile && (
         <Sidebar
@@ -114,22 +114,21 @@ function AppContent() {
 
       <main className="flex flex-1 flex-col overflow-hidden bg-bg">
         {/* Topbar */}
-        <div className="flex h-11 items-center gap-2 border-b border-b1 bg-s1 px-3 shrink-0">
+        <div className="flex h-12 items-center gap-2 px-3 shrink-0">
           {/* Mobile nav icons */}
           {isMobile && (
             <div className="flex items-center gap-0.5">
               {NAV_ITEMS.map((item) => (
                 <button
                   key={item.view}
-                  className={`flex items-center justify-center w-8 h-8 rounded-[5px] transition-all duration-100 ${
-                    activeView === item.view
-                      ? 'text-fg bg-s3'
-                      : 'text-muted hover:text-text hover:bg-s2'
-                  }`}
+                  className={`flex items-center justify-center w-10 h-10 rounded-[6px] transition-all duration-100 ${activeView === item.view
+                    ? 'text-fg bg-s3'
+                    : 'text-muted hover:text-text hover:bg-s2'
+                    }`}
                   onClick={() => setActiveView(item.view)}
                   title={item.label}
                 >
-                  {renderNavIcon(item)}
+                  {renderNavIcon(item, 21)}
                 </button>
               ))}
             </div>
@@ -148,10 +147,9 @@ function AppContent() {
               {MODES.map((m) => (
                 <button
                   key={m}
-                  className={`px-2.5 py-1 text-xs cursor-pointer transition-all duration-100 font-mono select-none ${
-                    mode === m ? 'text-fg bg-s3' : 'text-muted hover:text-text hover:bg-s2'
-                  }`}
-                  onClick={() => setMode(m)}
+                  className={`px-2.5 py-1 text-xs cursor-pointer transition-all duration-100 font-mono select-none ${activeMode === m ? 'text-fg bg-s3' : 'text-muted hover:text-text hover:bg-s2'
+                    }`}
+                  onClick={() => set('mode', m)}
                 >
                   {m}
                 </button>
@@ -161,12 +159,13 @@ function AppContent() {
 
           {/* Commands button — icon only on mobile */}
           <button
-            className={`flex items-center gap-1.5 bg-transparent border border-b2 rounded-[6px] text-muted hover:border-b3 hover:text-text transition-all duration-100 ${
-              isMobile ? 'px-1.5' : 'px-2.5 py-1'
+            className={`flex items-center justify-center bg-transparent border border-b2 rounded-[6px] text-muted hover:border-b3 hover:text-text transition-all duration-100 ${
+              isMobile ? 'w-10 h-10' : 'px-2.5 py-1 gap-1.5 text-xs'
             }`}
             onClick={() => setCmdOpen(true)}
+            title="Open Commands"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <svg width={isMobile ? "21" : "12"} height={isMobile ? "21" : "12"} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <circle cx="11" cy="11" r="8" />
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>

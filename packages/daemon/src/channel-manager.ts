@@ -42,7 +42,7 @@ export class ChannelManager {
    * Send a message on a channel. Creates or reuses the channel's TurnLoop.
    * Bridges turn loop events to the shared daemon EventBus.
    */
-  async send(channelId: string, text: string, cwd?: string): Promise<{
+  async send(channelId: string, text: string, cwd?: string, type?: string): Promise<{
     status: string;
     sessionId: string;
     events: number;
@@ -65,10 +65,10 @@ export class ChannelManager {
       sessionId = entry?.sessionId || channelId;
 
       // Build approval callback
-      let onApprovalAsk: ((req: { name: string; input: Record<string, unknown>; reason: string }) => Promise<boolean>) | undefined;
+      let onApprovalAsk: ((req: { toolCallId?: string; name: string; input: Record<string, unknown>; reason: string }) => Promise<boolean>) | undefined;
       if (this.approvalTracker) {
-        onApprovalAsk = async (req: { name: string; input: Record<string, unknown>; reason: string }) => {
-          const toolCallId = crypto.randomUUID();
+        onApprovalAsk = async (req: { toolCallId?: string; name: string; input: Record<string, unknown>; reason: string }) => {
+          const toolCallId = req.toolCallId || crypto.randomUUID();
           return this.approvalTracker!.register({
             toolCallId,
             name: req.name,
@@ -91,6 +91,7 @@ export class ChannelManager {
         resume: !!sessionId,
         onApprovalAsk,
         system: this.systemPrompt,
+        type: type || 'webui',
       }, this.sessionStore);
 
       this.turnLoops.set(channelId, loop);

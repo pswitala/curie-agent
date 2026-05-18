@@ -56,17 +56,20 @@ export class BatchTurnLoop {
     effort?: ReasoningEffort;
     maxTurns?: number;
     system?: string;
+    type?: string;
   }) {
+    const approvalMode = config.settings.heartbeat?.mode || 'yolo';
     this.turnLoop = new TurnLoop({
       provider: config.provider,
       model: config.model,
       tools: config.tools,
       cwd: config.cwd,
       settings: config.settings,
-      approvalMode: 'yolo',
+      approvalMode,
       effort: config.effort,
       maxTurns: config.maxTurns,
       system: config.system,
+      type: config.type || 'heartbeat',
     });
   }
 

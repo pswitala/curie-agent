@@ -9,6 +9,8 @@ export interface SessionInfo {
   provider: string;
   createdAt: number;
   updatedAt: number;
+  name?: string;
+  type?: string;
 }
 
 export function useSession(sessionId: string | null) {
@@ -45,8 +47,8 @@ export function useSession(sessionId: string | null) {
     if (!ws || !sessionId) return;
 
     const handleEvent = (event: WsEvent) => {
-      // Allow global heartbeat-brief events to pass through to all sessions
-      if (event.type !== 'heartbeat-brief') {
+      // Allow global events to pass through to all sessions
+      if (event.type !== 'heartbeat-brief' && event.type !== 'cron-task-fired') {
         // Filter: only process events for this session
         const evtSessionId = (event as any).sessionId || event.id;
         if (evtSessionId && evtSessionId !== sessionId) return;
@@ -66,7 +68,12 @@ export function useSession(sessionId: string | null) {
     };
 
     const unsubscribes: Array<() => void> = [];
-    const eventTypes = ['user-prompt', 'assistant-delta', 'assistant-stop', 'tool-call', 'tool-result', 'error', 'status', 'usage', 'thinking-delta', 'heartbeat-brief'] as const;
+    const eventTypes = [
+      'user-prompt', 'assistant-delta', 'assistant-stop', 'tool-call',
+      'tool-result', 'error', 'status', 'usage', 'thinking-delta',
+      'heartbeat-brief', 'approval-request', 'approval-decision', 'context-warning',
+      'cron-task-fired'
+    ] as const;
     for (const eventType of eventTypes) {
       unsubscribes.push(ws.on(eventType, handleEvent));
     }

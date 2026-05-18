@@ -58,12 +58,16 @@ export const HeartbeatStatusSchema = z.object({});
 export const ChannelListSchema = z.object({});
 export const ChannelGetSchema = z.object({ channelId: z.string() });
 
+// Stats
+export const SessionStatsSchema = z.object({});
+
 // MCP
 export const McpListSchema = z.object({});
 
 export const Method = {
   SESSION_LIST: 'session.list',
   SESSION_GET: 'session.get',
+  SESSION_STATS: 'session.stats',
   SESSION_SEND: 'session.send',
   SESSION_CANCEL: 'session.cancel',
   SESSION_RESUME: 'session.resume',

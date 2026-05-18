@@ -10,6 +10,8 @@ export interface SessionInfo {
   provider: string;
   createdAt: number;
   updatedAt: number;
+  name?: string;
+  type?: string;
 }
 
 export interface SessionFile {
@@ -65,10 +67,13 @@ export class SessionStore {
     };
   }
 
-  create(cwd: string, model: string, provider: string): SessionInfo {
+  create(cwd: string, model: string, provider: string, type?: string): SessionInfo {
     const id = ulid();
     const now = Date.now();
     const info: SessionInfo = { id, cwd, model, provider, createdAt: now, updatedAt: now };
+    if (type) {
+      info.type = type;
+    }
     const dir = this.sessionPath(id);
 
     fs.mkdirSync(dir, { recursive: true });
@@ -103,6 +108,27 @@ export class SessionStore {
     const eventsPath = this.eventsPath(id);
     const data = events.map((e) => JSON.stringify(e)).join('\n') + '\n';
     fs.appendFileSync(eventsPath, data, 'utf-8');
+
+    // Auto-generate session name from first 20 characters of the first user message (which is not a slash command)
+    const userPromptEvent = events.find(e => e.type === 'user-prompt');
+    if (userPromptEvent && 'text' in userPromptEvent && typeof userPromptEvent.text === 'string') {
+      const text = userPromptEvent.text.trim();
+      if (text && !text.startsWith('/')) {
+        const metaPath = this.metadataPath(id);
+        if (fs.existsSync(metaPath)) {
+          try {
+            const info = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as SessionInfo;
+            if (!info.name) {
+              info.name = text.slice(0, 20);
+              fs.writeFileSync(metaPath, JSON.stringify(info, null, 2) + '\n');
+            }
+          } catch (err) {
+            console.error(`[session-store] Failed to save session name:`, err);
+          }
+        }
+      }
+    }
+
     this.touch(id);
   }
 

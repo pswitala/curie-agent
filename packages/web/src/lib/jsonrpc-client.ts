@@ -49,8 +49,12 @@ export class JsonRpcClient {
     return this.request('session.get', { id });
   }
 
-  async sessionSend(id: string, text: string): Promise<unknown> {
-    return this.request('session.send', { id, text });
+  async sessionStats(): Promise<unknown> {
+    return this.request('session.stats');
+  }
+
+  async sessionSend(id: string, text: string, type?: string): Promise<unknown> {
+    return this.request('session.send', { id, text, type });
   }
 
   async sessionCancel(id: string): Promise<unknown> {
