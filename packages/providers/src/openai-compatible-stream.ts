@@ -8,20 +8,27 @@ import type { ProviderEvent } from './provider.js';
  * Behavior matches the OpenRouter reference: tool calls are buffered
  * during the stream and emitted as a single batch after it completes,
  * so the TUI renders them as one grouped block. <think>...</think>
- * tags inside content deltas are routed to thinking-delta events;
- * accumulated thinking is flushed as a single thinking-block at end.
+ * tags and gemma4-style <|channel>thought\n...<channel|> blocks inside
+ * content deltas are routed to thinking-delta events; accumulated
+ * thinking is flushed as a single thinking-block at end.
  */
 export async function* streamOpenAICompatible(
   client: OpenAI,
   streamParams: OpenAI.ChatCompletionCreateParams,
   signal?: AbortSignal,
+  options?: { suppressThinking?: boolean },
 ): AsyncIterable<ProviderEvent> {
+  const suppressThinking = options?.suppressThinking ?? false;
   const sdkStream = (await client.chat.completions.create(streamParams)) as AsyncIterable<OpenAI.ChatCompletionChunk>;
 
   const pendingTools = new Map<number, { id: string; name: string; inputStr: string }>();
   let lastUsage: OpenAI.CompletionUsage | null = null;
   let inThinkBlock = false;
   let accumulatedThinking = '';
+
+  // Gemma4 thinking open tag: <|channel>thought\n  close tag: <channel|>
+  const GEMMA_OPEN = '<|channel>thought\n';
+  const GEMMA_CLOSE = '<channel|>';
 
   for await (const chunk of sdkStream) {
     if (signal?.aborted) break;
@@ -32,37 +39,57 @@ export async function* streamOpenAICompatible(
     if (!choice) continue;
 
     if (choice.delta?.content && typeof choice.delta.content === 'string') {
-      const content = choice.delta.content;
+      // Process content through a position cursor so both tag formats share one state machine.
+      let remaining = choice.delta.content;
 
-      if (!inThinkBlock && content.includes('<think>')) {
-        const parts = content.split('<think>');
-        if (parts[0]) yield { type: 'text-delta', text: parts[0] };
-        inThinkBlock = true;
+      while (remaining.length > 0) {
+        if (!inThinkBlock) {
+          // Detect whichever opening tag appears first.
+          const thinkIdx = remaining.indexOf('<think>');
+          const gemmaIdx = remaining.indexOf(GEMMA_OPEN);
 
-        const rest = parts.slice(1).join('<think>');
-        if (rest.includes('</think>')) {
-          const thinkParts = rest.split('</think>');
-          yield { type: 'thinking-delta', text: thinkParts[0] || '' };
-          accumulatedThinking += thinkParts[0] || '';
-          inThinkBlock = false;
-          if (thinkParts[1]) yield { type: 'text-delta', text: thinkParts[1] };
+          let openIdx = -1;
+          let openTag = '';
+          if (thinkIdx !== -1 && (gemmaIdx === -1 || thinkIdx <= gemmaIdx)) {
+            openIdx = thinkIdx;
+            openTag = '<think>';
+          } else if (gemmaIdx !== -1) {
+            openIdx = gemmaIdx;
+            openTag = GEMMA_OPEN;
+          }
+
+          if (openIdx === -1) {
+            // No opening tag — plain text.
+            yield { type: 'text-delta', text: remaining };
+            remaining = '';
+          } else {
+            if (openIdx > 0) yield { type: 'text-delta', text: remaining.slice(0, openIdx) };
+            inThinkBlock = true;
+            remaining = remaining.slice(openIdx + openTag.length);
+          }
         } else {
-          yield { type: 'thinking-delta', text: rest };
-          accumulatedThinking += rest;
+          // Inside a think block — look for either close tag.
+          const closeTag = remaining.includes('</think>') && (!remaining.includes(GEMMA_CLOSE) || remaining.indexOf('</think>') <= remaining.indexOf(GEMMA_CLOSE))
+            ? '</think>'
+            : remaining.includes(GEMMA_CLOSE)
+            ? GEMMA_CLOSE
+            : null;
+
+          const closeIdx = closeTag !== null ? remaining.indexOf(closeTag) : -1;
+
+          if (closeIdx === -1) {
+            // Still inside think block — no close tag yet.
+            if (!suppressThinking) yield { type: 'thinking-delta', text: remaining };
+            accumulatedThinking += remaining;
+            remaining = '';
+          } else {
+            const thinkText = remaining.slice(0, closeIdx);
+            if (!suppressThinking) yield { type: 'thinking-delta', text: thinkText };
+            accumulatedThinking += thinkText;
+            inThinkBlock = false;
+            remaining = remaining.slice(closeIdx + (closeTag as string).length);
+          }
         }
-      } else if (inThinkBlock) {
-        if (content.includes('</think>')) {
-          const parts = content.split('</think>');
-          yield { type: 'thinking-delta', text: parts[0] || '' };
-          accumulatedThinking += parts[0] || '';
-          inThinkBlock = false;
-          if (parts[1]) yield { type: 'text-delta', text: parts[1] };
-        } else {
-          yield { type: 'thinking-delta', text: content };
-          accumulatedThinking += content;
-        }
-      } else {
-        yield { type: 'text-delta', text: content };
       }
     }
 
@@ -80,7 +107,7 @@ export async function* streamOpenAICompatible(
     }
   }
 
-  if (accumulatedThinking) {
+  if (accumulatedThinking && !suppressThinking) {
     yield { type: 'thinking-block', thinking: accumulatedThinking, signature: '' };
   }
 

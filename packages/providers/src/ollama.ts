@@ -75,15 +75,16 @@ export class OllamaProvider implements Provider {
       ? [{ role: 'system', content: args.system }, ...messages]
       : messages;
 
-    // Ollama-specific: omit stream_options, thinking blocks, token caching
-    const streamParams: OpenAI.ChatCompletionCreateParams = {
+    // Thinking blocks and token caching are omitted; include_usage requests final usage chunk
+    const streamParams = {
       model,
       messages: allMessages,
       stream: true,
+      stream_options: { include_usage: true },
       ...(tools ? { tools } : {}),
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
       ...(args.maxTokens ? { max_tokens: args.maxTokens } : {}),
-    };
+    } as OpenAI.ChatCompletionCreateParams;
 
     return {
       iterable: streamOpenAICompatible(this.client, streamParams, args.signal),

@@ -75,6 +75,24 @@ describe('streamOpenAICompatible', () => {
     expect(textDeltas.join('')).toBe('intro  done');
   });
 
+  it('routes gemma4 <|channel>thought\\n...<channel|> blocks into thinking events', async () => {
+    const client = makeClient([
+      makeChunk('<|channel>thought\nstep one\n'),
+      makeChunk('step two\n'),
+      makeChunk('<channel|>The answer is 42.'),
+    ]);
+    const events = await collect(streamOpenAICompatible(client, {} as OpenAI.ChatCompletionCreateParams));
+
+    const thinking = events.filter((e) => e.type === 'thinking-delta').map((e) => (e as { text: string }).text).join('');
+    expect(thinking).toBe('step one\nstep two\n');
+
+    const block = events.find((e) => e.type === 'thinking-block');
+    expect(block).toEqual({ type: 'thinking-block', thinking: 'step one\nstep two\n', signature: '' });
+
+    const text = events.filter((e) => e.type === 'text-delta').map((e) => (e as { text: string }).text).join('');
+    expect(text).toBe('The answer is 42.');
+  });
+
   it('handles <think> and </think> in the same chunk', async () => {
     const client = makeClient([makeChunk('a<think>b</think>c')]);
     const events = await collect(streamOpenAICompatible(client, {} as OpenAI.ChatCompletionCreateParams));
@@ -115,6 +133,17 @@ describe('streamOpenAICompatible', () => {
     const usage = events.find((e) => e.type === 'usage');
     expect(usage).toEqual({ type: 'usage', inputTokens: 10, outputTokens: 5 });
     expect(events[events.length - 1]).toEqual({ type: 'stop', reason: 'stop' });
+  });
+
+  it('suppresses thinking-delta and thinking-block when suppressThinking is true', async () => {
+    const client = makeClient([makeChunk('hello <think>this is reasoning</think> world')]);
+    const events = await collect(
+      streamOpenAICompatible(client, {} as OpenAI.ChatCompletionCreateParams, undefined, { suppressThinking: true }),
+    );
+    expect(events.filter((e) => e.type === 'thinking-delta')).toHaveLength(0);
+    expect(events.filter((e) => e.type === 'thinking-block')).toHaveLength(0);
+    const text = events.filter((e) => e.type === 'text-delta').map((e) => (e as { text: string }).text).join('');
+    expect(text).toBe('hello  world');
   });
 
   it('reports stop reason "aborted" when signal aborts before iteration begins', async () => {
