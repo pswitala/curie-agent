@@ -88,7 +88,7 @@ function ToolGroupBlock({ toolCalls }: { toolCalls: ToolCallEntry[] }) {
               <span className="text-[11.5px] font-semibold text-fg font-mono">{tc.name}</span>
               <span className="text-xs text-muted font-mono truncate max-w-[250px]">{tc.args}</span>
             </div>
-            <pre className="text-[11px] text-muted font-mono leading-[1.5] overflow-x-auto whitespace-pre-wrap">{tc.input ? escapeHtml(JSON.stringify(tc.input, null, 2)) : ''}</pre>
+            <pre className="text-[11px] text-muted font-mono leading-[1.5] overflow-x-auto whitespace-pre-wrap">{tc.input ? JSON.stringify(tc.input, null, 2) : ''}</pre>
           </div>
         ))}
       </div>

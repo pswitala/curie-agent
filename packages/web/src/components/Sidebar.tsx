@@ -142,13 +142,13 @@ export default function Sidebar({
     <aside className="w-[232px] bg-s1 border-r border-b1 flex flex-col overflow-hidden shrink-0">
       {/* Logo */}
       <div className="flex items-center gap-2 px-3 py-4 border-b border-b1">
-        <div className="w-[22px] h-[22px] bg-fg rounded-[5px] flex items-center justify-center shrink-0">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="#010101">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-          </svg>
-        </div>
+        <img
+          src="/icons/logo-512.png"
+          alt="Curie Logo"
+          className="w-[22px] h-[22px] object-contain rounded-[5px] shrink-0"
+        />
         <span className="text-[13px] font-semibold text-fg">curie-agent</span>
-        <span className="text-[10px] text-muted font-mono">v0.4.2</span>
+        <span className="text-[10px] text-muted font-mono">v0.2.4</span>
       </div>
 
       {/* Sessions */}
@@ -173,11 +173,10 @@ export default function Sidebar({
           {sessions.map((s) => (
             <button
               key={s.id}
-              className={`w-full text-left px-1.5 py-1 rounded-[4px] text-[11px] truncate transition-colors duration-100 ${
-                s.id === activeSessionId
-                  ? 'text-fg bg-s3'
-                  : 'text-muted hover:text-text hover:bg-s2'
-              }`}
+              className={`w-full text-left px-1.5 py-1 rounded-[4px] text-[11px] truncate transition-colors duration-100 ${s.id === activeSessionId
+                ? 'text-fg bg-s3'
+                : 'text-muted hover:text-text hover:bg-s2'
+                }`}
               onClick={() => onSelectSession(s.id)}
               title={formatSessionLabel(s)}
             >
@@ -192,9 +191,8 @@ export default function Sidebar({
         {NAV_ITEMS.map((item) => (
           <div
             key={item.view}
-            className={`flex items-center gap-2 px-3.5 py-1.5 cursor-pointer transition-colors duration-100 select-none ${
-              activeView === item.view ? 'text-fg bg-s3' : 'text-muted hover:text-text hover:bg-s2'
-            }`}
+            className={`flex items-center gap-2 px-3.5 py-1.5 cursor-pointer transition-colors duration-100 select-none ${activeView === item.view ? 'text-fg bg-s3' : 'text-muted hover:text-text hover:bg-s2'
+              }`}
             onClick={() => onNavigate(item.view)}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">

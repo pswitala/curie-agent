@@ -64,7 +64,7 @@ export const PROVIDER_INFO: Record<ProviderName, {
     label: 'Ollama (Local)',
     number: '5',
     defaultModel: 'custom',
-    settingsKey: 'local',
+    settingsKey: 'ollama',
     requiresKey: false,
   },
 };

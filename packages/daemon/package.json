@@ -23,10 +23,10 @@
     "clean": "npx rimraf dist"
   },
   "dependencies": {
-    "@curie-agent/core": "^0.2.1",
-    "@curie-agent/protocol": "^0.2.1",
-    "@curie-agent/providers": "^0.2.1",
-    "@curie-agent/tools": "^0.2.1",
+    "@curie-agent/core": "workspace:*",
+    "@curie-agent/protocol": "workspace:*",
+    "@curie-agent/providers": "workspace:*",
+    "@curie-agent/tools": "workspace:*",
     "ws": "^8.16.0"
   },
   "devDependencies": {

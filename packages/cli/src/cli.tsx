@@ -206,7 +206,17 @@ function createProvider(settings: CurieSettings): any | null {
     return { name: 'openrouter', stream: p.stream.bind(p), check: p.check.bind(p), complete: p.complete.bind(p) };
   }
 
-  if (providerName === 'ollama' || providerName === 'local') {
+  if (providerName === 'ollama') {
+    const key = (typeof settings.providers?.ollama?.api_key === 'string' ? settings.providers.ollama.api_key.trim() : '')
+      || process.env.MODEL_API_KEY || '';
+    const url = (typeof settings.providers?.ollama?.url === 'string' ? settings.providers.ollama.url.trim() : '')
+      || process.env.MODEL_URL || '';
+    if (!url) return null;
+    const p = new OllamaProvider(key || undefined, url || undefined);
+    return { name: 'ollama', stream: p.stream.bind(p), check: p.check.bind(p) };
+  }
+
+  if (providerName === 'local') {
     const key = (typeof settings.providers?.local?.api_key === 'string' ? settings.providers.local.api_key.trim() : '')
       || process.env.MODEL_API_KEY || '';
     const url = (typeof settings.providers?.local?.url === 'string' ? settings.providers.local.url.trim() : '')
@@ -231,7 +241,7 @@ function createProvider(settings: CurieSettings): any | null {
 // Daemon management helpers
 // ---------------------------------------------------------------------------
 
-const DEFAULT_DAEMON_URL = 'http://127.0.0.1:3457';
+const DEFAULT_DAEMON_URL = `http://127.0.0.1:${process.env.PORT || '3457'}`;
 
 /** Build the daemon URL from settings (uses web_ip if set). */
 function getDaemonUrl(): string {
@@ -239,7 +249,8 @@ function getDaemonUrl(): string {
     const sm = new SettingsManager();
     sm.load();
     const ip = sm.get().web_ip || '127.0.0.1';
-    const url = `http://${ip}:3457`;
+    const port = process.env.PORT || '3457';
+    const url = `http://${ip}:${port}`;
     if (ip !== '127.0.0.1') {
       console.log(`Using daemon URL: ${url} (web_ip=${ip})`);
     }
@@ -252,7 +263,11 @@ function getDaemonUrl(): string {
 /** Check if the daemon is reachable. */
 async function checkDaemon(url: string, token: string): Promise<boolean> {
   try {
-    const res = await fetch(`${url}/health`);
+    const res = await fetch(`${url}/health`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
     return res.ok;
   } catch {
     return false;
@@ -345,6 +360,7 @@ async function handleDaemonCommand(subcommand: string): Promise<{ keepRunning: b
       // Read web_ip from settings for daemon binding
       const settings = settingsManager.get();
       const webIp = settings.web_ip || '';
+      const port = process.env.PORT ? parseInt(process.env.PORT, 10) : undefined;
 
       const daemon = getOrCreateDaemonServer({
         sessionStore,
@@ -354,6 +370,7 @@ async function handleDaemonCommand(subcommand: string): Promise<{ keepRunning: b
         tools: mergedTools,
         systemPrompt,
         web_ip: webIp,
+        port,
       });
       let daemonUrl: string;
       try {

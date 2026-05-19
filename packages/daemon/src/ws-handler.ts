@@ -1,6 +1,7 @@
 import type { Server } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { EventBus, Event } from '@curie-agent/core';
+import { validateTokenWs } from './auth.js';
 
 export interface WsClientInfo {
   ws: WebSocket;
@@ -28,6 +29,12 @@ export class WsHandler {
 
       if (!token) {
         ws.close(4001, 'Missing token');
+        return;
+      }
+
+      if (!validateTokenWs(url)) {
+        console.log(`[ws] connection rejected: token mismatch`);
+        ws.close(4003, 'Invalid token');
         return;
       }
 

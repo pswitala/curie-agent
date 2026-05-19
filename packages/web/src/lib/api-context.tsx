@@ -6,9 +6,17 @@ interface ApiContext {
   rpc: JsonRpcClient | null;
   ws: WsClient | null;
   connected: boolean;
+  token: string | null;
+  setToken: (token: string) => void;
 }
 
-const ApiContext = createContext<ApiContext>({ rpc: null, ws: null, connected: false });
+const ApiContext = createContext<ApiContext>({
+  rpc: null,
+  ws: null,
+  connected: false,
+  token: null,
+  setToken: () => {},
+});
 
 export function useApi(): ApiContext {
   return useContext(ApiContext);
@@ -19,31 +27,49 @@ export interface ApiProviderProps {
 }
 
 export function ApiProvider({ children }: ApiProviderProps) {
-  const [context, setContext] = useState<ApiContext>({ rpc: null, ws: null, connected: false });
+  const [token, setTokenState] = useState<string | null>(null);
+  const [contextState, setContextState] = useState<{
+    rpc: JsonRpcClient | null;
+    ws: WsClient | null;
+    connected: boolean;
+  }>({ rpc: null, ws: null, connected: false });
 
+  // Initial load: parse URL or fallback to localStorage
   useEffect(() => {
-    const token = new URLSearchParams(window.location.search).get('token')
+    const initialToken = new URLSearchParams(window.location.search).get('token')
       || localStorage.getItem('daemon-token')
       || '';
-    if (!token) return;
+    if (initialToken) {
+      localStorage.setItem('daemon-token', initialToken);
+      setTokenState(initialToken);
+    }
+  }, []);
 
-    // Save token for subsequent visits
-    localStorage.setItem('daemon-token', token);
+  const setToken = (newToken: string) => {
+    localStorage.setItem('daemon-token', newToken);
+    setTokenState(newToken);
+  };
+
+  useEffect(() => {
+    if (!token) {
+      setContextState({ rpc: null, ws: null, connected: false });
+      return;
+    }
 
     const baseUrl = window.location.origin;
     const rpc = new JsonRpcClient(baseUrl, token);
     const ws = new WsClient(baseUrl, token);
 
-    setContext({ rpc, ws, connected: false });
+    setContextState({ rpc, ws, connected: false });
 
     ws.connect();
 
     const unsubscribe = ws.on('connection-status', (evt) => {
-      setContext(prev => ({ ...prev, connected: !!(evt as any).connected }));
+      setContextState(prev => ({ ...prev, connected: !!(evt as any).connected }));
     });
 
     const checkInterval = setInterval(() => {
-      setContext(prev => ({ ...prev, connected: ws.isConnected() }));
+      setContextState(prev => ({ ...prev, connected: ws.isConnected() }));
     }, 2000);
 
     return () => {
@@ -51,10 +77,18 @@ export function ApiProvider({ children }: ApiProviderProps) {
       clearInterval(checkInterval);
       ws.disconnect();
     };
-  }, []);
+  }, [token]);
+
+  const value: ApiContext = {
+    rpc: contextState.rpc,
+    ws: contextState.ws,
+    connected: contextState.connected,
+    token,
+    setToken,
+  };
 
   return (
-    <ApiContext.Provider value={context}>
+    <ApiContext.Provider value={value}>
       {children}
     </ApiContext.Provider>
   );

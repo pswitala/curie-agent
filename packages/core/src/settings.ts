@@ -99,6 +99,8 @@ export interface CurieSettings {
   // Daemon binding IP (empty = 127.0.0.1)
   web_ip: string;
 
+  daemon_token?: string;
+
   // ── Legacy flat keys (backward compat only, stripped on save) ──────────
   MODEL_PROVIDER?: string;
   MODEL_URL?: string;
@@ -142,16 +144,16 @@ export interface CurieSettings {
 
 function makeDefaultProviders(): ProviderMap {
   const p: Partial<ProviderMap> = {};
-  for (const name of ['anthropic','openai','openrouter','google','ollama','local'] as const) {
+  for (const name of ['anthropic', 'openai', 'openrouter', 'google', 'ollama', 'local'] as const) {
     p[name] = { api_key: '', url: '', model: '', model_cost: '', model_context_window: 131072 };
   }
   return {
     anthropic: { ...p.anthropic!, url: 'https://api.anthropic.com', model: 'claude-sonnet-4-6', model_context_window: 200000 },
-    openai:    { ...p.openai!,    url: 'https://api.openai.com',    model: 'gpt-4o' },
-    openrouter:{ ...p.openrouter!,url: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-sonnet-4-6', model_context_window: 200000 },
-    google:    { ...p.google!,    model: 'gemini-2.5-pro' },
-    ollama:    { ...p.ollama!,    url: 'http://localhost:11434/v1', model: 'llama3' },
-    local:     { ...p.local!,     model: 'custom' },
+    openai: { ...p.openai!, url: 'https://api.openai.com', model: 'gpt-4o' },
+    openrouter: { ...p.openrouter!, url: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-sonnet-4-6', model_context_window: 200000 },
+    google: { ...p.google!, model: 'gemini-2.5-pro' },
+    ollama: { ...p.ollama!, url: 'http://localhost:11434/v1', model: 'llama3' },
+    local: { ...p.local!, model: 'custom' },
   } as ProviderMap;
 }
 
@@ -197,7 +199,7 @@ function pickString(parsed: Record<string, unknown>, ...keys: string[]): string 
   for (const [k, v] of Object.entries(parsed)) {
     if (typeof v !== 'string' || v.length === 0) continue;
     if (targets.has(normalize(k))) return v;
-  } 
+  }
   return undefined;
 }
 
@@ -234,8 +236,8 @@ export function isLegacyFlatFormat(raw: Record<string, unknown>): boolean {
   const hasNested = 'providers' in raw && typeof raw.providers === 'object' && raw.providers !== null;
   if (hasNested) return false;
   const flatMarkerKeys = [
-    'MODEL_API_KEY','OPENAI_API_KEY','ANTHROPIC_API_KEY','OPENROUTER_API_KEY',
-    'GOOGLE_API_KEY','MODEL_URL','ANTHROPIC_URL','OPENAI_URL','OPENROUTER_URL','GOOGLE_URL',
+    'MODEL_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY',
+    'GOOGLE_API_KEY', 'MODEL_URL', 'ANTHROPIC_URL', 'OPENAI_URL', 'OPENROUTER_URL', 'GOOGLE_URL',
     'MODEL_PROVIDER',
   ];
   const normalize = (s: string) => s.replace(/[_-]/g, '').toLowerCase();
@@ -248,7 +250,7 @@ export function migrateFlatToNested(parsed: Record<string, unknown>): CurieSetti
   const modelProvider = (pickString(parsed, 'MODEL_PROVIDER') || 'anthropic').toLowerCase();
 
   // Resolve which provider MODEL_API_KEY/MODEL_URL belonged to
-  const resolvedProvider: keyof ProviderMap = ['ollama','local'].includes(modelProvider)
+  const resolvedProvider: keyof ProviderMap = ['ollama', 'local'].includes(modelProvider)
     ? modelProvider as keyof ProviderMap
     : (modelProvider as keyof ProviderMap) || 'anthropic';
 
@@ -273,11 +275,11 @@ export function migrateFlatToNested(parsed: Record<string, unknown>): CurieSetti
 
   const providers: ProviderMap = {
     anthropic: { api_key: anthropicKey, url: anthropicUrl, model: DEFAULT_SETTINGS.providers.anthropic.model, model_cost: '', model_context_window: 200000 },
-    openai:    { api_key: openaiKey,    url: openaiUrl,    model: DEFAULT_SETTINGS.providers.openai.model,    model_cost: '', model_context_window: 131072 },
-    openrouter:{ api_key: orKey,        url: orUrl,        model: DEFAULT_SETTINGS.providers.openrouter.model, model_cost: '', model_context_window: 200000 },
-    google:    { api_key: googleKey,    url: googleUrl,    model: DEFAULT_SETTINGS.providers.google.model,    model_cost: '', model_context_window: 131072 },
-    ollama:    { api_key: ollamaKey,    url: ollamaUrl,    model: DEFAULT_SETTINGS.providers.ollama.model,    model_cost: '', model_context_window: 131072 },
-    local:     { api_key: localKey,     url: localUrl,     model: DEFAULT_SETTINGS.providers.local.model,     model_cost: '', model_context_window: 131072 },
+    openai: { api_key: openaiKey, url: openaiUrl, model: DEFAULT_SETTINGS.providers.openai.model, model_cost: '', model_context_window: 131072 },
+    openrouter: { api_key: orKey, url: orUrl, model: DEFAULT_SETTINGS.providers.openrouter.model, model_cost: '', model_context_window: 200000 },
+    google: { api_key: googleKey, url: googleUrl, model: DEFAULT_SETTINGS.providers.google.model, model_cost: '', model_context_window: 131072 },
+    ollama: { api_key: ollamaKey, url: ollamaUrl, model: DEFAULT_SETTINGS.providers.ollama.model, model_cost: '', model_context_window: 131072 },
+    local: { api_key: localKey, url: localUrl, model: DEFAULT_SETTINGS.providers.local.model, model_cost: '', model_context_window: 131072 },
   };
 
   // Preserve flat model into the active provider's model
@@ -355,17 +357,17 @@ export function migrateFlatToNested(parsed: Record<string, unknown>): CurieSetti
 /** Serialize settings to JSON, stripping legacy flat keys. */
 export function stripLegacyKeys(s: CurieSettings): Record<string, unknown> {
   const legacy = new Set([
-    'MODEL_PROVIDER','MODEL_URL','MODEL_API_KEY',
-    'OPENAI_API_KEY','OPENAI_URL','ANTHROPIC_API_KEY','ANTHROPIC_URL',
-    'OPENROUTER_API_KEY','OPENROUTER_URL','GOOGLE_API_KEY','GOOGLE_URL',
-    'TELEGRAM_BOT_TOKEN','TELEGRAM_USER_ID','TELEGRAM_CHAT_ID','TELEGRAM_ALLOW_GROUPS',
-    'CHANNEL_TAB_ACTIVE','MCP_SERVERS',
-    'TOOLS_PER_CALL','WEBSEARCH_PER_CALL',
-    'HEARTBEAT','HEARTBEAT_INTRADAY','HEARTBEAT_DAILY','HEARTBEAT_WEEKLY',
-    'HEARTBEAT_MONTHLY','HEARTBEAT_DREAMING',
-    'MODEL_COST','MODEL_CONTEXT_WINDOW',
-    'SAFETY_PATH_GUARD','SAFETY_PATH_ALLOWLIST','SAFETY_COMMAND_GUARD','SAFETY_SNAPSHOTS',
-    'AUTO_COMPACT','AUTO_COMPACT_THRESHOLD','AUTO_COMPACT_WARN_THRESHOLD','AUTO_COMPACT_FORCED_THRESHOLD',
+    'MODEL_PROVIDER', 'MODEL_URL', 'MODEL_API_KEY',
+    'OPENAI_API_KEY', 'OPENAI_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_URL',
+    'OPENROUTER_API_KEY', 'OPENROUTER_URL', 'GOOGLE_API_KEY', 'GOOGLE_URL',
+    'TELEGRAM_BOT_TOKEN', 'TELEGRAM_USER_ID', 'TELEGRAM_CHAT_ID', 'TELEGRAM_ALLOW_GROUPS',
+    'CHANNEL_TAB_ACTIVE', 'MCP_SERVERS',
+    'TOOLS_PER_CALL', 'WEBSEARCH_PER_CALL',
+    'HEARTBEAT', 'HEARTBEAT_INTRADAY', 'HEARTBEAT_DAILY', 'HEARTBEAT_WEEKLY',
+    'HEARTBEAT_MONTHLY', 'HEARTBEAT_DREAMING',
+    'MODEL_COST', 'MODEL_CONTEXT_WINDOW',
+    'SAFETY_PATH_GUARD', 'SAFETY_PATH_ALLOWLIST', 'SAFETY_COMMAND_GUARD', 'SAFETY_SNAPSHOTS',
+    'AUTO_COMPACT', 'AUTO_COMPACT_THRESHOLD', 'AUTO_COMPACT_WARN_THRESHOLD', 'AUTO_COMPACT_FORCED_THRESHOLD',
     'PRICING_TIER_WARN',
   ]);
   const result: Record<string, unknown> = {};
@@ -503,7 +505,7 @@ export function parseNestedSettings(parsed: Record<string, unknown>): CurieSetti
   const getBool = (keys: string[]) => pickBool(parsed, ...keys);
 
   const providers: ProviderMap = { ...DEFAULT_SETTINGS.providers };
-  const provKeys: (keyof ProviderMap)[] = ['anthropic','openai','openrouter','google','ollama','local'];
+  const provKeys: (keyof ProviderMap)[] = ['anthropic', 'openai', 'openrouter', 'google', 'ollama', 'local'];
 
   const rawProviders = parsed.providers as Record<string, Record<string, string | number | undefined>> | undefined;
   if (rawProviders) {
@@ -578,5 +580,6 @@ export function parseNestedSettings(parsed: Record<string, unknown>): CurieSetti
     auto_compact: autoCompactConfig,
     pricing_tier_warn: (getString(['pricing_tier_warn', 'PRICING_TIER_WARN']) || 'on') as 'on' | 'off',
     web_ip: getString(['web_ip', 'WEB_IP']) || '',
+    daemon_token: getString(['daemon_token']),
   };
 }

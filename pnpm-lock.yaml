@@ -5,15 +5,15 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  '@curie-agent/core': workspace:^0.1.2
-  '@curie-agent/daemon': workspace:^0.1.2
-  '@curie-agent/protocol': workspace:^0.1.2
-  '@curie-agent/providers': workspace:^0.1.2
-  '@curie-agent/render': workspace:^0.1.2
-  '@curie-agent/tools': workspace:^0.1.2
-  '@curie-agent/mcp': workspace:^0.1.2
-  '@curie-agent/tui': workspace:^0.1.2
-  '@curie-agent/cli': workspace:^0.1.2
+  '@curie-agent/core': workspace:*
+  '@curie-agent/daemon': workspace:*
+  '@curie-agent/protocol': workspace:*
+  '@curie-agent/providers': workspace:*
+  '@curie-agent/render': workspace:*
+  '@curie-agent/tools': workspace:*
+  '@curie-agent/mcp': workspace:*
+  '@curie-agent/tui': workspace:*
+  '@curie-agent/cli': workspace:*
 
 importers:
 
@@ -65,28 +65,28 @@ importers:
   packages/cli:
     dependencies:
       '@curie-agent/core':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../core
       '@curie-agent/daemon':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../daemon
       '@curie-agent/mcp':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../mcp
       '@curie-agent/protocol':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../protocol
       '@curie-agent/providers':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../providers
       '@curie-agent/render':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../render
       '@curie-agent/tools':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../tools
       '@curie-agent/tui':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../tui
       '@types/react':
         specifier: ^19.0.0
@@ -124,16 +124,16 @@ importers:
   packages/daemon:
     dependencies:
       '@curie-agent/core':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../core
       '@curie-agent/protocol':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../protocol
       '@curie-agent/providers':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../providers
       '@curie-agent/tools':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../tools
       ws:
         specifier: ^8.16.0
@@ -152,10 +152,10 @@ importers:
   packages/mcp:
     dependencies:
       '@curie-agent/core':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../core
       '@curie-agent/tools':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../tools
       '@modelcontextprotocol/sdk':
         specifier: ^1.12.0
@@ -237,7 +237,7 @@ importers:
   packages/tools:
     dependencies:
       '@curie-agent/core':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../core
       zod:
         specifier: ^4.4.3
@@ -253,13 +253,13 @@ importers:
   packages/tui:
     dependencies:
       '@curie-agent/core':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../core
       '@curie-agent/protocol':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../protocol
       '@curie-agent/render':
-        specifier: workspace:^0.1.2
+        specifier: workspace:*
         version: link:../render
       '@types/react':
         specifier: ^19.0.0

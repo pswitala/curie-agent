@@ -23,7 +23,7 @@
     "clean": "npx rimraf dist"
   },
   "dependencies": {
-    "@curie-agent/core": "^0.2.1",
+    "@curie-agent/core": "workspace:*",
     "zod": "^4.4.3"
   },
   "devDependencies": {

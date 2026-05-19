@@ -38,15 +38,15 @@
   "packageManager": "pnpm@10.12.0",
   "pnpm": {
     "overrides": {
-      "@curie-agent/core": "workspace:^0.1.2",
-      "@curie-agent/daemon": "workspace:^0.1.2",
-      "@curie-agent/protocol": "workspace:^0.1.2",
-      "@curie-agent/providers": "workspace:^0.1.2",
-      "@curie-agent/render": "workspace:^0.1.2",
-      "@curie-agent/tools": "workspace:^0.1.2",
-      "@curie-agent/mcp": "workspace:^0.1.2",
-      "@curie-agent/tui": "workspace:^0.1.2",
-      "@curie-agent/cli": "workspace:^0.1.2"
+      "@curie-agent/core": "workspace:*",
+      "@curie-agent/daemon": "workspace:*",
+      "@curie-agent/protocol": "workspace:*",
+      "@curie-agent/providers": "workspace:*",
+      "@curie-agent/render": "workspace:*",
+      "@curie-agent/tools": "workspace:*",
+      "@curie-agent/mcp": "workspace:*",
+      "@curie-agent/tui": "workspace:*",
+      "@curie-agent/cli": "workspace:*"
     },
     "onlyBuiltDependencies": [
       "better-sqlite3",

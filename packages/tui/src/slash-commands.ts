@@ -1278,7 +1278,7 @@ function handleProvider(args: string): SlashCommandResult {
   if (!args) {
     return {
       type: 'message',
-      message: `Usage: /provider <name>\nProviders: ${validProviders.join(', ')}\n\nCurrent settings:\n  anthropic: providers.anthropic.api_key, providers.anthropic.url\n  openai: providers.openai.api_key, providers.openai.url\n  google: providers.google.api_key, providers.google.url\n  local: providers.local.url, providers.local.api_key\n  ollama: providers.local.url, providers.local.api_key\n  openrouter: providers.openrouter.api_key, providers.openrouter.url`,
+      message: `Usage: /provider <name>\nProviders: ${validProviders.join(', ')}\n\nCurrent settings:\n  anthropic: providers.anthropic.api_key, providers.anthropic.url\n  openai: providers.openai.api_key, providers.openai.url\n  google: providers.google.api_key, providers.google.url\n  local: providers.local.url, providers.local.api_key\n  ollama: providers.ollama.url, providers.ollama.api_key\n  openrouter: providers.openrouter.api_key, providers.openrouter.url`,
     };
   }
   const provider = args.toLowerCase();

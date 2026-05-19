@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import type { EventBus, SessionStore, SettingsManager, CurieSettings, ProviderStream, Tool } from '@curie-agent/core';
 import { JsonRpcHandler } from './jsonrpc-handler.js';
 import { WsHandler } from './ws-handler.js';
-import { validateTokenHttp, rejectUnauthorized, setCorsHeaders, handleCorsPreflight } from './auth.js';
+import { validateTokenHttp, rejectUnauthorized, setCorsHeaders, handleCorsPreflight, ensureToken } from './auth.js';
 import { serveStaticFile, serveWebUI } from './static-files.js';
 import { DaemonApp, type McpServerConfig, type SendMessageFn } from './daemon-app.js';
 
@@ -80,7 +80,7 @@ export class DaemonServer {
 
   async start(): Promise<{ url: string; port: number }> {
     const port = this.config.port ?? 3457;
-    const host = this.webIp || this.config.host || '127.0.0.1';
+    const host = this.webIp || this.config.host || process.env.HOST || '127.0.0.1';
 
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => {
@@ -144,7 +144,35 @@ export class DaemonServer {
 
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
 
-    // Health check (no auth)
+
+    // Auth check (skip for /ws, handled by ws handler)
+    if (url.pathname === '/ws') {
+      // WS upgrade is handled by ws.Server
+      return;
+    }
+
+    // Validate token for all non-public requests (allow frontend static assets to load)
+    const isPublicAsset =
+      url.pathname === '/' ||
+      url.pathname === '/index.html' ||
+      url.pathname === '/manifest.json' ||
+      url.pathname === '/sw.js' ||
+      url.pathname.startsWith('/icons/') ||
+      url.pathname.startsWith('/assets/');
+
+    if (!isPublicAsset && !validateTokenHttp(req)) {
+      console.log(`[http] auth FAILED path=${url.pathname}`);
+      rejectUnauthorized(res);
+      return;
+    }
+
+    // Set cookie if successfully authenticated via query param token to allow sub-resource loads
+    const token = ensureToken();
+    if (url.searchParams.get('token') === token) {
+      res.setHeader('Set-Cookie', `curie_token=${token}; Path=/; HttpOnly; SameSite=Strict`);
+    }
+
+    // Health check (auth required)
     if (url.pathname === '/health' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -155,20 +183,9 @@ export class DaemonServer {
       return;
     }
 
-    // Auth check (skip for /ws, handled by ws handler)
-    if (url.pathname === '/ws') {
-      // WS upgrade is handled by ws.Server
-      return;
-    }
-
     // JSON-RPC endpoint (auth required)
     if (url.pathname === '/api/json-rpc') {
       console.log(`[http] json-rpc path=${url.pathname} auth=${!!req.headers.authorization} token_query=${!!url.searchParams.get('token')}`);
-      if (!validateTokenHttp(req)) {
-        console.log(`[http] json-rpc auth FAILED`);
-        rejectUnauthorized(res);
-        return;
-      }
       this.handleJsonRpc(req, res);
       return;
     }
