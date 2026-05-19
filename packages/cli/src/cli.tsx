@@ -23,7 +23,7 @@ import type { ChannelTabEntry } from '@curie-agent/tui';
 import type { EffortLevel } from '@curie-agent/tui';
 import type { ModeLevel } from '@curie-agent/tui';
 import { AnthropicProvider, OpenAIProvider, OllamaProvider, GoogleGeminiProvider, OpenRouterProvider } from '@curie-agent/providers';
-import { allTools } from '@curie-agent/tools';
+import { allTools, discoverAllSkills, formatSkillsForPrompt } from '@curie-agent/tools';
 import { createMcpTools } from '@curie-agent/mcp';
 import type { MCPConfig } from '@curie-agent/mcp';
 import { DaemonRpcClient, DaemonWsClient } from './daemon-client.js';
@@ -353,9 +353,19 @@ async function handleDaemonCommand(subcommand: string): Promise<{ keepRunning: b
         mergedTools = [...allTools, ...result.tools] as any;
       }
 
-      // Read AGENTS.md for system prompt (if exists)
+      // Read AGENTS.md for system prompt (if exists), then append skills catalog
       const agentsPath = join(homedir(), '.curie-agent', 'AGENTS.md');
-      const systemPrompt = existsSync(agentsPath) ? readFileSync(agentsPath, 'utf-8') : undefined;
+      const agentsMd = existsSync(agentsPath) ? readFileSync(agentsPath, 'utf-8') : undefined;
+      const skills = discoverAllSkills(process.cwd());
+      const skillsSection = formatSkillsForPrompt(skills);
+      let systemPrompt: string | undefined;
+      if (agentsMd && skillsSection) {
+        systemPrompt = agentsMd + '\n\n' + skillsSection;
+      } else if (agentsMd) {
+        systemPrompt = agentsMd;
+      } else if (skillsSection) {
+        systemPrompt = skillsSection;
+      }
 
       // Read web_ip from settings for daemon binding
       const settings = settingsManager.get();

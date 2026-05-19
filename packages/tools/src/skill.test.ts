@@ -245,6 +245,7 @@ describe('skillTool', () => {
   it('has correct definition', () => {
     expect(skillTool.definition.name).toBe('Skill');
     expect(skillTool.definition.description).toContain('skill');
+    expect(skillTool.definition.description).toContain('## Available Skills');
   });
 
   it('returns body for valid skill', async () => {

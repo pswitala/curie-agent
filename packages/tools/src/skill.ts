@@ -149,7 +149,7 @@ export function listSkills(cwd: string): SkillMetadataEntry[] {
 
 export const skillTool = createTool(
   'Skill',
-  'Invoke a skill by name. Returns the skill\'s instructions which you should follow. Available skills are listed in the system prompt.',
+  'Invoke a skill by name. Returns the skill\'s instructions which you should follow. Available skills are listed in the system prompt under "## Available Skills".',
   z.object({
     skill: z.string().describe('The name of the skill to invoke (kebab-case identifier)'),
   }),
