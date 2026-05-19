@@ -10,6 +10,7 @@ import type {
   ReasoningEffort,
   ToolDefinition,
 } from './provider.js';
+import { streamOpenAICompatible } from './openai-compatible-stream.js';
 
 type CancelableIterable<T> = { iterable: AsyncIterable<T>; cancel(): void };
 
@@ -88,7 +89,6 @@ export class OpenAIProvider implements Provider {
   }
 
   private streamChat(args: ProviderStreamArgs, model: string): CancelableIterable<ProviderEvent> {
-    const self = this;
     const modelIsReasoning = isReasoningModel(model);
     const reasoningEffort = effortToReasoning(args.effort);
 
@@ -112,101 +112,10 @@ export class OpenAIProvider implements Provider {
       ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
       ...(modelIsReasoning && reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       stream_options: { include_usage: true },
-    };
-
-    let sdkStream: AsyncIterable<OpenAI.ChatCompletionChunk> | null = null;
-
-    async function* generator(): AsyncIterable<ProviderEvent> {
-      sdkStream = await self.client.chat.completions.create(
-        streamParams as OpenAI.ChatCompletionCreateParams,
-      ) as AsyncIterable<OpenAI.ChatCompletionChunk>;
-
-      const pendingTools = new Map<number, { id: string; name: string; inputStr: string }>();
-      let lastUsage: OpenAI.CompletionUsage | null = null;
-      let inThinkBlock = false;
-      let accumulatedThinking = '';
-
-      if (!sdkStream) return;
-      for await (const chunk of sdkStream) {
-        if (args.signal?.aborted) break;
-
-        if (chunk.usage) lastUsage = chunk.usage;
-
-        const choice = chunk.choices?.[0];
-        if (!choice) continue;
-
-        if (choice.delta?.content && typeof choice.delta.content === 'string') {
-          const content = choice.delta.content;
-          
-          if (!inThinkBlock && content.includes('<think>')) {
-            const parts = content.split('<think>');
-            if (parts[0]) yield { type: 'text-delta', text: parts[0] };
-            inThinkBlock = true;
-            
-            const rest = parts.slice(1).join('<think>');
-            if (rest.includes('</think>')) {
-              const thinkParts = rest.split('</think>');
-              yield { type: 'thinking-delta', text: thinkParts[0] || '' };
-              accumulatedThinking += (thinkParts[0] || '');
-              inThinkBlock = false;
-              if (thinkParts[1]) yield { type: 'text-delta', text: thinkParts[1] };
-            } else {
-              yield { type: 'thinking-delta', text: rest };
-              accumulatedThinking += rest;
-            }
-          } else if (inThinkBlock) {
-            if (content.includes('</think>')) {
-              const parts = content.split('</think>');
-              yield { type: 'thinking-delta', text: parts[0] || '' };
-              accumulatedThinking += (parts[0] || '');
-              inThinkBlock = false;
-              if (parts[1]) yield { type: 'text-delta', text: parts[1] };
-            } else {
-              yield { type: 'thinking-delta', text: content };
-              accumulatedThinking += content;
-            }
-          } else {
-            yield { type: 'text-delta', text: content };
-          }
-        }
-
-        if (choice.delta?.tool_calls) {
-          for (const tc of choice.delta.tool_calls) {
-            const idx = tc.index ?? 0;
-            if (tc.id) {
-              pendingTools.set(idx, { id: tc.id, name: tc.function?.name ?? '', inputStr: '' });
-            }
-            const pending = pendingTools.get(idx);
-            if (pending) {
-              pending.inputStr += tc.function?.arguments ?? '';
-            }
-          }
-        }
-      }
-
-      for (const [, pending] of pendingTools) {
-        let input: Record<string, unknown> = {};
-        try { if (pending.inputStr) input = JSON.parse(pending.inputStr); } catch { /* empty */ }
-        yield { type: 'tool-call', id: pending.id, name: pending.name, input };
-      }
-
-      if (accumulatedThinking) {
-        yield { type: 'thinking-block', thinking: accumulatedThinking, signature: '' };
-      }
-
-      if (lastUsage) {
-        yield {
-          type: 'usage',
-          inputTokens: lastUsage.prompt_tokens ?? 0,
-          outputTokens: lastUsage.completion_tokens ?? 0,
-        };
-      }
-
-      yield { type: 'stop', reason: args.signal?.aborted ? 'aborted' : 'stop' };
-    }
+    } as OpenAI.ChatCompletionCreateParams;
 
     return {
-      iterable: generator(),
+      iterable: streamOpenAICompatible(this.client, streamParams, args.signal),
       cancel() {
         // Chat Completions SDK doesn't expose a public cancel method.
       },
@@ -237,7 +146,7 @@ export class OpenAIProvider implements Provider {
     async function* generator(): AsyncIterable<ProviderEvent> {
       const sdkStream = await self.client.responses.create(respParams as any) as unknown as AsyncIterable<Record<string, unknown>>;
 
-      const pendingTools = new Map<number, { callId: string; name: string; inputStr: string }>();
+      const pendingTools = new Map<number, { callId: string; name: string; input: Record<string, unknown> }>();
       let lastUsageInput = 0;
       let lastUsageOutput = 0;
 
@@ -250,26 +159,19 @@ export class OpenAIProvider implements Provider {
           yield { type: 'text-delta', text: String(evt.delta ?? '') };
         } else if (type === 'response.reasoning_summary_text.delta' || type === 'response.reasoning.delta') {
           yield { type: 'thinking-delta', text: String(evt.delta ?? '') };
-        } else if (type === 'response.function_call_arguments.delta') {
-          const idx = Number(evt.output_index ?? 0);
-          const existing = pendingTools.get(idx);
-          if (existing) existing.inputStr += String(evt.delta ?? '');
         } else if (type === 'response.function_call_arguments.done') {
           const idx = Number(evt.output_index ?? 0);
           let input: Record<string, unknown> = {};
           try { if (evt.arguments) input = JSON.parse(String(evt.arguments)); } catch { /* empty */ }
           const existing = pendingTools.get(idx);
-          if (existing) {
-            yield { type: 'tool-call', id: existing.callId, name: existing.name, input };
-          }
-          pendingTools.delete(idx);
+          if (existing) existing.input = input;
         } else if (type === 'response.output_item.added') {
           const item = evt.item as Record<string, unknown>;
           if (item && item.type === 'function_call') {
             pendingTools.set(Number(evt.output_index ?? 0), {
               callId: String(item.call_id ?? ''),
               name: String(item.name ?? ''),
-              inputStr: '',
+              input: {},
             });
           }
         } else if (type === 'response.completed') {
@@ -280,6 +182,11 @@ export class OpenAIProvider implements Provider {
             lastUsageOutput = Number(u.output_tokens ?? 0);
           }
         }
+      }
+
+      // Flush buffered tool calls in stream order so the TUI renders them as one grouped block.
+      for (const [, pending] of pendingTools) {
+        yield { type: 'tool-call', id: pending.callId, name: pending.name, input: pending.input };
       }
 
       if (lastUsageInput || lastUsageOutput) {

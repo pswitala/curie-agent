@@ -76,6 +76,41 @@ describe('GoogleGeminiProvider', () => {
     });
   });
 
+  describe('buildRequestBody - thinkingConfig', () => {
+    const p = new GoogleGeminiProvider('key');
+    const buildRequestBody = (p as any).buildRequestBody.bind(p);
+
+    it('sets thinkingBudget to -1 (dynamic) when effort is auto/undefined', () => {
+      const body = buildRequestBody('gemini-2.5-flash', [], { thinking: true, effort: 'auto' });
+      expect((body.generationConfig as any).thinkingConfig.thinkingBudget).toBe(-1);
+    });
+
+    it('sets thinkingBudget to -1 when effort is undefined', () => {
+      const body = buildRequestBody('gemini-2.5-flash', [], { thinking: true });
+      expect((body.generationConfig as any).thinkingConfig.thinkingBudget).toBe(-1);
+    });
+
+    it('maps effort low to 1024', () => {
+      const body = buildRequestBody('gemini-2.5-flash', [], { thinking: true, effort: 'low' });
+      expect((body.generationConfig as any).thinkingConfig.thinkingBudget).toBe(1024);
+    });
+
+    it('maps effort max to 24576', () => {
+      const body = buildRequestBody('gemini-2.5-flash', [], { thinking: true, effort: 'max' });
+      expect((body.generationConfig as any).thinkingConfig.thinkingBudget).toBe(24576);
+    });
+
+    it('includes includeThoughts: true', () => {
+      const body = buildRequestBody('gemini-2.5-flash', [], { thinking: true });
+      expect((body.generationConfig as any).thinkingConfig.includeThoughts).toBe(true);
+    });
+
+    it('omits thinkingConfig for non-thinking calls', () => {
+      const body = buildRequestBody('gemini-2.0-flash', [], { thinking: false });
+      expect(body.generationConfig).toBeUndefined();
+    });
+  });
+
   describe('apiEndpoint', () => {
     const p = new GoogleGeminiProvider('key');
     const apiEndpoint = (p as any).apiEndpoint.bind(p);
@@ -228,6 +263,78 @@ describe('GoogleGeminiProvider', () => {
       expect(results).toHaveLength(2);
       expect((results[0] as any).candidates?.[0]?.content?.parts?.[0]?.text).toBe('hello');
       expect((results[1] as any).usageMetadata?.promptTokenCount).toBe(10);
+    });
+  });
+
+  describe('stream - thinking-delta', () => {
+    function makeFetchMock(sseText: string) {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(sseText));
+          controller.close();
+        },
+      });
+      return vi.fn().mockResolvedValue(new Response(stream, { status: 200 }));
+    }
+
+    async function collectEvents(provider: any, model: string, sseText: string) {
+      vi.stubGlobal('fetch', makeFetchMock(sseText));
+      const { iterable } = provider.stream({ messages: [{ role: 'user', content: 'hi' }], model });
+      const events: any[] = [];
+      for await (const ev of iterable) events.push(ev);
+      vi.unstubAllGlobals();
+      return events;
+    }
+
+    it('emits thinking-delta for each thought chunk', async () => {
+      const p = new GoogleGeminiProvider('key');
+      const events = await collectEvents(p, 'gemini-2.5-flash',
+        'data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"Why "}]}}]}\n\n' +
+        'data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"indeed"}]}}]}\n\n',
+      );
+      const deltas = events.filter((e) => e.type === 'thinking-delta');
+      expect(deltas).toHaveLength(2);
+      expect(deltas[0].text).toBe('Why ');
+      expect(deltas[1].text).toBe('indeed');
+    });
+
+    it('emits thinking-block with accumulated text at stream end', async () => {
+      const p = new GoogleGeminiProvider('key');
+      const events = await collectEvents(p, 'gemini-2.5-flash',
+        'data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"part1"}]}}]}\n\n' +
+        'data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"part2"}]}}]}\n\n',
+      );
+      const block = events.find((e) => e.type === 'thinking-block');
+      expect(block).toBeDefined();
+      expect(block.thinking).toBe('part1part2');
+    });
+
+    it('emits both thinking-delta and text-delta in correct order for mixed chunk', async () => {
+      const p = new GoogleGeminiProvider('key');
+      const events = await collectEvents(p, 'gemini-2.5-flash',
+        'data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"think"},{"text":"answer"}]}}]}\n\n',
+      );
+      const types = events.map((e) => e.type);
+      expect(types).toContain('thinking-delta');
+      expect(types).toContain('text-delta');
+      expect(types.indexOf('thinking-delta')).toBeLessThan(types.indexOf('text-delta'));
+    });
+
+    it('emits no thinking-delta for non-thinking model', async () => {
+      const p = new GoogleGeminiProvider('key');
+      const events = await collectEvents(p, 'gemini-2.0-flash',
+        'data: {"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}\n\n',
+      );
+      expect(events.some((e) => e.type === 'thinking-delta')).toBe(false);
+      expect(events.some((e) => e.type === 'text-delta')).toBe(true);
+    });
+
+    it('emits no thinking-block when no thinking parts received', async () => {
+      const p = new GoogleGeminiProvider('key');
+      const events = await collectEvents(p, 'gemini-2.5-flash',
+        'data: {"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}\n\n',
+      );
+      expect(events.some((e) => e.type === 'thinking-block')).toBe(false);
     });
   });
 });

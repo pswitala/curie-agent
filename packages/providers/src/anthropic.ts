@@ -156,13 +156,8 @@ export class AnthropicProvider implements Provider {
         }
 
         if (event.type === 'content_block_stop') {
-          const tool = toolBlocks.get(event.index);
-          if (tool) {
-            let input: Record<string, unknown> = {};
-            try { input = JSON.parse(tool.inputStr || '{}'); } catch { /* empty input */ }
-            yield { type: 'tool-call', id: tool.id, name: tool.name, input };
-            toolBlocks.delete(event.index);
-          }
+          // Tool calls are buffered until the stream completes so the TUI
+          // can render them as one grouped block (matching OpenRouter).
           const thinking = thinkingBlocks.get(event.index);
           if (thinking) {
             yield { type: 'thinking-block', thinking: thinking.thinking, signature: thinking.signature };
@@ -185,6 +180,14 @@ export class AnthropicProvider implements Provider {
         yield { type: 'stop', reason: 'aborted' };
         return;
       }
+
+      // Flush buffered tool calls in stream order (Map preserves insertion order).
+      for (const [, tool] of toolBlocks) {
+        let input: Record<string, unknown> = {};
+        try { input = JSON.parse(tool.inputStr || '{}'); } catch { /* empty input */ }
+        yield { type: 'tool-call', id: tool.id, name: tool.name, input };
+      }
+      toolBlocks.clear();
 
       try {
         const final = await sdkStream.finalMessage();

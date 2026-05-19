@@ -22,6 +22,22 @@ function isThinkingModelName(model: string): boolean {
   return m.startsWith('gemini-2.5') || m.startsWith('gemini-3') || m.includes('flash-latest') || m.includes('pro-latest');
 }
 
+/**
+ * Map curie effort level to Gemini thinkingBudget.
+ * Without an explicit budget, Gemini often allocates 0 tokens for tool-call
+ * turns — resulting in no thought parts and no thinking-delta events.
+ * -1 means dynamic (model always allocates some thinking tokens).
+ */
+function effortToThinkingBudget(effort?: string): number {
+  switch (effort) {
+    case 'low':    return 1024;
+    case 'medium': return 4096;
+    case 'high':   return 16000;
+    case 'max':    return 24576;
+    default:       return -1;
+  }
+}
+
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com';
 const DEFAULT_API_VERSION = 'v1beta';
 
@@ -75,6 +91,7 @@ export class GoogleGeminiProvider implements Provider {
       system?: string;
       tools?: unknown[];
       thinking?: boolean;
+      effort?: string;
     },
   ): Record<string, unknown> {
     const safeModel = model.startsWith('models/') ? model : `models/${model}`;
@@ -85,7 +102,10 @@ export class GoogleGeminiProvider implements Provider {
     if (opts?.tools && opts.tools.length) body.tools = opts.tools;
     const generationConfig: Record<string, unknown> = {};
     if (opts?.thinking) {
-      generationConfig.thinkingConfig = { includeThoughts: true };
+      generationConfig.thinkingConfig = {
+        includeThoughts: true,
+        thinkingBudget: effortToThinkingBudget(opts.effort),
+      };
     }
     if (Object.keys(generationConfig).length) {
       body.generationConfig = generationConfig;
@@ -162,6 +182,7 @@ export class GoogleGeminiProvider implements Provider {
       system: args.system,
       tools: tools ? [{ functionDeclarations: tools }] : undefined,
       thinking,
+      effort: args.effort,
     });
 
     const controller = new AbortController();
@@ -193,8 +214,6 @@ export class GoogleGeminiProvider implements Provider {
       let accumulatedThinking = '';
       let totalInputTokens = 0;
       let totalOutputTokens = 0;
-      let lastThoughtLen = 0;
-      let totalDeltaSent = 0;
 
       for await (const chunk of self.parseSSEStream(response)) {
         if (args.signal?.aborted || controller.signal.aborted) {
@@ -207,21 +226,8 @@ export class GoogleGeminiProvider implements Provider {
           const raw = part as unknown as Record<string, unknown>;
 
           if (raw.thought === true && typeof raw.text === 'string' && raw.text) {
-            // Google Gemini sends accumulated text (full thinking so far) in
-            // each SSE chunk. We need delta tracking within a turn, but must
-            // detect turn resets when text shrinks.
-            if (raw.text.length < totalDeltaSent) {
-              // Turn reset detected — emit full text for new turn.
-              totalDeltaSent = raw.text.length;
-              lastThoughtLen = 0;
-            }
-            const newText = raw.text.slice(lastThoughtLen);
-            if (newText) {
-              accumulatedThinking += newText;
-              totalDeltaSent += newText.length;
-              lastThoughtLen = raw.text.length;
-              yield { type: 'thinking-delta', text: newText };
-            }
+            accumulatedThinking += raw.text;
+            yield { type: 'thinking-delta', text: raw.text };
           } else if (typeof raw.text === 'string' && raw.text) {
             yield { type: 'text-delta', text: raw.text };
           }
@@ -325,6 +331,7 @@ export class GoogleGeminiProvider implements Provider {
         system: args.system,
         tools: tools ? [{ functionDeclarations: tools }] : undefined,
         thinking,
+        effort: args.effort,
       });
 
       const response = await fetch(this.apiEndpoint(model, 'generateContent'), {
