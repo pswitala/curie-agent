@@ -2,7 +2,7 @@ import { useConfig } from '../hooks/useConfig.js';
 import type { SessionInfo } from '../hooks/useSession.js';
 import type { WsEvent } from '../lib/ws-client.js';
 
-type View = 'assistant' | 'channels' | 'stats' | 'projects' | 'agents';
+type View = 'assistant' | 'channels' | 'stats' | 'projects' | 'agents' | 'settings';
 
 interface Props {
   activeView: View;

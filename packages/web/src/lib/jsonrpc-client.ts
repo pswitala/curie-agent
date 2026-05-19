@@ -128,4 +128,17 @@ export class JsonRpcClient {
   async mcpList(): Promise<unknown> {
     return this.request('mcp.list');
   }
+
+  async identitySetup(params: {
+    provider: string;
+    apiKey: string;
+    model: string;
+    soulName: string;
+    soulVibe: string;
+    userName: string;
+    userTimezone: string;
+    userLanguages: string;
+  }): Promise<unknown> {
+    return this.request('identity.setup', params);
+  }
 }

@@ -31,4 +31,6 @@ export { TokenMonitor, parseTieredPricing, selectTier, estimateCost, type PriceT
 export type { TokenMonitorConfig, TokenEvent } from './token-monitor.js';
 export { withDateContext, formatDate } from './context.js';
 export { listSnapshots, revertTo } from './safety/snapshot.js';
+export { createIdentityFiles } from './identity-files.js';
+export type { InitData, ProviderName } from './identity-files.js';
 

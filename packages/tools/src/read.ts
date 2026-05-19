@@ -80,12 +80,6 @@ export const readTool = createTool(
       })
       .join('\n');
 
-    return {
-      output: {
-        path: filePath,
-        totalLines: lines.length,
-        content: numbered,
-      },
-    };
+    return { output: numbered };
   },
 );

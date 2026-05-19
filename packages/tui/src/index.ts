@@ -28,6 +28,7 @@ export {
   isAlreadyInitialized,
   getConfirmationMessage,
   advanceStep,
+  createIdentityFiles,
   PROVIDER_INFO,
   type InitWizardState,
   type InitData,

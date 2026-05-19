@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 
-import { ChatSurface, COLD_START_BANNER } from '@curie-agent/tui';
+import { ChatSurface, COLD_START_BANNER, getInitialWizardState, advanceStep, createIdentityFiles, getConfirmationMessage, isAlreadyInitialized, PROVIDER_INFO } from '@curie-agent/tui';
+import type { InitWizardState } from '@curie-agent/tui';
 import { getTheme } from '@curie-agent/render';
 import { SettingsManager, DEFAULT_SETTINGS } from '@curie-agent/core';
 import type { CurieSettings } from '@curie-agent/core';
@@ -524,12 +525,17 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
   const [currentProvider, setCurrentProvider] = useState('connecting...');
   const [currentTheme, setCurrentTheme] = useState(themeName);
   const [currentMode, setCurrentMode] = useState(initialMode || 'auto');
+  const currentModeRef = useRef(currentMode);
+  useEffect(() => { currentModeRef.current = currentMode; }, [currentMode]);
   const [currentEffort, setCurrentEffort] = useState('auto');
+  const [debug, setDebug] = useState(false);
+  const debugRef = useRef(debug);
+  useEffect(() => { debugRef.current = debug; }, [debug]);
   const [inputTokens, setInputTokens] = useState<number | undefined>(undefined);
   const [outputTokens, setOutputTokens] = useState<number | undefined>(undefined);
   const [currentTab, setCurrentTab] = useState<TabId>('assistant');
   const [duration, setDuration] = useState('00:00:00');
-  const [status, setStatus] = useState('connecting');
+  const [status, setStatus] = useState('idle');
   const [connected, setConnected] = useState(false);
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [agents, setAgents] = useState<Map<string, AgentEntry>>(new Map());
@@ -542,6 +548,12 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
     reason: string;
   } | null>(null);
   const pendingToolCallIdRef = useRef<string | null>(null);
+  const pendingApprovalRef = useRef<null | {
+    toolName: string;
+    input: Record<string, unknown>;
+    reason: string;
+  }>(null);
+  useEffect(() => { pendingApprovalRef.current = pendingApproval; }, [pendingApproval]);
 
   // Session tracking
   const sessionIdRef = useRef<string>('main');
@@ -549,6 +561,11 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
 
   // Background message queue (for messages arriving during active turn)
   const backgroundQueueRef = useRef<Array<{ role: 'system' | 'heartbeat' | 'task' | 'debug'; content: string; title?: string }>>([]);
+
+  // Init wizard state
+  const [wizardState, setWizardState] = useState<InitWizardState | null>(null);
+  const settingsMgrRef = useRef<SettingsManager>(new SettingsManager());
+  const settingsLoadedRef = useRef(false);
 
   const startedAt = useRef(Date.now());
 
@@ -614,19 +631,37 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
     });
 
     ws.on('tool-result', (event: WsEvent) => {
-      const output = String(event.output || '');
+      const output = typeof event.output === 'string' ? event.output : JSON.stringify(event.output);
       const error = event.error;
       if (error) {
-        setMessages(prev => [...prev, { role: 'tool', content: `[Error] ${output}` }]);
-      } else if (output) {
-        setMessages(prev => [...prev, { role: 'tool', content: `[OK] ${output}` }]);
+        setMessages(prev => [...prev, { role: 'tool', content: `[Error] ${error}` }]);
+      } else if (debugRef.current) {
+        setMessages(prev => [...prev, { role: 'tool', content: output ? `[OK] ${output}` : `[OK] (completed)` }]);
+      } else {
+        // Non-debug: tool-call already shows the compact name/path, so just mark done
+        if (output) {
+          // Count lines in the output for a useful summary
+          const lineCount = output.split('\n').length;
+          setMessages(prev => [...prev, { role: 'tool', content: `[OK] ${lineCount} lines` }]);
+        }
       }
     });
 
     ws.on('approval-request', (event: WsEvent) => {
+      // Ignore duplicate requests — modal already shown for another tool call
+      if (pendingApprovalRef.current) return;
+
       const toolCallId = String(event.toolCallId || '');
       const name = String(event.name || 'unknown');
       const input = (event.input || {}) as Record<string, unknown>;
+      // In auto/yolo mode the daemon auto-approves — no modal needed
+      if (currentModeRef.current === 'auto' || currentModeRef.current === 'yolo') {
+        pendingToolCallIdRef.current = toolCallId;
+        // Auto-approve immediately
+        rpcRef.current.approvalDecide(toolCallId, 'allow').catch(() => {});
+        pendingToolCallIdRef.current = null;
+        return;
+      }
       pendingToolCallIdRef.current = toolCallId;
       setPendingApproval({ toolName: name, input, reason: 'Tool requires approval' });
     });
@@ -687,21 +722,22 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
 
       // Load initial settings from daemon
       try {
-        const [modelRes, modeRes, effortRes, providerRes] = await Promise.all([
+        const [modelRes, modeRes, effortRes, debugRes, providerRes] = await Promise.all([
           rpcRef.current.configGet('model').catch(() => null),
           rpcRef.current.configGet('mode').catch(() => null),
           rpcRef.current.configGet('effort').catch(() => null),
+          rpcRef.current.configGet('debug').catch(() => null),
           rpcRef.current.providerList().catch(() => []),
         ]);
-
         if (modelRes) setCurrentModel(String(modelRes));
         if (modeRes) setCurrentMode(String(modeRes));
         if (effortRes) setCurrentEffort(String(effortRes));
+        if (debugRes) setDebug(debugRes === true || String(debugRes).toLowerCase() === 'true');
         if (Array.isArray(providerRes) && providerRes.length > 0) {
           setCurrentProvider(String(providerRes[0].name || 'unknown'));
         }
-      } catch {
-        // Ignore errors during initial load
+      } catch (err) {
+        console.error('[tui] Failed to load initial settings from daemon:', err);
       }
     });
 
@@ -713,6 +749,33 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
     };
   }, []);
 
+  // Fallback: fetch settings from daemon once connected (in case daemon-ready event didn't fire in time)
+  useEffect(() => {
+    if (!connected || settingsLoadedRef.current) return;
+    settingsLoadedRef.current = true;
+    (async () => {
+      try {
+        const [modelRes, modeRes, effortRes, debugRes, providerRes] = await Promise.all([
+          rpcRef.current.configGet('model').catch(() => null),
+          rpcRef.current.configGet('mode').catch(() => null),
+          rpcRef.current.configGet('effort').catch(() => null),
+          rpcRef.current.configGet('debug').catch(() => null),
+          rpcRef.current.providerList().catch(() => []),
+        ]);
+
+        if (modelRes) setCurrentModel(String(modelRes));
+        if (modeRes) setCurrentMode(String(modeRes));
+        if (effortRes) setCurrentEffort(String(effortRes));
+        if (debugRes) setDebug(debugRes === true || String(debugRes).toLowerCase() === 'true');
+        if (Array.isArray(providerRes) && providerRes.length > 0) {
+          setCurrentProvider(String(providerRes[0].name || 'unknown'));
+        }
+      } catch (err) {
+        console.error('[tui] Failed to load initial settings (fallback):', err);
+      }
+    })();
+  }, [connected]);
+
   // Handle generic event (catch-all for unhandled types)
   const handleEvent = useCallback((event: WsEvent) => {
     // Already handled above by specific handlers
@@ -720,6 +783,31 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
 
   // Submit message to daemon
   const onSubmit = useCallback(async (text: string) => {
+    // Check if wizard is active — route input through state machine
+    if (wizardState) {
+      setMessages(prev => [...prev, { role: 'user', content: text }]);
+      const next = advanceStep(wizardState, text, settingsMgrRef.current.get());
+      if (next) {
+        setWizardState(next);
+        setMessages(prev => [...prev, { role: 'system', content: next.question }]);
+        if (next.question === '__COMPLETE__') {
+          createIdentityFiles(wizardState.data);
+          const info = PROVIDER_INFO[wizardState.data.provider!];
+          if (wizardState.data.apiKey) {
+            settingsMgrRef.current.setProviderKey(wizardState.data.provider!, 'api_key', wizardState.data.apiKey);
+          }
+          settingsMgrRef.current.setProviderKey(wizardState.data.provider!, 'model', wizardState.data.model!);
+          settingsMgrRef.current.update({ current_provider: wizardState.data.provider!, model: wizardState.data.model! });
+          const finalSettings = settingsMgrRef.current.get();
+          setCurrentModel(finalSettings.model);
+          setCurrentProvider(finalSettings.current_provider);
+          setWizardState(null);
+          setMessages(prev => [...prev, { role: 'system', content: getConfirmationMessage(wizardState.data) }]);
+        }
+      }
+      return;
+    }
+
     // Add user message to display
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     busyRef.current = true;
@@ -864,6 +952,23 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
             await rpcRef.current.sessionSend(sessionIdRef.current, `/agent ${prompt}`, 'tui');
           } catch {
             setMessages(prev => [...prev, { role: 'system', content: `Agent started: "${prompt}"` }]);
+          }
+          break;
+        }
+        case 'init': {
+          const settings = settingsMgrRef.current.load();
+          if (!args) {
+            if (isAlreadyInitialized()) {
+              setMessages(prev => [...prev, { role: 'system', content: 'Already initialized. Provider and settings already configured.' }]);
+            } else {
+              const initialState = getInitialWizardState(settings);
+              setWizardState(initialState);
+              setMessages(prev => [...prev, { role: 'system', content: initialState.question }]);
+            }
+          } else {
+            // Legacy: treat as direct API key
+            settingsMgrRef.current.setProviderKey('anthropic', 'api_key', args.trim());
+            setMessages(prev => [...prev, { role: 'system', content: `API key configured for anthropic.` }]);
           }
           break;
         }

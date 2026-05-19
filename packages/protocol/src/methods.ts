@@ -64,6 +64,18 @@ export const SessionStatsSchema = z.object({});
 // MCP
 export const McpListSchema = z.object({});
 
+// Identity setup (init wizard)
+export const IdentitySetupSchema = z.object({
+  provider: z.string(),
+  apiKey: z.string(),
+  model: z.string(),
+  soulName: z.string(),
+  soulVibe: z.string(),
+  userName: z.string(),
+  userTimezone: z.string(),
+  userLanguages: z.string(),
+});
+
 export const Method = {
   SESSION_LIST: 'session.list',
   SESSION_GET: 'session.get',
@@ -97,4 +109,6 @@ export const Method = {
   CHANNEL_GET: 'channel.get',
   // MCP
   MCP_LIST: 'mcp.list',
+  // Identity setup
+  IDENTITY_SETUP: 'identity.setup',
 } as const;

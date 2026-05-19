@@ -98,7 +98,16 @@ export class WsHandler {
               info.sessionFilter = msg.session;
             }
           }
-          // Future: JSON-RPC over WebSocket (for commands, not just events)
+
+          // Sync: client requested daemon to re-send its ready event
+          if (msg.type === 'sync') {
+            this.eventBus.emit({
+              type: 'daemon-ready',
+              id: crypto.randomUUID(),
+              version: '0.2.4',
+              timestamp: Date.now(),
+            } as unknown as Event);
+          }
         } catch {
           // Ignore malformed messages
         }

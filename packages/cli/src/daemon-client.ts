@@ -142,6 +142,10 @@ export class DaemonWsClient {
     private token: string,
   ) {}
 
+  getWsUrl(): string {
+    return `${this.url.replace('http', 'ws')}/ws?token=${this.token}&client=tui`;
+  }
+
   connect(): void {
     if (this.ws) return;
 
@@ -151,6 +155,8 @@ export class DaemonWsClient {
     this.ws.onopen = () => {
       this.connected = true;
       this.reconnectDelay = 1000;
+      // Request daemon to re-send its ready event so the client can sync
+      this.ws!.send(JSON.stringify({ type: 'sync' }));
     };
 
     this.ws.onmessage = (event: MessageEvent) => {

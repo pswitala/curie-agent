@@ -2,7 +2,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync, existsSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { Method } from '@curie-agent/protocol';
-import { TurnLoop, parseReminderTime, listSnapshots, revertTo } from '@curie-agent/core';
+import { TurnLoop, parseReminderTime, listSnapshots, revertTo, createIdentityFiles } from '@curie-agent/core';
 import { EventBus } from '@curie-agent/core';
 import type { SessionStore, SettingsManager, Event, ProviderStream, Tool, CurieSettings } from '@curie-agent/core';
 import { listSkills, discoverAllSkills } from '@curie-agent/tools';
@@ -537,6 +537,52 @@ export class JsonRpcHandler {
         case Method.MCP_LIST:
           result = { servers: this.daemonApp?.mcpStatus ?? [] };
           break;
+
+        // Identity setup
+        case Method.IDENTITY_SETUP: {
+          const p = params as Record<string, unknown>;
+          const provider = this.getStringParam(p, 'provider') || 'anthropic';
+          const apiKey = (p?.apiKey as string) || '';
+          const model = this.getStringParam(p, 'model') || 'custom';
+          const soulName = this.getStringParam(p, 'soulName') || 'Curie';
+          const soulVibe = this.getStringParam(p, 'soulVibe') || 'AI coding assistant';
+          const userName = this.getStringParam(p, 'userName') || 'User';
+          const userTimezone = this.getStringParam(p, 'userTimezone') || 'UTC';
+          const userLanguages = this.getStringParam(p, 'userLanguages') || 'TypeScript, Python';
+
+          createIdentityFiles({
+            provider: provider as any,
+            apiKey,
+            model,
+            soul: { name: soulName, vibe: soulVibe },
+            user: { name: userName, timezone: userTimezone, languages: userLanguages },
+            agentsAccepted: true,
+          });
+
+          const settings = this.settingsManager.get();
+          if (!settings.providers) settings.providers = {} as never;
+          if (!(provider in (settings.providers as Record<string, unknown>))) {
+            (settings.providers as Record<string, unknown>)[provider] = {};
+          }
+          const providerConfig = (settings.providers as Record<string, Record<string, unknown>>)[provider]!;
+          if (apiKey) providerConfig.api_key = apiKey;
+          providerConfig.model = model;
+          settings.current_provider = provider;
+          settings.model = model;
+          this.settingsManager.update(settings);
+          this.settingsManager.save();
+
+          this.sharedEventBus?.emit({
+            type: 'config-changed',
+            id: Math.random().toString(36).substring(7),
+            timestamp: Date.now(),
+            key: 'init',
+            value: true,
+          } as any);
+
+          result = { status: 'complete', files: ['SOUL.md', 'USER.md', 'AGENTS.md', 'MEMORY.md', 'TOOLS.md', 'HEARTBEAT.md'] };
+          break;
+        }
 
         // Not yet implemented
         case Method.ORCHESTRA_PANES:
