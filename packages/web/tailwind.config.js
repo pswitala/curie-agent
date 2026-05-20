@@ -20,10 +20,15 @@ export default {
         green: 'var(--green)',
         yellow: 'var(--yellow)',
         red: 'var(--red)',
+        gold: 'var(--gold)',
+        cream: 'var(--cream)',
+        wood: 'var(--wood)',
+        'wood-light': 'var(--wood-light)',
       },
       fontFamily: {
         sans: ['Instrument Sans', 'sans-serif'],
         mono: ['JetBrains Mono', 'monospace'],
+        display: ['Playfair Display', 'serif'],
       },
       borderRadius: {
         DEFAULT: '6px',

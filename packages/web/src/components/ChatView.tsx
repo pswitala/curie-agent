@@ -10,11 +10,13 @@ interface Props {
   rpc: JsonRpcClient | null;
   className?: string;
   activeSessionId: string | null;
-  onNewChat?: () => void;
   onCreateSession?: (sessionId: string) => void;
   onClearCmdResult?: () => void;
   events: WsEvent[];
   addLiveEvent: (event: WsEvent) => void;
+  totalTokens?: number;
+  contextTokens?: number;
+  costUsd?: number;
 }
 
 function ThinkingBlock({ content }: { content: string }) {
@@ -23,11 +25,16 @@ function ThinkingBlock({ content }: { content: string }) {
   return (
     <div className="px-5 py-1 animate-fadeIn">
       <div
-        className="border border-b2 rounded-lg overflow-hidden cursor-pointer select-none hover:bg-s2/50 transition-colors duration-100"
+        className="rounded-lg overflow-hidden cursor-pointer select-none transition-all duration-150"
+        style={{
+          background: 'linear-gradient(135deg, var(--s2) 0%, var(--s1) 100%)',
+          border: '1px solid var(--b1)',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+        }}
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="flex items-center gap-2 px-3 py-2 bg-s2">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted shrink-0">
+        <div className="flex items-center gap-2 px-3 py-2" style={{ background: 'color-mix(in srgb, var(--s2) 80%, transparent)' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" className="shrink-0" style={{ opacity: 0.7 }}>
             <path d="M12 2a7 7 0 0 0-7 7c0 3 2 5 2 8h10c0-3 2-5 2-8a7 7 0 0 0-7-7z" />
             <circle cx="9" cy="9" r="1" fill="currentColor" />
             <circle cx="15" cy="9" r="1" fill="currentColor" />
@@ -44,7 +51,7 @@ function ThinkingBlock({ content }: { content: string }) {
           </svg>
         </div>
         {expanded && (
-          <div className="px-3 py-2.5 border-t border-b1 bg-s1/50">
+          <div className="px-3 py-2.5" style={{ borderTop: '1px solid var(--b1)', background: 'color-mix(in srgb, var(--s1) 60%, transparent)' }}>
             <pre className="text-[11px] text-muted leading-relaxed whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto">
               {content}
             </pre>
@@ -60,13 +67,18 @@ function ToolGroupBlock({ toolCalls }: { toolCalls: ToolCallEntry[] }) {
 
   return (
     <div className="px-5 py-1 animate-fadeIn">
-      <div className="border border-b2 rounded-lg overflow-hidden mb-1">
+      <div className="rounded-lg overflow-hidden mb-1" style={{
+        background: 'linear-gradient(135deg, var(--s2) 0%, var(--s1) 100%)',
+        border: '1px solid var(--b1)',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+      }}>
         <div
-          className="flex items-center gap-2 px-3 py-2 bg-s2 cursor-pointer select-none hover:bg-s2/50 transition-colors duration-100"
+          className="flex items-center gap-2 px-3 py-2 cursor-pointer select-none transition-all duration-150"
+          style={{ background: 'color-mix(in srgb, var(--s2) 80%, transparent)' }}
           onClick={() => setExpanded(!expanded)}
         >
-          <div className="w-[14px] h-[14px] rounded-[3px] bg-s4 flex items-center justify-center">
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth="1.5">
+          <div className="w-[14px] h-[14px] rounded-[3px] flex items-center justify-center" style={{ background: 'color-mix(in srgb, var(--gold) 15%, var(--s3))' }}>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" style={{ opacity: 0.7 }}>
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
               <polyline points="14 2 14 8 20 8" />
             </svg>
@@ -83,9 +95,9 @@ function ToolGroupBlock({ toolCalls }: { toolCalls: ToolCallEntry[] }) {
           </svg>
         </div>
         {expanded && toolCalls.map((tc, j) => (
-          <div key={j} className="px-3 py-2.5 border-t border-b1 bg-s1/50 first:border-t-0">
+          <div key={j} className="px-3 py-2.5 first:border-t-0" style={{ borderTop: '1px solid var(--b1)', background: 'color-mix(in srgb, var(--s1) 60%, transparent)' }}>
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-[11.5px] font-semibold text-fg font-mono">{tc.name}</span>
+              <span className="text-[11.5px] font-semibold font-mono" style={{ color: 'var(--gold)' }}>{tc.name}</span>
               <span className="text-xs text-muted font-mono truncate max-w-[250px]">{tc.args}</span>
             </div>
             <pre className="text-[11px] text-muted font-mono leading-[1.5] overflow-x-auto whitespace-pre-wrap">{tc.input ? JSON.stringify(tc.input, null, 2) : ''}</pre>
@@ -101,13 +113,18 @@ function HeartbeatBlock({ event }: { event: any }) {
 
   return (
     <div className="px-5 py-1 animate-fadeIn">
-      <div className="border border-b2 rounded-lg overflow-hidden mb-1">
+      <div className="rounded-lg overflow-hidden mb-1" style={{
+        background: 'linear-gradient(135deg, var(--s2) 0%, var(--s1) 100%)',
+        border: '1px solid var(--b1)',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+      }}>
         <div
-          className="flex items-center gap-2 px-3 py-2 bg-s2 cursor-pointer select-none hover:bg-s2/50 transition-colors duration-100"
+          className="flex items-center gap-2 px-3 py-2 cursor-pointer select-none transition-all duration-150"
+          style={{ background: 'color-mix(in srgb, var(--s2) 80%, transparent)' }}
           onClick={() => setExpanded(!expanded)}
         >
-          <div className="w-[14px] h-[14px] rounded-[3px] bg-red/20 flex items-center justify-center">
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="var(--red, #ef4444)" strokeWidth="1.5">
+          <div className="w-[14px] h-[14px] rounded-[3px] flex items-center justify-center" style={{ background: 'color-mix(in srgb, var(--red) 15%, var(--s3))' }}>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="var(--red)" strokeWidth="1.5">
               <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
             </svg>
           </div>
@@ -123,7 +140,7 @@ function HeartbeatBlock({ event }: { event: any }) {
           </svg>
         </div>
         {expanded && (
-          <div className="px-3 py-3 border-t border-b1 bg-s1/50 first:border-t-0 markdown-body">
+          <div className="px-3 py-3 markdown-body" style={{ borderTop: '1px solid var(--b1)', background: 'color-mix(in srgb, var(--s1) 60%, transparent)' }}>
             <div dangerouslySetInnerHTML={{ __html: renderMarkdown(event.formattedText || '') }} />
           </div>
         )}
@@ -135,13 +152,16 @@ function HeartbeatBlock({ event }: { event: any }) {
 function ReminderBlock({ message, time }: { message: string; time: string }) {
   return (
     <div className="px-5 py-1.5 animate-fadeIn">
-      <div className="p-3.5 rounded-xl border border-blue-500/20 bg-blue-500/5 backdrop-blur-md shadow-lg max-w-[480px] flex gap-3 transition-all duration-200 hover:border-blue-500/35 relative overflow-hidden group">
+      <div className="p-3.5 rounded-xl backdrop-blur-md shadow-lg max-w-[480px] flex gap-3 transition-all duration-200 relative overflow-hidden group" style={{
+        background: 'linear-gradient(135deg, color-mix(in srgb, var(--gold) 8%, var(--s2)), color-mix(in srgb, var(--gold) 4%, var(--s1)))',
+        border: '1px solid color-mix(in srgb, var(--gold) 20%, var(--b1))',
+      }}>
         {/* Decorative dynamic pulse background indicator */}
-        <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/10 rounded-full filter blur-xl opacity-50 group-hover:scale-125 transition-transform duration-500" />
+        <div className="absolute top-0 right-0 w-24 h-24 rounded-full filter blur-xl opacity-30 group-hover:scale-125 transition-transform duration-500" style={{ background: 'var(--gold)' }} />
         
         {/* Ringing Bell Icon with pulse animation */}
-        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 shrink-0 relative">
-          <span className="absolute inset-0 rounded-lg bg-blue-500/20 animate-ping opacity-75" style={{ animationDuration: '2s' }} />
+        <div className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0 relative" style={{ background: 'color-mix(in srgb, var(--gold) 15%, transparent)', color: 'var(--gold)' }}>
+          <span className="absolute inset-0 rounded-lg animate-ping opacity-50" style={{ background: 'color-mix(in srgb, var(--gold) 20%, transparent)', animationDuration: '2s' }} />
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-wiggle">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
             <path d="M13.73 21a2 2 0 0 1-3.46 0" />
@@ -151,7 +171,7 @@ function ReminderBlock({ message, time }: { message: string; time: string }) {
         {/* Content details */}
         <div className="flex-1 min-w-0 flex flex-col justify-center">
           <div className="flex items-center justify-between gap-2 mb-1 select-none">
-            <span className="font-bold text-blue-400 text-xs tracking-wide uppercase">Reminder Fired</span>
+            <span className="font-bold text-xs tracking-wide uppercase" style={{ color: 'var(--gold)' }}>Reminder Fired</span>
             <span className="text-[10px] text-muted font-mono">{time}</span>
           </div>
           <div className="text-[13px] text-text leading-relaxed font-semibold">
@@ -395,7 +415,7 @@ function eventToMessage(event: WsEvent): MessageEntry | null {
   }
 }
 
-export default function ChatView({ cmdResult, rpc, className, activeSessionId, onNewChat, onCreateSession, onClearCmdResult, events, addLiveEvent }: Props) {
+export default function ChatView({ cmdResult, rpc, className, activeSessionId, onCreateSession, onClearCmdResult, events, addLiveEvent, totalTokens, contextTokens, costUsd }: Props) {
   const { ws, connected } = useApi();
   const [typing, setTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -814,7 +834,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin" ref={chatRef}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-muted">
-            <div className="text-lg mb-2">No messages yet</div>
+            <div className="text-lg mb-2 font-display" style={{ color: 'var(--cream)' }}>No messages yet</div>
             <div className="text-sm text-muted2">Send a message to start</div>
           </div>
         )}
@@ -827,14 +847,14 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
 
             if (msg.type === 'user') {
                return (
-                 <div key={i} className="flex flex-row-reverse px-5 py-0.5 hover:bg-white/[0.012] transition-colors duration-100">
+                 <div key={i} className="flex flex-row-reverse px-5 py-0.5 transition-colors duration-100">
                    <div className="flex flex-1 flex-col items-end min-w-0">
                      <div className="flex flex-row-reverse items-baseline gap-2 mb-1">
-                       <span className="text-xs font-semibold text-fg">you</span>
+                       <span className="text-xs font-semibold" style={{ color: 'var(--cream)' }}>you</span>
                        <span className="text-xs text-muted font-mono">{msg.time}</span>
                      </div>
                      <div
-                       className="text-[13px] text-text leading-[1.65] bg-s3 border border-b2 rounded-t-[10px] rounded-bl-[10px] px-3.5 py-2.5 max-w-[480px] markdown-body"
+                       className="text-[13px] text-text leading-[1.65] chat-msg-user rounded-t-[10px] rounded-bl-[10px] px-3.5 py-2.5 max-w-[480px] markdown-body"
                        dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
                      />
                    </div>
@@ -874,13 +894,13 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
              }
 
              return (
-               <div key={i} className="px-5 py-0.5 hover:bg-white/[0.012] transition-colors duration-100">
+               <div key={i} className="px-5 py-0.5 transition-colors duration-100">
                  <div className="flex items-baseline gap-2 mb-1">
-                   <span className="text-xs font-semibold text-fg">curie-agent</span>
+                   <span className="text-xs font-semibold" style={{ color: 'var(--gold)' }}>curie-agent</span>
                    <span className="text-xs text-muted font-mono">{msg.time}</span>
                  </div>
                  <div
-                   className="text-[13px] text-text leading-[1.65] markdown-body"
+                   className="text-[13px] text-text leading-[1.65] markdown-body chat-msg-agent pl-3"
                    dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
                  />
                </div>
@@ -912,7 +932,9 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
           onSend={handleSend}
           cmdInput={localCmd}
           onClearCmdInput={() => setLocalCmd('')}
-          onNewChat={onNewChat}
+          totalTokens={totalTokens}
+          contextTokens={contextTokens}
+          costUsd={costUsd}
         />
       </div>
     </div>

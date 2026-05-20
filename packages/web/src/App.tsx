@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ApiProvider, useApi } from './lib/api-context.js';
-import Sidebar from './components/Sidebar.js';
-import ChatView from './components/ChatView.js';
+import ChatArea from './components/ChatArea.js';
 import ChannelsView from './components/ChannelsView.js';
 import StatsView from './components/StatsView.js';
 import ProjectsView from './components/ProjectsView.js';
@@ -17,14 +16,6 @@ import AuthorizationScreen from './components/AuthorizationScreen.js';
 
 type View = 'assistant' | 'channels' | 'stats' | 'projects' | 'agents' | 'settings';
 
-const TITLES: Record<View, string> = {
-  assistant: 'Assistant',
-  channels: 'Channels',
-  stats: 'Stats',
-  projects: 'Projects',
-  agents: 'Agents',
-  settings: 'Settings',
-};
 
 const MODES = ['plan', 'edit', 'auto', 'yolo'] as const;
 
@@ -53,11 +44,11 @@ function AppContent() {
   const [showSetupWizard, setShowSetupWizard] = useState(false);
   const [showSessionList, setShowSessionList] = useState(false);
 
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
   useEffect(() => {
-    const checkStandalone = window.matchMedia('(display-mode: standalone)').matches 
+    const checkStandalone = window.matchMedia('(display-mode: standalone)').matches
       || (window.navigator as any).standalone === true;
     setIsStandalone(!!checkStandalone);
   }, []);
@@ -95,7 +86,7 @@ function AppContent() {
   const { sessions, refetch } = useWebSessions();
   const { events, addLiveEvent } = useSession(activeSessionId);
 
-  const theme = (get('theme') as string) || 'nord';
+  const theme = (get('theme') as string) || 'curie';
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -115,7 +106,7 @@ function AppContent() {
       .then((val) => {
         if (!val) setShowSetupWizard(true);
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [connected, rpc]);
 
   const handleNewChat = useCallback(() => {
@@ -162,10 +153,10 @@ function AppContent() {
   }
 
   return (
-    <div className="flex h-dvh w-screen flex-col overflow-hidden bg-bg">
+    <div className="flex h-dvh w-screen flex-col overflow-hidden bg-bg coffee-pattern">
       {/* Offline Mode Indicator */}
       {!isOnline && (
-        <div className="bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-500 px-4 py-2 text-center text-xs font-semibold flex items-center justify-center gap-2 select-none shrink-0 z-50 animate-fadeIn">
+        <div className="px-4 py-2 text-center text-xs font-semibold flex items-center justify-center gap-2 select-none shrink-0 z-50 animate-fadeIn" style={{ background: 'color-mix(in srgb, var(--yellow) 10%, transparent)', borderBottom: '1px solid color-mix(in srgb, var(--yellow) 20%, transparent)', color: 'var(--yellow)' }}>
           <svg className="animate-pulse shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
             <line x1="12" y1="9" x2="12" y2="13" />
@@ -181,75 +172,64 @@ function AppContent() {
       {/* Background version polling — detects server restarts even when SW cache is stale */}
       <VersionPoller />
 
-      <div className="flex flex-1 w-full overflow-hidden">
-        {/* Sidebar — hidden on mobile */}
-        {!isMobile && (
-          <Sidebar
-            activeView={activeView}
-            onNavigate={setActiveView}
-            connected={connected}
-            sessions={sessions}
-            activeSessionId={activeSessionId}
-            onNewChat={handleNewChat}
-            onSelectSession={handleSelectSession}
-            events={events}
-          />
-        )}
-
-        <main className="flex flex-1 flex-col overflow-hidden bg-bg">
-          {/* Topbar */}
-          <div className="flex h-12 items-center gap-2 px-3 shrink-0">
-            {/* Mobile nav icons */}
-            {isMobile && (
-              <div className="flex items-center gap-0.5">
-                {/* Sessions button */}
+      <main className="flex flex-1 flex-col overflow-hidden bg-bg">
+          {/* Topbar — premium wood strip */}
+          <div className="topbar-wood flex h-12 items-center gap-1 px-2 shrink-0">
+            {/* Left: session button + nav icons */}
+            <div className="flex items-center gap-0.5">
+              {/* Session button (always visible) */}
+              <button
+                className={`relative flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150`}
+                style={{
+                  color: showSessionList ? 'var(--fg)' : 'var(--muted)',
+                  background: showSessionList ? 'var(--s3)' : 'transparent',
+                  border: showSessionList ? '1px solid var(--b1)' : '1px solid transparent',
+                }}
+                onClick={() => setShowSessionList(true)}
+                title="Sessions"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+                </svg>
+                {sessions.length > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center" style={{ background: 'var(--gold)', color: '#1a1410' }}>
+                    {sessions.length > 99 ? '99+' : sessions.length}
+                  </span>
+                )}
+              </button>
+              <div className="w-px h-5 bg-b1 mx-0.5" />
+              {/* Nav icons — one per view (tooltip on hover) */}
+              {NAV_ITEMS.map((item) => (
                 <button
-                  className={`relative flex items-center justify-center w-10 h-10 rounded-[6px] transition-all duration-100 ${
-                    showSessionList ? 'text-fg bg-s3' : 'text-muted hover:text-text hover:bg-s2'
-                  }`}
-                  onClick={() => setShowSessionList(true)}
-                  title="Sessions"
+                  key={item.view}
+                  className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150 cursor-pointer"
+                  style={{
+                    color: activeView === item.view ? 'var(--gold)' : 'var(--muted)',
+                    background: activeView === item.view ? 'var(--s3)' : 'transparent',
+                    border: activeView === item.view ? '1px solid var(--b1)' : '1px solid transparent',
+                  }}
+                  onClick={() => setActiveView(item.view)}
+                  title={item.label}
                 >
-                  <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-                  </svg>
-                  {sessions.length > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 bg-blue-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                      {sessions.length > 99 ? '99+' : sessions.length}
-                    </span>
-                  )}
+                  {renderNavIcon(item, 18)}
                 </button>
-                {NAV_ITEMS.map((item) => (
-                  <button
-                    key={item.view}
-                    className={`flex items-center justify-center w-10 h-10 rounded-[6px] transition-all duration-100 ${activeView === item.view
-                      ? 'text-fg bg-s3'
-                      : 'text-muted hover:text-text hover:bg-s2'
-                      }`}
-                    onClick={() => setActiveView(item.view)}
-                    title={item.label}
-                  >
-                    {renderNavIcon(item, 21)}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Title — only on desktop */}
-            {!isMobile && (
-              <span className="text-[13.5px] font-medium text-fg">{TITLES[activeView]}</span>
-            )}
+              ))}
+            </div>
 
             <div className="flex-1" />
 
             {/* Mode pill — hidden on very small screens */}
             {window.innerWidth >= 640 && (
-              <div className="flex border border-b2 rounded-[6px] overflow-hidden">
+              <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--b2)', background: 'var(--s1)' }}>
                 {MODES.map((m) => (
                   <button
                     key={m}
-                    className={`px-2.5 py-1 text-xs cursor-pointer transition-all duration-100 font-mono select-none ${activeMode === m ? 'text-fg bg-s3' : 'text-muted hover:text-text hover:bg-s2'
-                      }`}
+                    className="px-2.5 py-1 text-xs cursor-pointer transition-all duration-150 font-mono select-none"
+                    style={{
+                      color: activeMode === m ? 'var(--gold)' : 'var(--muted)',
+                      background: activeMode === m ? 'var(--s3)' : 'transparent',
+                      borderRight: '1px solid var(--b1)',
+                    }}
                     onClick={() => set('mode', m)}
                   >
                     {m}
@@ -262,7 +242,12 @@ function AppContent() {
             {(deferredPrompt || (isMobile && !isStandalone)) && (
               <button
                 onClick={handleInstallClick}
-                className="flex items-center justify-center bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 rounded-[6px] transition-all duration-100 px-2.5 py-1 gap-1.5 text-xs font-semibold cursor-pointer shrink-0"
+                className="flex items-center justify-center rounded-lg transition-all duration-150 px-2.5 py-1 gap-1.5 text-xs font-semibold cursor-pointer shrink-0"
+                style={{
+                  background: 'color-mix(in srgb, var(--green) 10%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--green) 30%, transparent)',
+                  color: 'var(--green)',
+                }}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -275,9 +260,13 @@ function AppContent() {
 
             {/* Commands button — icon only on mobile */}
             <button
-              className={`flex items-center justify-center bg-transparent border border-b2 rounded-[6px] text-muted hover:border-b3 hover:text-text transition-all duration-100 ${
-                isMobile ? 'w-10 h-10' : 'px-2.5 py-1 gap-1.5 text-xs'
-              }`}
+              className={`flex items-center justify-center rounded-lg transition-all duration-150 hover:scale-[1.02] ${isMobile ? 'w-10 h-10' : 'px-2.5 py-1 gap-1.5 text-xs'
+                }`}
+              style={{
+                background: 'transparent',
+                border: '1px solid var(--b2)',
+                color: 'var(--muted)',
+              }}
               onClick={() => setCmdOpen(true)}
               title="Open Commands"
             >
@@ -288,37 +277,35 @@ function AppContent() {
               {!isMobile && (
                 <>
                   Commands
-                  <span className="bg-s3 rounded-[3px] px-1.5 py-0.5 text-[10px] text-muted font-mono">K</span>
+                  <span className="rounded-[3px] px-1.5 py-0.5 text-[10px] font-mono" style={{ background: 'var(--s3)', color: 'var(--muted)', border: '1px solid var(--b1)' }}>K</span>
                 </>
               )}
             </button>
           </div>
 
-        {/* Views */}
-        <div className="relative flex-1 min-h-0">
-          {showSetupWizard && rpc ? (
-            <SetupWizard rpc={rpc} onComplete={() => setShowSetupWizard(false)} className="absolute inset-0" />
-          ) : activeView === 'assistant' && (
-            <ChatView
-              cmdResult={cmdResult}
-              onClearCmdResult={handleClearCmdResult}
-              rpc={rpc}
-              className="absolute inset-0"
-              activeSessionId={activeSessionId}
-              onNewChat={handleNewChat}
-              onCreateSession={handleCreateSession}
-              events={events}
-              addLiveEvent={addLiveEvent}
-            />
-          )}
-          {activeView === 'channels' && <ChannelsView rpc={rpc} className="absolute inset-0" />}
-          {activeView === 'stats' && <StatsView rpc={rpc} className="absolute inset-0" />}
-          {activeView === 'projects' && <ProjectsView rpc={rpc} className="absolute inset-0" />}
-          {activeView === 'agents' && <SubagentsView rpc={rpc} className="absolute inset-0" />}
-          {activeView === 'settings' && <div className="absolute inset-0 flex items-center justify-center text-muted text-xs">Settings view — coming soon</div>}
-        </div>
-      </main>
-      </div>
+          {/* Views */}
+          <div className="relative flex-1 min-h-0">
+            {showSetupWizard && rpc ? (
+              <SetupWizard rpc={rpc} onComplete={() => setShowSetupWizard(false)} className="absolute inset-0" />
+            ) : activeView === 'assistant' && (
+              <ChatArea
+                cmdResult={cmdResult}
+                onClearCmdResult={handleClearCmdResult}
+                rpc={rpc}
+                className="absolute inset-0"
+                activeSessionId={activeSessionId}
+                onCreateSession={handleCreateSession}
+                events={events}
+                addLiveEvent={addLiveEvent}
+              />
+            )}
+            {activeView === 'channels' && <ChannelsView rpc={rpc} className="absolute inset-0" />}
+            {activeView === 'stats' && <StatsView rpc={rpc} className="absolute inset-0" />}
+            {activeView === 'projects' && <ProjectsView rpc={rpc} className="absolute inset-0" />}
+            {activeView === 'agents' && <SubagentsView rpc={rpc} className="absolute inset-0" />}
+            {activeView === 'settings' && <div className="absolute inset-0 flex items-center justify-center text-muted text-xs">Settings view — coming soon</div>}
+          </div>
+        </main>
 
       {/* Command Palette */}
       <CommandPalette
@@ -330,21 +317,23 @@ function AppContent() {
       {/* Mobile Session List Bottom Sheet */}
       {showSessionList && (
         <div
-          className="fixed inset-0 z-[998] flex items-end bg-black/50 backdrop-blur-sm animate-fadeIn"
+          className="fixed inset-0 z-[998] flex items-end animate-fadeIn"
+          style={{ background: 'rgba(10, 8, 5, 0.6)', backdropFilter: 'blur(4px)' }}
           onClick={() => setShowSessionList(false)}
         >
           <div
-            className="w-full max-h-[70vh] bg-s1 border-t border-b1 rounded-t-2xl overflow-hidden animate-slideUp select-none flex flex-col"
+            className="w-full max-h-[70vh] rounded-t-2xl overflow-hidden animate-slideUp select-none flex flex-col wood-grain"
+            style={{ background: 'var(--s1)', borderTop: '1px solid var(--b1)' }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Handle bar */}
             <div className="flex justify-center pt-3 pb-1 shrink-0">
-              <div className="w-8 h-1 rounded-full bg-b2" />
+              <div className="w-8 h-1 rounded-full" style={{ background: 'var(--gold)', opacity: 0.3 }} />
             </div>
 
             {/* Header */}
-            <div className="flex items-center justify-between px-4 pb-3 border-b border-b1 shrink-0">
-              <span className="text-[13px] font-semibold text-fg">Sessions</span>
+            <div className="flex items-center justify-between px-4 pb-3 shrink-0" style={{ borderBottom: '1px solid var(--b1)' }}>
+              <span className="text-[13px] font-display font-semibold" style={{ color: 'var(--cream)' }}>Sessions</span>
               <button
                 onClick={() => setShowSessionList(false)}
                 className="text-muted hover:text-fg transition-colors duration-100 p-1"
@@ -357,13 +346,18 @@ function AppContent() {
             </div>
 
             {/* New Chat button */}
-            <div className="px-4 py-2.5 border-b border-b1 shrink-0">
+            <div className="px-4 py-2.5 shrink-0" style={{ borderBottom: '1px solid var(--b1)' }}>
               <button
                 onClick={() => {
                   handleNewChat();
                   setShowSessionList(false);
                 }}
-                className="w-full flex items-center gap-2.5 py-2 px-3 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400 hover:bg-blue-600/20 transition-all duration-100 active:scale-[0.98] cursor-pointer"
+                className="w-full flex items-center gap-2.5 py-2 px-3 rounded-xl transition-all duration-150 active:scale-[0.98] cursor-pointer"
+                style={{
+                  background: 'color-mix(in srgb, var(--gold) 10%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--gold) 20%, transparent)',
+                  color: 'var(--gold)',
+                }}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="12" y1="5" x2="12" y2="19" />
@@ -380,20 +374,21 @@ function AppContent() {
                 .map((s) => (
                   <button
                     key={s.id}
-                    className={`w-full text-left py-3 px-3 rounded-xl mb-1 transition-all duration-100 active:scale-[0.98] min-h-[52px] ${
-                      s.id === activeSessionId
-                        ? 'bg-s3 border border-b2'
-                        : 'hover:bg-s2 border border-transparent'
-                    }`}
+                    className="w-full text-left py-3 px-3 rounded-xl mb-1 transition-all duration-150 active:scale-[0.98] min-h-[52px] cursor-pointer"
+                    style={{
+                      background: s.id === activeSessionId ? 'linear-gradient(135deg, var(--s3) 0%, var(--s2) 100%)' : 'transparent',
+                      border: s.id === activeSessionId ? '1px solid var(--b2)' : '1px solid transparent',
+                    }}
                     onClick={() => {
                       handleSelectSession(s.id);
                       setShowSessionList(false);
                     }}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${
-                        s.id === activeSessionId ? 'bg-blue-500' : 'bg-transparent'
-                      }`} />
+                      <div className="w-2 h-2 rounded-full shrink-0" style={{
+                        background: s.id === activeSessionId ? 'var(--gold)' : 'transparent',
+                        boxShadow: s.id === activeSessionId ? '0 0 4px var(--gold)' : 'none',
+                      }} />
                       <div className="flex-1 min-w-0">
                         <div className="text-[12.5px] font-medium text-fg truncate">
                           {s.name || s.provider}
@@ -475,11 +470,11 @@ function AppContent() {
 
       {/* Manual PWA Install Instructions Modal */}
       {showManualInstall && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fadeIn">
-          <div className="w-full max-w-[340px] p-5 rounded-2xl border border-b2 bg-s2/95 backdrop-blur-md shadow-2xl animate-scaleIn select-none">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 animate-fadeIn" style={{ background: 'rgba(10, 8, 5, 0.7)', backdropFilter: 'blur(8px)' }}>
+          <div className="w-full max-w-[340px] p-5 rounded-2xl shadow-2xl animate-scaleIn select-none" style={{ background: 'linear-gradient(135deg, var(--s2), var(--s1))', border: '1px solid var(--b2)', boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
             {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-b1 mb-4">
-              <span className="font-bold text-fg text-[13.5px]">Install Curie Agent</span>
+            <div className="flex items-center justify-between pb-3 mb-4" style={{ borderBottom: '1px solid var(--b1)' }}>
+              <span className="font-bold text-[13.5px] font-display" style={{ color: 'var(--cream)' }}>Install Curie Agent</span>
               <button
                 onClick={() => setShowManualInstall(false)}
                 className="text-muted hover:text-fg transition-colors duration-100 cursor-pointer"
@@ -498,8 +493,8 @@ function AppContent() {
                   <p className="text-[12px] text-muted mb-1 px-0.5">
                     Follow these simple steps to add Curie to your home screen:
                   </p>
-                  <div className="flex gap-3 items-start bg-s1/50 border border-b1 p-3 rounded-xl">
-                    <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-blue-500/10 text-blue-400 shrink-0">
+                  <div className="flex gap-3 items-start p-3 rounded-xl" style={{ background: 'color-mix(in srgb, var(--s1) 50%, transparent)', border: '1px solid var(--b1)' }}>
+                    <div className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0" style={{ background: 'color-mix(in srgb, var(--gold) 10%, transparent)', color: 'var(--gold)' }}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                         <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13" />
                       </svg>
@@ -510,8 +505,8 @@ function AppContent() {
                     </div>
                   </div>
 
-                  <div className="flex gap-3 items-start bg-s1/50 border border-b1 p-3 rounded-xl">
-                    <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-blue-500/10 text-blue-400 shrink-0 font-bold font-mono text-[16px] select-none">
+                  <div className="flex gap-3 items-start p-3 rounded-xl" style={{ background: 'color-mix(in srgb, var(--s1) 50%, transparent)', border: '1px solid var(--b1)' }}>
+                    <div className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0 font-bold font-mono text-[16px] select-none" style={{ background: 'color-mix(in srgb, var(--gold) 10%, transparent)', color: 'var(--gold)' }}>
                       +
                     </div>
                     <div>
@@ -559,7 +554,7 @@ function AppContent() {
             {/* Action */}
             <button
               onClick={() => setShowManualInstall(false)}
-              className="w-full mt-5 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg shadow-blue-500/10 active:scale-[0.98] transition-all duration-150 cursor-pointer flex items-center justify-center"
+              className="btn-gold w-full mt-5 py-2.5 px-4 rounded-xl font-semibold text-xs active:scale-[0.98] transition-all duration-150 cursor-pointer flex items-center justify-center"
             >
               Got it
             </button>

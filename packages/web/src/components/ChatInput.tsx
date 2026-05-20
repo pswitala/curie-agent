@@ -1,15 +1,29 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useConfig } from '../hooks/useConfig.js';
 
 interface Props {
   onSend: (text: string) => void;
   cmdInput?: string;
   onClearCmdInput?: () => void;
-  onNewChat?: () => void;
+  totalTokens?: number;
+  contextTokens?: number;
+  costUsd?: number;
 }
 
-const CHIPS = ['/status', '/context', '/memory', '/heartbeat', '/snapshots'];
+function formatTokenCount(n: number): string {
+  if (n < 1000) return String(n);
+  return `${(n / 1000).toFixed(1)}k`;
+}
 
-export default function ChatInput({ onSend, cmdInput, onClearCmdInput, onNewChat }: Props) {
+export default function ChatInput({ onSend, cmdInput, onClearCmdInput, totalTokens, contextTokens, costUsd }: Props) {
+  const { providers, get } = useConfig();
+  const currentProvider = get('current_provider') as string | undefined;
+  const model = get('model') as string | undefined;
+
+  const activeProvider = providers.find(p => p.name === currentProvider && p.configured)
+    || providers.find(p => p.configured)
+    || { name: 'none' };
+
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -49,43 +63,28 @@ export default function ChatInput({ onSend, cmdInput, onClearCmdInput, onNewChat
     }
   }, [value, onSend]);
 
-  const insertChip = useCallback((chip: string) => {
-    setValue(chip);
-    textareaRef.current?.focus();
-  }, []);
-
   return (
     <div className="px-5 pt-3 pb-7 md:pb-3 bg-transparent">
-      <div className="bg-s2 border border-b2 rounded-[10px] focus-within:border-b3 transition-colors duration-150">
-        {/* Chips */}
-        <div className="flex flex-wrap gap-1 px-3 pt-2">
-          {onNewChat && (
-            <button
-              className="flex items-center gap-0.5 bg-transparent border border-b2 rounded px-1.5 py-0.5 text-xs text-muted hover:border-b3 hover:text-fg transition-colors duration-100 cursor-pointer select-none font-medium"
-              onClick={onNewChat}
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              New
-            </button>
-          )}
-          {CHIPS.map((chip) => (
-            <button
-              key={chip}
-              className="bg-transparent border border-b2 rounded px-1.5 py-0.5 text-xs text-muted hover:border-b3 hover:text-text transition-colors duration-100 cursor-pointer select-none font-mono"
-              onClick={() => insertChip(chip)}
-            >
-              {chip}
-            </button>
-          ))}
+      <div
+        className="glass-card rounded-xl transition-all duration-200"
+        style={{
+          background: 'linear-gradient(135deg, var(--s2) 0%, color-mix(in srgb, var(--s1) 90%, var(--wood)) 100%)',
+          border: '1px solid var(--b2)',
+        }}
+      >
+        {/* Provider + model bar above textarea */}
+        <div className="flex items-center gap-2 px-3 py-1.5 text-[10.5px]">
+          <span className="w-[6px] h-[6px] rounded-full shrink-0" style={{ background: currentProvider ? 'var(--green)' : 'var(--muted2)', opacity: currentProvider ? 1 : 0.3 }} />
+          <span style={{ color: 'var(--gold)', opacity: 0.8 }}>{activeProvider.name}</span>
+          <span className="text-muted">·</span>
+          <span className="text-muted">{model || 'no model set'}</span>
         </div>
 
         {/* Textarea */}
         <textarea
           ref={textareaRef}
-          className="w-full bg-transparent border-0 outline-none text-fg font-sans text-[13.5px] px-3.5 py-2.5 resize-none leading-[1.5] placeholder-muted2"
+          className="w-full bg-transparent border-0 outline-none text-fg font-sans text-[13.5px] px-3.5 py-2.5 resize-none leading-[1.5]"
+          style={{ color: 'var(--cream)' }}
           rows={1}
           placeholder="Message curie-agent..."
           value={value}
@@ -94,17 +93,25 @@ export default function ChatInput({ onSend, cmdInput, onClearCmdInput, onNewChat
         />
 
         {/* Footer */}
-        <div className="flex items-center px-3 pb-2 pt-1">
-          <span className="text-[11px] text-muted2 font-mono">Enter send &middot; Shift+Enter newline &middot; / commands</span>
-          <div className="flex-1" />
+        <div className="flex items-center px-3 pb-2.5 pt-1">
+          {totalTokens !== undefined ? (
+            <>
+              <span className="text-[10px] text-muted font-mono" style={{ opacity: 0.6 }}>{formatTokenCount(totalTokens)} tokens</span>
+              <span className="opacity-30 mx-1">|</span>
+              <span className="text-[10px] text-muted font-mono" style={{ opacity: 0.6 }}>ctx {formatTokenCount(contextTokens ?? 0)}</span>
+              <span className="opacity-30 mx-1">|</span>
+              <span className="text-[10px] text-muted font-mono" style={{ color: 'var(--green)', opacity: 0.6 }}>${(costUsd ?? 0).toFixed(4)}</span>
+              <div className="flex-1" />
+            </>
+          ) : null}
           <button
-            className="bg-fg border-0 rounded-[6px] w-7 h-7 flex items-center justify-center cursor-pointer hover:opacity-80 transition-opacity duration-150"
+            className="btn-gold rounded-lg w-8 h-8 flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95"
             onClick={() => {
               const text = value.trim();
               if (text) { onSend(text); setValue(''); }
             }}
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#010101" strokeWidth="2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1a1410" strokeWidth="2.5">
               <line x1="22" y1="2" x2="11" y2="13" />
               <polygon points="22 2 15 22 11 13 2 9 22 2" />
             </svg>
