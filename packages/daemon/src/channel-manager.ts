@@ -131,6 +131,8 @@ export class ChannelManager {
 
       return { status: 'completed', sessionId, events: result.events.length };
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[channelManager] TurnLoop error for channelId=${channelId}:`, msg);
       return {
         status: 'error',
         sessionId: '',

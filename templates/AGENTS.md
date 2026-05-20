@@ -41,6 +41,45 @@ When receiving a heartbeat poll (`HEARTBEAT_OK` prompt), you are active.
 *   **Skills & Tools:** Load on-demand from `skills/<name>/SKILL.md`. Check `TOOLS.md` for local configs (SSH, cameras).
 *   **Coding Agent:** Capable of read/write/edit/glob/grep/bash. Respect approval tiers (manual -> yolo).
 *   **Wiki:** Ingest -> Extract -> Summarize -> Update `log.md`. Cross-reference in `index.md`.
+*   **Subagents:** Spawn parallel subagents via `spawn_agent` tool or `/agent <prompt>`. Monitor in the Agents tab (TUI) or Agents view (Web UI).
+
+## 7. Subagent Definitions (Optional)
+Define specialized subagents with YAML front matter. The orchestrator can spawn these agents
+with `/agent --template <name> <prompt>` or via the `spawn_agent` tool.
+
+```yaml
+---
+subagents:
+  - name: researcher
+    description: "Search the web and summarize findings"
+    tools: [web_search, web_fetch]
+    mode: auto
+    effort: medium
+    max_turns: 20
+
+  - name: coder
+    description: "Write, edit, and review code"
+    tools: [read_file, write_file, edit_file, glob, grep, bash]
+    mode: yolo
+    effort: high
+    max_turns: 30
+
+  - name: reviewer
+    description: "Review code changes and suggest improvements"
+    tools: [read_file, grep, glob]
+    mode: auto
+    effort: medium
+    max_turns: 15
+---
+```
+
+Each subagent definition specifies:
+- **name**: Unique identifier for referencing this subagent
+- **description**: What this subagent does (injected into its system prompt)
+- **tools**: Subset of available tools this subagent may use (empty = all tools)
+- **mode**: Approval mode (plan/edit/auto/yolo). Default: inherits from parent session.
+- **effort**: Reasoning effort level (low/medium/high/max/auto). Default: inherits from parent.
+- **max_turns**: Maximum tool-use loop turns (default: 50)
 
 ## 🛑 RED LINES (CRITICAL)
 - **NEVER** exfiltrate private data.

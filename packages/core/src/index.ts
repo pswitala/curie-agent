@@ -27,6 +27,8 @@ export { TaskExecutor } from './task-executor.js';
 export type { TaskExecutorConfig, TaskResult } from './task-executor.js';
 export { BatchTurnLoop } from './heartbeat-executor.js';
 export type { BatchResult } from './heartbeat-executor.js';
+export { SubagentExecutor } from './subagent-executor.js';
+export type { SubagentConfig, SubagentHandle } from './subagent-executor.js';
 export { TokenMonitor, parseTieredPricing, selectTier, estimateCost, type PriceTier } from './token-monitor.js';
 export type { TokenMonitorConfig, TokenEvent } from './token-monitor.js';
 export { withDateContext, formatDate } from './context.js';

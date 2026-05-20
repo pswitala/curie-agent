@@ -422,6 +422,11 @@ export class TurnLoop {
         }
 
         if (toolCalls.length === 0) {
+          if (!fullText && thinkingBlocks.length === 0) {
+            emit({ type: 'status', id: session.id, message:
+              'The model did not return a response. This can happen with incompatible models or configuration issues.',
+              timestamp: Date.now() });
+          }
           emit({ type: 'assistant-stop', id: session.id, timestamp: Date.now() });
           emit({ type: 'session-stop', id: session.id, reason: 'stop', timestamp: Date.now() });
           return { events: this.bus.history(), sessionId: session.id, reason: 'stop' };

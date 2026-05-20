@@ -6,7 +6,12 @@ export interface AgentEntry {
   id: string;
   prompt: string;
   output: string;
-  status: 'running' | 'completed' | 'error';
+  status: 'running' | 'completed' | 'error' | 'cancelled';
+  toolCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+  startedAt: number;
+  doneAt?: number;
 }
 
 interface AgentsTabProps {
@@ -52,6 +57,7 @@ export function AgentsTab({ agents, theme }: AgentsTabProps) {
         const statusText =
           agent.status === 'running' ? 'running' :
           agent.status === 'completed' ? 'done' :
+          agent.status === 'cancelled' ? 'cancelled' :
           'error';
 
         const promptTruncated = agent.prompt.length > cols - 30 ? agent.prompt.slice(0, cols - 33) + '...' : agent.prompt;
@@ -61,6 +67,10 @@ export function AgentsTab({ agents, theme }: AgentsTabProps) {
         const visibleLines = outputLines.slice(-MAX_OUTPUT_LINES);
         const hasMore = outputLines.length > MAX_OUTPUT_LINES;
 
+        const elapsedMs = agent.doneAt ? (agent.doneAt - agent.startedAt) : (Date.now() - agent.startedAt);
+        const elapsed = formatDuration(elapsedMs);
+        const tokenTotal = agent.inputTokens + agent.outputTokens;
+
         return (
           <Box key={id} flexDirection="column" marginBottom={1}>
             <Box>
@@ -68,6 +78,11 @@ export function AgentsTab({ agents, theme }: AgentsTabProps) {
                 [{statusText}]
               </Text>
               <Text color={fg}> Agent: {promptTruncated}</Text>
+            </Box>
+            <Box marginTop={0}>
+              <Text color={muted}>
+                {elapsed} · {agent.toolCalls} tools{tokenTotal > 0 ? ` · ${(tokenTotal / 1000).toFixed(1)}k tok` : ''}
+              </Text>
             </Box>
             {visibleLines.length > 0 && (
               <Box flexDirection="column" paddingX={1}>
@@ -88,4 +103,12 @@ export function AgentsTab({ agents, theme }: AgentsTabProps) {
       })}
     </Box>
   );
+}
+
+function formatDuration(ms: number): string {
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const remainSec = secs % 60;
+  return `${mins}m${remainSec}s`;
 }

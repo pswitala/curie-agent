@@ -14,7 +14,16 @@ export type Event =
   | { type: 'hook'; id: string; phase: string; name: string; result?: string; error?: string; timestamp: number }
   | { type: 'status'; id: string; message: string; spinner?: boolean; timestamp: number }
   | { type: 'session-resumed'; id: string; turnsRecovered: number; timestamp: number }
-| { type: 'context-warning'; id: string; message: string; timestamp: number };
+| { type: 'context-warning'; id: string; message: string; timestamp: number }
+// Subagent events
+| { type: 'agent-start'; id: string; agentId: string; sessionId: string; prompt: string; timestamp: number }
+| { type: 'agent-text-delta'; id: string; agentId: string; text: string; timestamp: number }
+| { type: 'agent-thinking-delta'; id: string; agentId: string; text: string; timestamp: number }
+| { type: 'agent-tool-call'; id: string; agentId: string; toolCallId: string; name: string; input: Record<string, unknown>; timestamp: number }
+| { type: 'agent-tool-result'; id: string; agentId: string; toolCallId: string; output: unknown; error?: string; timestamp: number }
+| { type: 'agent-usage'; id: string; agentId: string; inputTokens: number; outputTokens: number; timestamp: number }
+| { type: 'agent-done'; id: string; agentId: string; sessionId: string; text: string; toolCalls: number; errors: string[]; durationMs: number; timestamp: number }
+| { type: 'agent-error'; id: string; agentId: string; sessionId: string; message: string; code?: string; timestamp: number };
 
 export type EventType = Event['type'];
 

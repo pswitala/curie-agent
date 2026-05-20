@@ -80,6 +80,18 @@ export class WsHandler {
         ));
       }
 
+      // Subscribe to subagent events — not yet in core Event union
+      for (const type of ['agent-start', 'agent-text-delta', 'agent-thinking-delta', 'agent-tool-call', 'agent-tool-result', 'agent-usage', 'agent-done', 'agent-error'] as const) {
+        handlers.push(this.eventBus.subscribe(
+          type as any,
+          (event: Event) => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify(event));
+            }
+          }
+        ));
+      }
+
       // Handle client messages (subscribe filter, RPC commands)
       ws.on('message', (data: WebSocket.Data) => {
         try {

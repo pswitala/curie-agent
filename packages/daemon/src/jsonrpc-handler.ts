@@ -2,7 +2,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync, existsSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { Method } from '@curie-agent/protocol';
-import { TurnLoop, parseReminderTime, listSnapshots, revertTo, createIdentityFiles } from '@curie-agent/core';
+import { TurnLoop, parseReminderTime, listSnapshots, revertTo, createIdentityFiles, SubagentExecutor } from '@curie-agent/core';
 import { EventBus } from '@curie-agent/core';
 import type { SessionStore, SettingsManager, Event, ProviderStream, Tool, CurieSettings } from '@curie-agent/core';
 import { listSkills, discoverAllSkills } from '@curie-agent/tools';
@@ -592,6 +592,150 @@ export class JsonRpcHandler {
           result = { status: 'not-implemented', method };
           break;
 
+        // Subagent management
+        case Method.SUBAGENT_SPAWN: {
+          const p = params as Record<string, unknown>;
+          const sessionId = this.getStringParam(p, 'sessionId');
+          const prompt = this.getStringParam(p, 'prompt');
+          if (!sessionId || !prompt) return this.paramError('sessionId, prompt');
+
+          const providerName = p?.provider as string | undefined;
+          const mode = p?.mode as 'plan' | 'edit' | 'auto' | 'yolo' | undefined;
+          const effort = p?.effort as 'low' | 'medium' | 'high' | 'max' | 'auto' | undefined;
+          const model = p?.model as string | undefined;
+          const tools = p?.tools as string[] | undefined;
+
+          if (!this.daemonApp || !this.createProvider) {
+            return { jsonrpc: '2.0', id, error: { code: -32603, message: 'Daemon not fully initialized' } };
+          }
+
+          const settings = this.settingsManager.get();
+          // If a specific provider is requested, override current_provider in settings
+          const spawnSettings = providerName
+            ? { ...settings, current_provider: providerName } as typeof settings
+            : settings;
+          const providerInstance = this.createProvider(spawnSettings);
+
+          // Resolve model for the subagent.
+          // - Explicit 'model' param from UI always wins.
+          // - If spawning on a different provider, use that provider's default config (ignore model_override).
+          // - If same provider as parent, inherit model_override if set.
+          const effectiveModel = (() => {
+            if (model) return model;
+            if (providerName && providerName !== settings.current_provider) {
+              // Different provider — use target's default, not parent's model_override
+              return spawnSettings.providers?.[providerName]?.model || settings.model;
+            }
+            // Same provider — allow model_override to apply
+            return spawnSettings.model_override || spawnSettings.model;
+          })();
+
+          const handle = await this.daemonApp.subagentExecutor.spawn({
+            provider: providerInstance,
+            model: effectiveModel,
+            tools: this.tools,
+            cwd: join(homedir(), '.curie-agent'),
+            settings,
+            prompt,
+            system: this.systemPrompt,
+            providerName: providerName || undefined,
+            mode: mode || settings.mode || 'auto',
+            effort,
+            allowedTools: tools,
+            type: 'subagent',
+          });
+
+          result = {
+            agentId: handle.agentId,
+            sessionId: handle.sessionId,
+            prompt: handle.prompt,
+            provider: handle.provider,
+            status: handle.status,
+            startedAt: handle.startedAt,
+          };
+          break;
+        }
+
+        case Method.SUBAGENT_LIST: {
+          const p = params as Record<string, unknown>;
+          const statusFilter = p?.status as string | undefined;
+
+          if (!this.daemonApp) {
+            return { jsonrpc: '2.0', id, error: { code: -32603, message: 'Daemon not initialized' } };
+          }
+
+          const agents = this.daemonApp.subagentExecutor.list(statusFilter);
+          result = agents.map((a) => ({
+            agentId: a.agentId,
+            sessionId: a.sessionId,
+            prompt: a.prompt,
+            provider: a.provider,
+            status: a.status,
+            text: a.text.slice(0, 200),
+            toolCalls: a.toolCalls,
+            inputTokens: a.inputTokens,
+            outputTokens: a.outputTokens,
+            startedAt: a.startedAt,
+            doneAt: a.doneAt,
+          }));
+          break;
+        }
+
+        case Method.SUBAGENT_CANCEL: {
+          const p = params as Record<string, unknown>;
+          const agentId = this.getStringParam(p, 'agentId');
+          if (!agentId) return this.paramError('agentId');
+
+          if (!this.daemonApp) {
+            return { jsonrpc: '2.0', id, error: { code: -32603, message: 'Daemon not initialized' } };
+          }
+
+          const cancelled = this.daemonApp.subagentExecutor.cancel(agentId);
+          result = { cancelled };
+          break;
+        }
+
+        case Method.SUBAGENT_STATS: {
+          const p = params as Record<string, unknown>;
+          const agentId = this.getStringParam(p, 'agentId');
+          if (!agentId) return this.paramError('agentId');
+
+          if (!this.daemonApp) {
+            return { jsonrpc: '2.0', id, error: { code: -32603, message: 'Daemon not initialized' } };
+          }
+
+          const handle = this.daemonApp.subagentExecutor.stats(agentId);
+          result = handle ? {
+            agentId: handle.agentId,
+            sessionId: handle.sessionId,
+            prompt: handle.prompt,
+            status: handle.status,
+            text: handle.text.slice(0, 2000),
+            toolCalls: handle.toolCalls,
+            errors: handle.errors,
+            inputTokens: handle.inputTokens,
+            outputTokens: handle.outputTokens,
+            startedAt: handle.startedAt,
+            doneAt: handle.doneAt,
+          } : null;
+          break;
+        }
+
+        case Method.SUBAGENT_SEND: {
+          const p = params as Record<string, unknown>;
+          const agentId = this.getStringParam(p, 'agentId');
+          const message = this.getStringParam(p, 'message');
+          if (!agentId || !message) return this.paramError('agentId, message');
+
+          if (!this.daemonApp) {
+            return { jsonrpc: '2.0', id, error: { code: -32603, message: 'Daemon not initialized' } };
+          }
+
+          const sent = this.daemonApp.subagentExecutor.sendMessage(agentId, message);
+          result = { sent };
+          break;
+        }
+
         default:
           return { jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } };
       }
@@ -643,6 +787,10 @@ export class JsonRpcHandler {
       'tool-result', 'approval-request', 'approval-decision', 'usage',
       'error', 'session-start', 'session-stop', 'hook', 'status',
       'session-resumed', 'context-warning', 'thinking-delta',
+      // Subagent events
+      'agent-start', 'agent-text-delta', 'agent-thinking-delta',
+      'agent-tool-call', 'agent-tool-result', 'agent-usage',
+      'agent-done', 'agent-error',
     ];
     const unsubscribes: Array<() => void> = [];
     for (const type of eventTypes) {
@@ -1585,6 +1733,37 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
             emitDelta(`Successfully reverted current workspace files to snapshot **${snap.sha.slice(0, 7)}** (_"${snap.label}"_)!`);
           } else {
             emitDelta(`Failed to revert: ${res.error}`);
+          }
+          break;
+        }
+
+        case 'agent': {
+          if (!this.daemonApp || !this.createProvider) {
+            emitDelta(`Agent system is not active on this daemon.`);
+            break;
+          }
+          if (!args) {
+            emitDelta(`Usage: \`/agent <prompt>\` to spawn a subagent. The subagent runs in parallel and streams output back.`);
+            break;
+          }
+          try {
+            const settings = this.settingsManager.get();
+            const provider = this.createProvider(settings);
+            const handle = await this.daemonApp.subagentExecutor.spawn({
+              provider,
+              model: settings.model_override || settings.model,
+              tools: this.tools,
+              cwd: join(homedir(), '.curie-agent'),
+              settings,
+              prompt: args,
+              system: this.systemPrompt,
+              mode: settings.mode || 'auto',
+              type: 'subagent',
+            });
+            emitDelta(`**Agent started**: "${args}" (ID: \`${handle.agentId.slice(0, 8)}...\`). Monitor in the Agents tab.`);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            emitDelta(`Failed to start agent: ${msg}`);
           }
           break;
         }

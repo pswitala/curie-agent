@@ -2,7 +2,7 @@ import http from 'node:http';
 import { URL } from 'node:url';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import type { EventBus, SessionStore, SettingsManager, CurieSettings, ProviderStream, Tool } from '@curie-agent/core';
 import { JsonRpcHandler } from './jsonrpc-handler.js';
 import { WsHandler } from './ws-handler.js';
@@ -144,6 +144,19 @@ export class DaemonServer {
 
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
 
+    // Serve sw.js with no-cache so the browser can detect service worker updates
+    if (url.pathname === '/sw.js') {
+      const swPath = join(this.webRoot, 'sw.js');
+      if (existsSync(swPath)) {
+        const content = readFileSync(swPath);
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Content-Type', 'application/javascript');
+        res.setHeader('Service-Worker-Allowed', '/');
+        res.writeHead(200);
+        res.end(content);
+        return;
+      }
+    }
 
     // Auth check (skip for /ws, handled by ws handler)
     if (url.pathname === '/ws') {

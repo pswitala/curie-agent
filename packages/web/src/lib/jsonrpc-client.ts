@@ -141,4 +141,33 @@ export class JsonRpcClient {
   }): Promise<unknown> {
     return this.request('identity.setup', params);
   }
+
+  // Subagent management
+  async subagentSpawn(params: {
+    sessionId: string;
+    prompt: string;
+    provider?: string;
+    mode?: string;
+    effort?: string;
+    model?: string;
+    tools?: string[];
+  }): Promise<unknown> {
+    return this.request('subagent.spawn', params);
+  }
+
+  async subagentList(params?: { sessionId?: string; status?: string }): Promise<unknown> {
+    return this.request('subagent.list', params);
+  }
+
+  async subagentCancel(agentId: string): Promise<unknown> {
+    return this.request('subagent.cancel', { agentId });
+  }
+
+  async subagentStats(agentId: string): Promise<unknown> {
+    return this.request('subagent.stats', { agentId });
+  }
+
+  async subagentSend(agentId: string, message: string): Promise<unknown> {
+    return this.request('subagent.send', { agentId, message });
+  }
 }

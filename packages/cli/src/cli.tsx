@@ -4,7 +4,7 @@ process.title = 'curie-agent';
 
 import { render } from 'ink';
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync } from 'node:fs';
@@ -398,14 +398,52 @@ async function handleDaemonCommand(subcommand: string): Promise<{ keepRunning: b
       return { keepRunning: true, daemon };
     }
     case 'stop': {
+      // Phase 1: In-process daemon
       const { getDaemonInstance } = await import('@curie-agent/daemon');
       const daemon = getDaemonInstance();
-      if (!daemon) {
-        console.log('No daemon instance running in this process.');
+      if (daemon) {
+        await daemon.stop();
+        console.log('Daemon stopped.');
         return { keepRunning: false };
       }
-      await daemon.stop();
-      console.log('Daemon stopped.');
+      console.log('No in-process daemon instance.');
+
+      // Phase 2: Kill processes on port 3457
+      const PORT = 3457;
+      const isWin = platform() === 'win32';
+      let pids: string[] = [];
+
+      try {
+        if (isWin) {
+          const output = execSync(`netstat -ano | findstr :${PORT}`, { encoding: 'utf-8' });
+          pids = [...new Set(
+            output.trim().split('\n')
+              .map(line => line.trim().split(/\s+/).pop()!)
+              .filter(Boolean)
+          )];
+        } else {
+          const output = execSync(`lsof -ti:${PORT}`, { encoding: 'utf-8' });
+          pids = output.trim().split('\n').filter(Boolean);
+        }
+      } catch {
+        console.log(`No daemon process found on port ${PORT}.`);
+        return { keepRunning: false };
+      }
+
+      for (const pid of pids) {
+        try {
+          if (isWin) {
+            execSync(`taskkill //PID ${pid} //F`, { stdio: 'inherit' });
+          } else {
+            execSync(`kill -9 ${pid}`, { stdio: 'inherit' });
+          }
+          console.log(`Killed process ${pid}.`);
+        } catch {
+          console.error(`Failed to kill process ${pid}.`);
+        }
+      }
+
+      console.log(`Killed ${pids.length} daemon process(es) on port ${PORT}.`);
       return { keepRunning: false };
     }
     case 'token': {

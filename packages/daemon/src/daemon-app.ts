@@ -4,7 +4,7 @@ import type {
   EventBus, Event, SessionStore, SettingsManager,
   CurieSettings, ProviderStream, Tool,
 } from '@curie-agent/core';
-import { CronManager, TelegramGateway, HeartbeatExecutor, HeartbeatDelivery, TaskExecutor, computeNextFire } from '@curie-agent/core';
+import { CronManager, TelegramGateway, HeartbeatExecutor, HeartbeatDelivery, TaskExecutor, SubagentExecutor, computeNextFire } from '@curie-agent/core';
 import type { ScheduleType, CronTask } from '@curie-agent/core';
 import type { ProviderFactory } from './server.js';
 import { ApprovalTracker } from './approval-tracker.js';
@@ -38,6 +38,7 @@ export class DaemonApp {
   public channelManager: ChannelManager;
   public approvalTracker: ApprovalTracker;
   public cronManager: CronManager;
+  public subagentExecutor: SubagentExecutor;
   public telegramGateway: TelegramGateway | null = null;
   public mcpStatus: McpConnectionStatus[] = [];
 
@@ -60,6 +61,7 @@ export class DaemonApp {
       createProvider, tools, this.approvalTracker, this.systemPrompt,
     );
     this.cronManager = new CronManager();
+    this.subagentExecutor = new SubagentExecutor(eventBus, sessionStore);
   }
 
   /** Start all subsystems. */
@@ -142,6 +144,7 @@ export class DaemonApp {
     this.telegramGateway?.stop();
     this.channelManager.cleanup();
     this.approvalTracker.clear();
+    this.subagentExecutor.shutdown();
   }
 
   /**

@@ -10,7 +10,26 @@ root.render(<React.StrictMode><App /></React.StrictMode>);
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
-      .then((reg) => console.log('ServiceWorker registration successful with scope: ', reg.scope))
+      .then((reg) => {
+        console.log('ServiceWorker registration successful with scope: ', reg.scope);
+
+        reg.addEventListener('updatefound', () => {
+          const installing = reg.installing;
+          if (installing) {
+            (window as any)._pendingUpdateWorker = installing;
+            installing.addEventListener('statechange', () => {
+              if (installing.state === 'installed') {
+                (window as any)._hasPendingUpdate = true;
+                window.dispatchEvent(new CustomEvent('pwa-update-available'));
+              }
+            });
+          }
+        });
+
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          window.dispatchEvent(new CustomEvent('pwa-controller-updated'));
+        });
+      })
       .catch((err) => console.error('ServiceWorker registration failed: ', err));
   });
 }

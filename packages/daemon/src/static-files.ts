@@ -59,7 +59,7 @@ export function serveStaticFile(
 
     // Caching headers for assets
     const ext = absPath.slice(absPath.lastIndexOf('.'));
-    if (['.js', '.css', '.png', '.jpg', '.svg', '.woff2', '.woff'].includes(ext)) {
+    if (['.css', '.png', '.jpg', '.svg', '.woff2', '.woff'].includes(ext)) {
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     } else {
       res.setHeader('Cache-Control', 'no-cache');

@@ -324,3 +324,12 @@
   animation: wiggle 1s ease-in-out infinite;
   transform-origin: top center;
 }
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.animate-slideUp {
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

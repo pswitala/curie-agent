@@ -69,6 +69,11 @@ export {
   ChannelListSchema,
   ChannelGetSchema,
   McpListSchema,
+  SubagentSpawnSchema,
+  SubagentListSchema,
+  SubagentCancelSchema,
+  SubagentStatsSchema,
+  SubagentSendSchema,
 } from './methods.js';
 
 export {

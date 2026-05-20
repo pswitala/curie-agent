@@ -10,6 +10,7 @@ export { taskTool } from './task.js';
 export { webSearchTool } from './web-search.js';
 export { webFetchTool } from './web-fetch.js';
 export { skillTool, discoverAllSkills, formatSkillsForPrompt, listSkills, parseFrontmatter, type ParsedSkill } from './skill.js';
+export { createSpawnAgentTool } from './spawn-agent.js';
 
 import { readTool } from './read.js';
 import { editTool } from './edit.js';

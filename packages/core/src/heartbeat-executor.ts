@@ -150,7 +150,9 @@ export class HeartbeatExecutor {
       settings: this.config.settings,
       effort: this.config.effort,
       maxTurns: this.config.maxTurns ?? 30,
-      system: this.config.system || `You are running a Heartbeat cycle. Follow the instructions in the prompt carefully. Use tools to gather data, analyze, and produce the final Heartbeat Brief.`,
+      // System prompt from daemon-app carries AGENTS.md + skills catalog.
+      // Standalone use gets a minimal fallback (no skills).
+      system: this.config.system || 'You are running a Heartbeat cycle.',
     }).run(prompt);
 
     return {

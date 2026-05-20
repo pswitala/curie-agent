@@ -76,6 +76,24 @@ export const IdentitySetupSchema = z.object({
   userLanguages: z.string(),
 });
 
+// Subagent management
+export const SubagentSpawnSchema = z.object({
+  sessionId: z.string(),
+  prompt: z.string(),
+  provider: z.enum(['anthropic', 'openai', 'google', 'ollama', 'openrouter']).optional(),
+  mode: z.enum(['plan', 'edit', 'auto', 'yolo']).optional(),
+  effort: z.enum(['low', 'medium', 'high', 'max', 'auto']).optional(),
+  model: z.string().optional(),
+  tools: z.array(z.string()).optional(),
+});
+export const SubagentListSchema = z.object({
+  sessionId: z.string().optional(),
+  status: z.enum(['running', 'completed', 'error', 'cancelled']).optional(),
+});
+export const SubagentCancelSchema = z.object({ agentId: z.string() });
+export const SubagentStatsSchema = z.object({ agentId: z.string() });
+export const SubagentSendSchema = z.object({ agentId: z.string(), message: z.string() });
+
 export const Method = {
   SESSION_LIST: 'session.list',
   SESSION_GET: 'session.get',
@@ -111,4 +129,10 @@ export const Method = {
   MCP_LIST: 'mcp.list',
   // Identity setup
   IDENTITY_SETUP: 'identity.setup',
+  // Subagent management
+  SUBAGENT_SPAWN: 'subagent.spawn',
+  SUBAGENT_LIST: 'subagent.list',
+  SUBAGENT_CANCEL: 'subagent.cancel',
+  SUBAGENT_STATS: 'subagent.stats',
+  SUBAGENT_SEND: 'subagent.send',
 } as const;
