@@ -138,11 +138,13 @@ export class HeartbeatExecutor {
     // 1. Read HEARTBEAT.md instructions
     const heartbeatProtocol = this.readHeartbeatMd();
 
-    // 2. Gather context
+    // 2. Gather context (MEMORY.md, USER.md, tasks summary — no AGENTS.md dup)
     const context = await this.gatherContext();
 
-    // 3. Build prompt with schedule-type header
-    const prompt = this.buildPrompt(heartbeatProtocol, context, this.config.scheduleType);
+    // 3. Build system prompt with protocol + context; user gets minimal instruction
+    const fullSystem = this.buildSystemPrompt(heartbeatProtocol, context);
+    const baseSystem = this.config.system || 'You are running a Heartbeat cycle.';
+    const userInstruction = this.buildUserInstruction(this.config.scheduleType);
 
     // 4. Run batch turn loop
     const batchResult = await new BatchTurnLoop({
@@ -153,10 +155,9 @@ export class HeartbeatExecutor {
       settings: this.config.settings,
       effort: this.config.effort,
       maxTurns: this.config.maxTurns ?? 30,
-      // System prompt from daemon-app carries AGENTS.md + skills catalog.
-      // Standalone use gets a minimal fallback (no skills).
-      system: this.config.system || 'You are running a Heartbeat cycle.',
-    }).run(prompt);
+      // baseSystem (AGENTS.md + skills) is enriched by withDateContext() in TurnLoop
+      system: fullSystem ? `${baseSystem}\n\n${fullSystem}` : baseSystem,
+    }).run(userInstruction);
 
     const maxTurns = this.config.maxTurns ?? 30;
     return {
@@ -193,12 +194,6 @@ export class HeartbeatExecutor {
       sections.push('=== USER.md ===\n' + readFileSync(userPath, 'utf-8'));
     }
 
-    // Gather AGENTS.md
-    const agentsPath = join(this.heartbeatDir, 'AGENTS.md');
-    if (existsSync(agentsPath)) {
-      sections.push('=== AGENTS.md ===\n' + readFileSync(agentsPath, 'utf-8'));
-    }
-
     // Gather project tasks/todo file from cwd (try unified format first, fall back to legacy)
     const taskPath = join(this.config.cwd, 'tasks.json');
     if (!existsSync(taskPath)) {
@@ -219,33 +214,14 @@ export class HeartbeatExecutor {
     return sections.join('\n\n');
   }
 
-  private buildPrompt(protocol: string, context: string, scheduleType?: ScheduleType): string {
+  private buildSystemPrompt(protocol: string, context: string): string {
+    return ['=== HEARTBEAT PROTOCOL ===', protocol, '', '=== GATHERED CONTEXT ===', context].join('\n');
+  }
+
+  private buildUserInstruction(scheduleType?: ScheduleType): string {
     const scheduleHint = scheduleType
       ? `Execute the **${scheduleType}** section of the HEARTBEAT protocol.\n`
       : '';
-
-    const now = new Date().toLocaleString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
-
-    return [
-      '=== HEARTBEAT PROTOCOL ===',
-      protocol,
-      '',
-      '=== GATHERED CONTEXT ===',
-      context,
-      '',
-      '=== CURRENT TIME ===',
-      now,
-      '',
-      `${scheduleHint}Please now execute the Heartbeat protocol using the gathered context. Produce the final Heartbeat Brief as specified in the protocol.`,
-    ].join('\n');
+    return `${scheduleHint}Please now execute the Heartbeat protocol using the gathered context. Produce the final Heartbeat Brief as specified in the protocol.`;
   }
 }

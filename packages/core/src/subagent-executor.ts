@@ -147,15 +147,9 @@ export class SubagentExecutor {
       type: config.type || 'subagent',
     }, this.sessionStore);
 
-    // Build injected context block
-    const contextBlock = buildSubagentContext(config.prompt, config.context, config.tools);
-    const mergedSystem = contextBlock
-      ? `${config.system ? config.system + '\n\n' : ''}${contextBlock}`
-      : config.system;
-
-    // Update the turn loop with merged system
-    const runPromise = mergedSystem
-      ? createAndRunTurnLoop(turnLoop, config.prompt, mergedSystem)
+    // Use config.system directly as the subagent's system prompt
+    const runPromise = config.system
+      ? createAndRunTurnLoop(turnLoop, config.prompt, config.system)
       : turnLoop.run(config.prompt);
 
     // Bridge subagent events to shared daemon EventBus
@@ -330,33 +324,6 @@ function findHandle(agents: Map<string, SubagentHandle>, sessionId: string): Sub
     if (handle.sessionId === sessionId) return handle;
   }
   return undefined;
-}
-
-function buildSubagentContext(prompt: string, context?: string, tools?: Tool[]): string {
-  const sections: string[] = [];
-
-  sections.push(`=== SUBAGENT CONTEXT ===`);
-  sections.push(`Role: ${prompt}`);
-  sections.push(`Current time: ${new Date().toISOString()}`);
-
-  if (context) {
-    sections.push('=== ADDITIONAL CONTEXT ===');
-    sections.push(context);
-  }
-
-  if (tools && tools.length > 0) {
-    sections.push('=== YOUR AVAILABLE TOOLS ===');
-    for (const t of tools) {
-      sections.push(`- ${t.definition.name}: ${t.definition.description}`);
-    }
-  }
-
-  sections.push('=== COMMUNICATION PROTOCOL ===');
-  sections.push('When you need a tool, call it through the tool-use interface.');
-  sections.push('When done, respond with a clear summary of your results.');
-  sections.push('');
-
-  return sections.join('\n');
 }
 
 async function createAndRunTurnLoop(turnLoop: TurnLoop, prompt: string, system: string): Promise<{ events: Event[]; sessionId: string; reason: string }> {

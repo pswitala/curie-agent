@@ -395,8 +395,11 @@ export class DaemonApp {
       const settings = this.settingsManager.get();
       const provider = this.createProvider(settings);
 
-      // Build prompt with context from task title + gathered files
-      const prompt = this.buildAutoTaskPrompt(task.title);
+      const autoSystem = this.buildAutoSystemPrompt(task.title);
+      const fullSystem = this.systemPrompt
+        ? `${this.systemPrompt}\n\n${autoSystem}`
+        : autoSystem;
+      const userPrompt = this.buildAutoUserPrompt(task.title);
 
       this.taskManager.updateTaskStatus(task.id, 'executing');
 
@@ -413,9 +416,9 @@ export class DaemonApp {
         tools: this.tools,
         cwd: join(homedir(), '.curie-agent'),
         settings,
-        prompt,
-        system: this.systemPrompt,
-        mode: 'yolo', // unsupervised — tasks always run with full autonomy
+        prompt: userPrompt,
+        system: fullSystem,
+        mode: 'auto', 
         effort: effectiveEffort,
         type: 'subagent',
         metadata,
@@ -430,61 +433,68 @@ export class DaemonApp {
     }
   }
 
-   /** Build prompt for an auto-mode task — gathers context files + current time. */
-  private buildAutoTaskPrompt(instruction: string): string {
-    const sections: string[] = [];
-    const readIf = (dir: string, name: string) => {
-      const path = join(dir, name);
-      if (existsSync(path)) {
-        sections.push(`=== ${name} ===\n` + readFileSync(path, 'utf-8'));
-      }
-    };
-
+   /** Build system prompt for an auto-mode subagent — persistent identity + operational context. */
+  private buildAutoSystemPrompt(taskTitle: string): string {
     const curieDir = join(homedir(), '.curie-agent');
-    readIf(curieDir, 'MEMORY.md');
-    readIf(curieDir, 'USER.md');
-    readIf(curieDir, 'AGENTS.md');
 
-    // Read personal tasks/todo file (unified format or legacy todo.json)
+    // Read active tasks from unified format or legacy todo.json
+    let tasksSection = '';
     const taskPath = join(curieDir, 'tasks.json');
-    if (!existsSync(taskPath)) {
+    if (existsSync(taskPath)) {
+      const raw = readFileSync(taskPath, 'utf-8');
+      try {
+        const parsed = JSON.parse(raw) as { tasks?: Array<{ id: string; title: string; status: string; priority?: string }> };
+        if (parsed.tasks?.length) {
+          tasksSection = `\n=== ACTIVE TASKS ===\n` + parsed.tasks.filter(t => t.status !== 'done').map(t => `  [${t.status}] ${t.title}`).join('\n');
+        }
+      } catch { /* skip */ }
+    } else {
       const todoPath = join(curieDir, 'todo.json');
       if (existsSync(todoPath)) {
         const raw = readFileSync(todoPath, 'utf-8');
         try {
           const parsed = JSON.parse(raw) as { tasks?: Array<{ id: string; title: string; status: string; priority?: string }> };
           if (parsed.tasks?.length) {
-            sections.push('=== Tasks ===\n' + parsed.tasks.filter(t => t.status !== 'done').map(t => `  [${t.status}] ${t.title}`).join('\n'));
+            tasksSection = `\n=== ACTIVE TASKS ===\n` + parsed.tasks.filter(t => t.status !== 'done').map(t => `  [${t.status}] ${t.title}`).join('\n');
           }
         } catch { /* skip */ }
       }
-    } else {
-      const raw = readFileSync(taskPath, 'utf-8');
-      try {
-        const parsed = JSON.parse(raw) as { tasks?: Array<{ id: string; title: string; status: string; priority?: string }> };
-        if (parsed.tasks?.length) {
-          sections.push('=== Tasks ===\n' + parsed.tasks.filter(t => t.status !== 'done').map(t => `  [${t.status}] ${t.title}`).join('\n'));
-        }
-      } catch { /* skip */ }
     }
 
-    const now = new Date().toLocaleString('en-US', {
-      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-    });
+    const sections: string[] = [];
 
-    return [
-      '=== TASK INSTRUCTION ===',
-      instruction,
-      '',
-      '=== GATHERED CONTEXT ===',
-      sections.length ? sections.join('\n\n') : '(no context files found)',
-      '',
-      '=== CURRENT TIME ===',
-      now,
-      '',
-      'Execute the task instruction above. Use available tools to gather data, browse websites, read files, and produce results. Deliver a clear summary of what you accomplished.',
-    ].join('\n');
+    // Persistent user profile
+    const userMd = join(curieDir, 'USER.md');
+    if (existsSync(userMd)) {
+      sections.push(`=== USER PROFILE ===\n${readFileSync(userMd, 'utf-8')}`);
+    }
+
+    // Persistent agent memory
+    const memoryMd = join(curieDir, 'MEMORY.md');
+    if (existsSync(memoryMd)) {
+      sections.push(`=== AGENT MEMORY ===\n${readFileSync(memoryMd, 'utf-8')}`);
+    }
+
+    // Active tasks
+    if (tasksSection) {
+      sections.push(tasksSection.trimStart());
+    }
+
+    // Available tools listing
+    if (this.tools.length > 0) {
+      const toolList = this.tools.map(t => `- ${t.definition.name}: ${t.definition.description}`).join('\n');
+      sections.push(`=== AVAILABLE TOOLS ===\n${toolList}`);
+    }
+
+    // Subagent communication protocol
+    sections.push('=== COMMUNICATION PROTOCOL ===\nWhen you need a tool, call it through the tool-use interface.\nWhen done, respond with a clear summary of your results.');
+
+    return sections.join('\n\n');
+  }
+
+   /** Build user message for an auto-mode subagent — task instruction only. */
+  private buildAutoUserPrompt(taskTitle: string): string {
+    return `${taskTitle}\n\nExecute this task using available tools. Deliver a clear summary of your results.`;
   }
 
   /** Execute a heartbeat from unified TaskManager (auto mode + frequency). */
