@@ -371,7 +371,7 @@ export class JsonRpcHandler {
           if (key.startsWith('heartbeat') && this.daemonApp) {
             const updatedSettings = this.settingsManager.get();
             if (updatedSettings.heartbeat?.schedule === 'on') {
-              this.daemonApp.cronManager.rescheduleFromSettings({
+              this.daemonApp.taskManager.rescheduleFromSettings({
                 HEARTBEAT_INTRADAY: updatedSettings.heartbeat.intraday,
                 HEARTBEAT_DAILY: updatedSettings.heartbeat.daily,
                 HEARTBEAT_WEEKLY: updatedSettings.heartbeat.weekly,
@@ -379,10 +379,7 @@ export class JsonRpcHandler {
                 HEARTBEAT_DREAMING: updatedSettings.heartbeat.dreaming,
               });
             } else if (updatedSettings.heartbeat?.schedule === 'off') {
-              const pendingHbs = this.daemonApp.cronManager.listReminders('pending').filter(t => t.type === 'heartbeat');
-              for (const t of pendingHbs) {
-                this.daemonApp.cronManager.cancelReminder(t.id);
-              }
+              this.daemonApp.taskManager.cancelAllHeartbeats();
             }
           }
 
@@ -442,15 +439,13 @@ export class JsonRpcHandler {
           // Server will handle shutdown after response
           break;
 
-        // Cron management
+        // Cron management (redirected to unified TaskManager)
         case Method.CRON_LIST: {
-          const type = this.getStringParam(params, 'type');
-          const status = this.getStringParam(params, 'status');
+          const mode = this.getStringParam(params, 'mode');
           if (this.daemonApp) {
-            const tasks = this.daemonApp.cronManager.listReminders(
-              status as 'pending' | 'fired' | 'executing' | 'completed' | 'failed' | 'cancelled' | undefined
-            );
-            result = type ? tasks.filter(t => t.type === type) : tasks;
+            this.daemonApp.taskManager.load();
+            const tasks = mode ? this.daemonApp.taskManager.list({ mode: mode as 'notify' | 'auto' }) : this.daemonApp.taskManager.list({ mode: 'notify' });
+            result = tasks;
           } else {
             result = [];
           }
@@ -461,15 +456,11 @@ export class JsonRpcHandler {
           const type = this.getStringParam(params, 'type');
           const message = this.getStringParam(params, 'message');
           const scheduledAt = params?.scheduledAt as number | undefined;
-          if (!type || !message || !scheduledAt) return this.paramError('type, message, scheduledAt');
+          if (!message || !scheduledAt) return this.paramError('message, scheduledAt');
           if (this.daemonApp) {
-            if (type === 'reminder') {
-              const task = this.daemonApp.cronManager.createReminder(message, scheduledAt);
-              result = task;
-            } else if (type === 'task') {
-              const task = this.daemonApp.cronManager.createTask(message, scheduledAt);
-              result = task;
-            }
+            const mode = type === 'task' ? 'auto' : 'notify';
+            const task = this.daemonApp.taskManager.create({ title: message, mode, scope: 'personal', scheduled_at: scheduledAt });
+            result = task;
           }
           break;
         }
@@ -478,14 +469,14 @@ export class JsonRpcHandler {
           const taskId = this.getStringParam(params, 'id');
           if (!taskId) return this.paramError('id');
           if (this.daemonApp) {
-            result = { cancelled: this.daemonApp.cronManager.cancelReminder(taskId) };
+            result = { cancelled: this.daemonApp.taskManager.cancelTask(taskId) };
           }
           break;
         }
 
         case Method.CRON_CLEAR:
           if (this.daemonApp) {
-            result = { removed: this.daemonApp.cronManager.clearCompleted() };
+            result = { removed: this.daemonApp.taskManager.clearCompleted() };
           }
           break;
 
@@ -1343,40 +1334,29 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
             emitDelta(`Failed to parse reminder time. Please format like: \`in 2 hours call developer\` or \`tomorrow at 9:00 am meeting\`.`);
             break;
           }
-          this.daemonApp.cronManager.createReminder(parsed.message, parsed.scheduledAt, sessionId);
+          const task = this.daemonApp.taskManager.create({ title: parsed.message, mode: 'notify', scope: 'personal', scheduled_at: parsed.scheduledAt });
           emitDelta(`Reminder scheduled! **"${parsed.message}"** at ${new Date(parsed.scheduledAt).toLocaleString()}`);
           break;
         }
 
         case 'cron': {
           if (!this.daemonApp) {
-            emitDelta(`Cron reminder system is not active on this daemon.`);
+            emitDelta(`Task service is not active on this daemon.`);
             break;
           }
-          this.daemonApp.cronManager.load();
+          this.daemonApp.taskManager.load();
           const parts = args.split(/\s+/);
           const sub = parts[0]?.toLowerCase() || '';
           const rest = parts.slice(1).join(' ').trim();
 
           if (sub === 'list' || !sub) {
-            const list = this.daemonApp.cronManager.listReminders();
+            const list = this.daemonApp.taskManager.list({ mode: 'notify' });
             if (list.length === 0) {
               emitDelta(`No reminders scheduled.`);
             } else {
               const items = list.map((t, i) => {
-                const timeStr = new Date(t.scheduledAt).toLocaleString();
-                const statusEmoji = t.status === 'pending' ? '⏳'
-                  : t.status === 'fired' ? '🔔'
-                  : t.status === 'executing' ? '⚙️'
-                  : t.status === 'completed' ? '✅'
-                  : t.status === 'failed' ? '❌'
-                  : '❌';
-                const typeLabel = t.type === 'heartbeat'
-                  ? `Heartbeat: ${t.schedule ? `[${t.schedule.type.toUpperCase()}] ` : ''}`
-                  : t.type === 'task'
-                    ? 'Task: '
-                    : 'Reminder: ';
-                return `${i + 1}. ${statusEmoji} ${typeLabel}${t.message} (Scheduled: ${timeStr}, ID: \`${t.id}\`)`;
+                const timeStr = t.scheduled_at ? new Date(t.scheduled_at).toLocaleString() : '—';
+                return `${i + 1}. ${t.status} ${t.title} (Scheduled: ${timeStr}, ID: \`${t.id.slice(0, 8)}\`)`;
               }).join('\n');
               emitDelta(`### Active Reminders:\n${items}`);
             }
@@ -1384,7 +1364,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
             if (!rest) {
               emitDelta(`Usage: \`/cron delete <id>\``);
             } else {
-              const result = this.daemonApp.cronManager.cancelReminder(rest);
+              const result = this.daemonApp.taskManager.cancelTask(rest);
               if (result) {
                 emitDelta(`Reminder \`${rest}\` cancelled.`);
               } else {
@@ -1392,8 +1372,8 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
               }
             }
           } else if (sub === 'clear') {
-            const removed = this.daemonApp.cronManager.clearCompleted();
-            emitDelta(`Successfully cleared ${removed} completed reminder(s).`);
+            const removed = this.daemonApp.taskManager.clearCompleted();
+            emitDelta(`Successfully cleared ${removed} completed task(s).`);
           } else {
             emitDelta(`Unknown cron subcommand. Supported: \`/cron list\`, \`/cron delete <id>\`, \`/cron clear\`.`);
           }
@@ -1442,7 +1422,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
               settings.heartbeat.schedule = 'on';
               this.settingsManager.save();
               if (this.daemonApp) {
-                this.daemonApp.cronManager.rescheduleFromSettings({
+                this.daemonApp.taskManager.rescheduleFromSettings({
                   HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
                   HEARTBEAT_DAILY: settings.heartbeat.daily,
                   HEARTBEAT_WEEKLY: settings.heartbeat.weekly,
@@ -1458,10 +1438,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
               settings.heartbeat.schedule = 'off';
               this.settingsManager.save();
               if (this.daemonApp) {
-                const pendingHbs = this.daemonApp.cronManager.listReminders('pending').filter(t => t.type === 'heartbeat');
-                for (const t of pendingHbs) {
-                  this.daemonApp.cronManager.cancelReminder(t.id);
-                }
+                this.daemonApp.taskManager.cancelAllHeartbeats();
               }
               emitDelta(`Heartbeat cycle disabled.`);
               break;
@@ -1486,7 +1463,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                   settings.heartbeat.intraday = tokens.join(',');
                   this.settingsManager.save();
                   if (this.daemonApp && settings.heartbeat.schedule === 'on') {
-                    this.daemonApp.cronManager.rescheduleFromSettings({
+                    this.daemonApp.taskManager.rescheduleFromSettings({
                       HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
                       HEARTBEAT_DAILY: settings.heartbeat.daily,
                       HEARTBEAT_WEEKLY: settings.heartbeat.weekly,
@@ -1513,7 +1490,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                   settings.heartbeat.daily = rest;
                   this.settingsManager.save();
                   if (this.daemonApp && settings.heartbeat.schedule === 'on') {
-                    this.daemonApp.cronManager.rescheduleFromSettings({
+                    this.daemonApp.taskManager.rescheduleFromSettings({
                       HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
                       HEARTBEAT_DAILY: settings.heartbeat.daily,
                       HEARTBEAT_WEEKLY: settings.heartbeat.weekly,
@@ -1541,7 +1518,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                   settings.heartbeat.weekly = rest;
                   this.settingsManager.save();
                   if (this.daemonApp && settings.heartbeat.schedule === 'on') {
-                    this.daemonApp.cronManager.rescheduleFromSettings({
+                    this.daemonApp.taskManager.rescheduleFromSettings({
                       HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
                       HEARTBEAT_DAILY: settings.heartbeat.daily,
                       HEARTBEAT_WEEKLY: settings.heartbeat.weekly,
@@ -1568,7 +1545,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                   settings.heartbeat.monthly = rest;
                   this.settingsManager.save();
                   if (this.daemonApp && settings.heartbeat.schedule === 'on') {
-                    this.daemonApp.cronManager.rescheduleFromSettings({
+                    this.daemonApp.taskManager.rescheduleFromSettings({
                       HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
                       HEARTBEAT_DAILY: settings.heartbeat.daily,
                       HEARTBEAT_WEEKLY: settings.heartbeat.weekly,
@@ -1595,7 +1572,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                   settings.heartbeat.dreaming = rest;
                   this.settingsManager.save();
                   if (this.daemonApp && settings.heartbeat.schedule === 'on') {
-                    this.daemonApp.cronManager.rescheduleFromSettings({
+                    this.daemonApp.taskManager.rescheduleFromSettings({
                       HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
                       HEARTBEAT_DAILY: settings.heartbeat.daily,
                       HEARTBEAT_WEEKLY: settings.heartbeat.weekly,
@@ -1628,7 +1605,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
             emitDelta(`Task system is not active on this daemon.`);
             break;
           }
-          this.daemonApp.cronManager.load();
+          this.daemonApp.taskManager.load();
           const parts = args.trim().split(/\s+/);
           const sub = parts[0]?.toLowerCase();
           const rest = parts.slice(1).join(' ').trim();
@@ -1642,8 +1619,8 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                 if (!parsed) {
                   emitDelta(`Could not parse scheduled time from: "${rest}". Try: \`at 7:55 do something\` or \`tomorrow at 9am do something\`.`);
                 } else {
-                  const task = this.daemonApp.cronManager.createTask(parsed.message, parsed.scheduledAt);
-                  const timeStr = new Date(task.scheduledAt).toLocaleString();
+                  const task = this.daemonApp.taskManager.create({ title: parsed.message, mode: 'auto', scope: 'personal', scheduled_at: parsed.scheduledAt });
+                  const timeStr = new Date(task.scheduled_at!).toLocaleString();
                   emitDelta(`### Task Scheduled Successfully!
 * **Task ID**: \`${task.id}\`
 * **Scheduled Time**: \`${timeStr}\`
@@ -1657,7 +1634,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
               const filter = ['pending', 'executing', 'completed', 'failed', 'cancelled'].includes(rest.toLowerCase())
                 ? rest.toLowerCase() as any
                 : undefined;
-              const tasks = this.daemonApp.cronManager.listTasks(filter);
+              const tasks = this.daemonApp.taskManager.list({ mode: 'auto' });
               if (tasks.length === 0) {
                 emitDelta(filter ? `No tasks found with status **${filter}**.` : `No tasks scheduled yet. Use \`/task create\` to schedule a task.`);
               } else {
@@ -1668,8 +1645,8 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                     : t.status === 'completed' ? '✅ COMPLETED'
                     : t.status === 'failed' ? '❌ FAILED'
                     : '🚫 CANCELLED';
-                  const timeStr = new Date(t.scheduledAt).toLocaleString();
-                  lines.push(`* **[${statusEmoji}]** "${t.message}"`);
+                  const timeStr = t.scheduled_at ? new Date(t.scheduled_at).toLocaleString() : '—';
+                  lines.push(`* **[${statusEmoji}]** "${t.title}"`);
                   lines.push(`  └─ Scheduled: \`${timeStr}\``);
                   lines.push(`  └─ ID: \`${t.id}\``);
                 });
@@ -1682,7 +1659,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
               if (!rest) {
                 emitDelta(`Usage: \`/task delete <id>\``);
               } else {
-                const res = this.daemonApp.cronManager.cancelReminder(rest);
+                const res = this.daemonApp.taskManager.cancelTask(rest);
                 if (res) {
                   emitDelta(`Task \`${rest}\` cancelled successfully.`);
                 } else {
@@ -1764,6 +1741,186 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             emitDelta(`Failed to start agent: ${msg}`);
+          }
+          break;
+        }
+
+        case 'todo': {
+          if (!this.daemonApp) {
+            emitDelta(`Task system is not active on this daemon.`);
+            break;
+          }
+          this.daemonApp.taskManager.load();
+          const parts = args.trim().split(/\s+/);
+          const sub = parts[0]?.toLowerCase() || '';
+          const rest = parts.slice(1).join(' ').trim();
+
+          // Detect mode keyword (auto/notify) from full args
+          const fullArgsLower = args.toLowerCase();
+          let mode: 'manual' | 'auto' | 'notify' = 'manual';
+          if (/^auto\s/.test(fullArgsLower) || /^\bat\b/.test(fullArgsLower)) {
+            mode = 'auto';
+          } else if (/^notify\s/.test(fullArgsLower) || /remind\s/.test(fullArgsLower)) {
+            mode = 'notify';
+          }
+
+          const scope = 'personal'; // Default to personal tasks for now
+
+          switch (sub) {
+            case 'list': {
+              const allTasks = this.daemonApp.taskManager.list({ scope });
+              if (allTasks.length === 0) {
+                emitDelta(`No tasks in ${scope} scope.`);
+              } else {
+                const active = allTasks.filter((t) => !['done', 'canceled'].includes(t.status));
+                const doneCount = allTasks.filter((t) => t.status === 'done').length;
+                const lines = [`### Tasks (${scope}) — ${active.length} active, ${doneCount} done:`];
+                for (const t of active.sort((a, b) => Number(a.order ?? 0) - Number(b.order ?? 0))) {
+                  const icon = String(t.status) === 'in_progress' ? '[*]' : '-';
+                  const prio = (t.priority && t.priority !== 'medium') ? ` [${t.priority}]` : '';
+                  const modeCol = t.mode ? `[${String(t.mode).toUpperCase()}]` : '[MANUAL]';
+                  const timeStr = t.scheduled_at ? ` (at ${new Date(t.scheduled_at).toLocaleString()})` : '';
+                  lines.push(`  ${icon} ${String(t.id).slice(0, 8)} ${modeCol}${prio} ${t.title}${timeStr}`);
+                }
+                emitDelta(lines.join('\n'));
+              }
+              break;
+            }
+
+            case 'add': {
+              if (!rest) {
+                emitDelta(`Usage: \`/todo add <title>\` or \`/todo auto add "X at Y"\` for scheduled tasks\n  /todo notify add "remind about X" — notification only`);
+                break;
+              }
+
+              // Detect and strip mode keyword
+              let instruction = rest.replace(/^(auto|notify)\s+/, '').trim();
+              if (!instruction) {
+                emitDelta(`Usage: \`/todo add <title>\` or \`/todo auto add "X at Y"\``);
+                break;
+              }
+
+              // Check for natural language time (at/in/tomorrow etc.)
+              const hasTimeRef = /\b(at|in|tomorrow|tonight)\b/i.test(instruction) || /remind/.test(instruction);
+              if (hasTimeRef) {
+                const parsed = parseReminderTime(instruction);
+                if (parsed) {
+                  instruction = parsed.message;
+                  if (mode === 'auto') {
+                    const task = this.daemonApp.taskManager.create({
+                      title: instruction,
+                      mode: 'auto', scope, scheduled_at: parsed.scheduledAt,
+                    });
+                    emitDelta(`**Task scheduled**: "${instruction}" at ${new Date(parsed.scheduledAt).toLocaleString()} (ID: \`${task.id.slice(0, 8)}...\`)`);
+                  } else if (mode === 'notify') {
+                    const task = this.daemonApp.taskManager.create({
+                      title: instruction,
+                      mode: 'notify', scope, scheduled_at: parsed.scheduledAt,
+                    });
+                    emitDelta(`**Reminder set**: "${instruction}" at ${new Date(parsed.scheduledAt).toLocaleString()} (ID: \`${task.id.slice(0, 8)}...\`)`);
+                  } else {
+                    // manual with time — auto-escalate to notify
+                    const task = this.daemonApp.taskManager.create({
+                      title: instruction,
+                      mode: 'notify', scope, scheduled_at: parsed.scheduledAt,
+                    });
+                    emitDelta(`**Reminder set**: "${instruction}" at ${new Date(parsed.scheduledAt).toLocaleString()} (ID: \`${task.id.slice(0, 8)}...\`)`);
+                  }
+                } else {
+                  // No time found — fall through to manual add
+                }
+              }
+
+              if (!hasTimeRef) {
+                const task = this.daemonApp.taskManager.create({
+                  title: instruction,
+                  mode, scope,
+                });
+                emitDelta(`**Task added**: "${instruction}" (ID: \`${task.id.slice(0, 8)}...\`)`);
+              } else if (!parseReminderTime(instruction)) {
+                // Parse failed — add as manual task
+                const task = this.daemonApp.taskManager.create({
+                  title: instruction, mode, scope,
+                });
+                emitDelta(`**Task added**: "${instruction}" (ID: \`${task.id.slice(0, 8)}...\`)`);
+              }
+              break;
+            }
+
+            case 'complete': {
+              if (!rest) {
+                emitDelta(`Usage: \`/todo complete <id>\``);
+                break;
+              }
+              const task = this.daemonApp.taskManager.findTask(rest);
+              if (!task) {
+                emitDelta(`Task not found: \`${rest}\`.`);
+              } else {
+                this.daemonApp.taskManager.updateTaskStatus(task.id, 'done');
+                emitDelta(`Completed: **${task.title}**`);
+              }
+              break;
+            }
+
+            case 'cancel': {
+              if (!rest) {
+                emitDelta(`Usage: \`/todo cancel <id>\``);
+                break;
+              }
+              const task = this.daemonApp.taskManager.findTask(rest);
+              if (!task) {
+                emitDelta(`Task not found: \`${rest}\`.`);
+              } else {
+                this.daemonApp.taskManager.updateTaskStatus(task.id, 'canceled');
+                emitDelta(`Canceled: **${task.title}**`);
+              }
+              break;
+            }
+
+            case 'start': {
+              if (!rest) {
+                emitDelta(`Usage: \`/todo start <id>\``);
+                break;
+              }
+              const task = this.daemonApp.taskManager.findTask(rest);
+              if (!task) {
+                emitDelta(`Task not found: \`${rest}\`.`);
+              } else {
+                this.daemonApp.taskManager.updateTaskStatus(task.id, 'in_progress');
+                emitDelta(`Started: **${task.title}**`);
+              }
+              break;
+            }
+
+            case 'remove': {
+              if (!rest) {
+                emitDelta(`Usage: \`/todo remove <id>\``);
+                break;
+              }
+              const task = this.daemonApp.taskManager.findTask(rest);
+              if (!task) {
+                emitDelta(`Task not found: \`${rest}\`.`);
+              } else {
+                this.daemonApp.taskManager.removeTask(task.id);
+                emitDelta(`Removed: \`${task.id.slice(0, 8)}\``);
+              }
+              break;
+            }
+
+            default: {
+              emitDelta(`### Task Commands (Unified Todo System)
+
+**Manual tasks:** \`/todo add "finish report"\` — add to task list
+**Auto tasks:** \`/todo auto add "build at 3pm"\` — agent executes it
+**Notify:** \`/todo notify add "remind about X at 5pm"\` — notification only
+
+* \`/todo list [personal|project]\` — List tasks
+* \`/todo complete <id>\` — Mark done
+* \`/todo cancel <id>\` — Cancel task
+* \`/todo start <id>\` — Start working on it
+* \`/todo remove <id>\` — Delete permanently`);
+              break;
+            }
           }
           break;
         }

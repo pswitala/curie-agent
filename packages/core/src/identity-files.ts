@@ -208,4 +208,11 @@ export function createIdentityFiles(data: InitData): void {
     '_(fill in as needed)_',
     '',
   ].join('\n'));
+
+  // tasks.json (unified task store — empty initial list)
+  writeCurieFile('tasks.json', JSON.stringify({
+    $schema: 'tasks.schema.json',
+    version: 1,
+    tasks: [],
+  }, null, 2));
 }

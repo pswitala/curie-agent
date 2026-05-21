@@ -40,6 +40,8 @@ export class HeartbeatDelivery {
   static formatBrief(result: {
     text: string;
     toolCalls: number;
+    maxTurns?: number;
+    reason: string;
     errors: string[];
     sessionId: string;
   }): string {
@@ -52,9 +54,27 @@ export class HeartbeatDelivery {
       `*Heartbeat Brief*`,
       '',
       body,
+    ];
+
+    // Surface completion reason when not a normal stop
+    if (result.reason !== 'stop') {
+      switch (result.reason) {
+        case 'max-turns':
+          lines.push('', `*Stopped: reached maximum turns (${result.maxTurns ?? 30}). Task may be incomplete.*`);
+          break;
+        case 'error':
+          lines.push('', '*Stopped: provider error. See warnings below for details.*');
+          break;
+        case 'cancelled':
+          lines.push('', '*Stopped: heartbeat was cancelled mid-execution.*');
+          break;
+      }
+    }
+
+    lines.push(
       '',
       `_Tool calls: ${result.toolCalls} | Session: ${result.sessionId.slice(0, 8)}_`,
-    ];
+    );
 
     if (result.errors.length > 0) {
       lines.push('', '*Warnings:*');

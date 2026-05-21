@@ -2,8 +2,35 @@ import type { CurieSettings } from '../../core/src/settings.js';
 import { SettingsManager } from '../../core/src/settings.js';
 import type { Message } from '../../core/src/turn-loop.js';
 import type { TabId } from './tab-bar.js';
-import { CronManager, pickNextSchedule, scheduleLabel } from '@curie-agent/core';
-import { readFileSync } from 'node:fs';
+import { TaskManager, pickNextSchedule, scheduleLabel } from '@curie-agent/core';
+import { readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+
+/** Resolve the unified task file path for a scope. */
+function resolveTaskPath(scope: 'personal' | 'project', cwd: string): string {
+  if (scope === 'personal') return join(homedir(), '.curie-agent', 'tasks.json');
+  return join(cwd, 'tasks.json');
+}
+
+/** Read tasks file; falls back to legacy todo.json. Returns null if neither exists. */
+function readTaskJson(path: string): { $schema?: string; version?: number; tasks: Array<Record<string, unknown>> } | null {
+  try {
+    if (!existsSync(path)) return null;
+    const raw = readFileSync(path, 'utf-8');
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    if (Array.isArray(data.tasks)) return data as any;
+    // Legacy format — check for plain array at root? No, legacy is {tasks: []} with no version/schema.
+    return null;
+  } catch { return null; }
+}
+
+/** Normalize a legacy task record (missing mode/scope) to UnifiedTask fields. */
+function normalizeTaskRecord(t: Record<string, unknown>): Record<string, unknown> {
+  if (!t.mode) t.mode = 'manual';
+  if (!t.scope) t.scope = 'personal';
+  return t;
+}
 
 export interface SlashCommandContext {
   settings: CurieSettings;
@@ -22,7 +49,8 @@ export interface SlashCommandContext {
   messages?: Message[];
   /** Channel message display data from the TUI (broader role set, includes tool-group and system). */
   channelMessages?: Array<{ role: string; content: string; title?: string }>;
-  cronManager?: CronManager;
+ /** Unified task manager for task CRUD and scheduling. */
+  taskManager?: TaskManager;
   /** MCP client instances for connection status display. */
   mcpClients?: Array<{ serverId: string; isConnected: boolean; tools: ReadonlyArray<{ name: string }> }>;
   /** Server IDs that failed to connect during createMcpTools. */
@@ -126,6 +154,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'statusline', description: 'Toggle status line display', usage: '/statusline [on|off]', category: 'Display' },
   // Knowledge
   { name: 'memory', description: 'View memory file sizes or capture a memory', usage: '/memory [status|add]', category: 'Knowledge' },
+  { name: 'todo', description: 'Manage tasks in todo.json', usage: '/todo <list|add|complete|remove>', category: 'Knowledge' },
   { name: 'stats', description: 'Daily usage, sessions, streaks', usage: '/stats', category: 'Knowledge' },
   { name: 'context', description: 'Visual grid showing context window usage, compaction, autocompaction', usage: '/context [auto|messages|compact [detailed|brief]]', category: 'Knowledge' },
   // Automation
@@ -182,6 +211,9 @@ export async function handleSlashCommand(
 
     case 'memory':
       return handleMemory(args, ctx);
+
+    case 'todo':
+      return handleTodo(args, ctx);
 
     case 'stats':
       return { type: 'switch_tab', tab: 'stats', message: 'Switched to Stats tab' };
@@ -616,104 +648,72 @@ function handleRemind(args: string, ctx: SlashCommandContext): SlashCommandResul
   if (!args) {
     return {
       type: 'message',
-      message: 'Usage: /remind <message at time>\nExamples: /remind "tomorrow at 7am make breakfast", /remind "in 30 minutes call mom"',
+      message: 'Usage: /remind <message at time>\nExample: /remind "tomorrow at 7am make breakfast"\nOr use /todo notify add "..." for the unified format.',
     };
   }
 
-  const cronManager = ctx.cronManager;
-  if (!cronManager) {
-    return {
-      type: 'message',
-      message: 'Reminder service not available. Please restart the application.',
-    };
+  const { parseReminderTime }: { parseReminderTime?: (input: string) => { message: string; scheduledAt: number } | null } = {} as any;
+  try {
+    Object.assign(require('../../core/src/reminder-parser.js'), { parseReminderTime });
+  } catch { /* module not available */ }
+
+  if (!parseReminderTime) {
+    return { type: 'message', message: `Could not parse time from: "${args}".\nUse /todo notify add "tomorrow at 7am make breakfast"` };
   }
 
-  const { parseReminderTime } = require('../../core/src/reminder-parser.js');
   const parsed = parseReminderTime(args);
   if (!parsed) {
-    return {
-      type: 'message',
-      message: `Could not parse time from: "${args}".\nTry: /remind "tomorrow at 7am make breakfast"`,
-    };
+    return { type: 'message', message: `Could not parse time from: "${args}".\nUse /todo notify add "tomorrow at 7am make breakfast"` };
   }
 
- const task = cronManager.createReminder(parsed.message, parsed.scheduledAt);
-  const timeStr = new Date(task.scheduledAt).toLocaleString();
-  return {
-    type: 'message',
-    message: `Curie reminder:\nDate: ${timeStr}\n${parsed.message}\nID: ${task.id}`,
-  };
+  if (ctx.taskManager) {
+    ctx.taskManager.load();
+    const task = ctx.taskManager.create({ title: parsed.message, mode: 'notify', scope: 'personal', scheduled_at: parsed.scheduledAt });
+    return { type: 'message', message: `Reminder set:\nTime: ${new Date(task.scheduled_at!).toLocaleString()}\nMessage: ${task.title}\nID: ${task.id}` };
+  }
+
+  return { type: 'message', message: 'Reminder service not available. Please restart the application.' };
 }
 
 function handleCron(args: string, ctx: SlashCommandContext): SlashCommandResult {
-  const cronManager = ctx.cronManager;
-  if (!cronManager) {
-    return {
-      type: 'message',
-      message: 'Reminder service not available. Please restart the application.',
-    };
-  }
-
-  // Reload from disk before each command so tool-created reminders
-  // are visible even if the tool used a separate CronManager instance.
-  cronManager.load();
+  // /cron is an alias for viewing notify-mode tasks in the unified store.
 
   const parts = args.trim().split(/\s+/);
   const action = parts[0]?.toLowerCase();
   const rest = parts.slice(1).join(' ').trim();
 
+  if (!ctx.taskManager) {
+    return { type: 'message', message: 'Task service not available. Please restart the application.' };
+  }
+
+  ctx.taskManager.load();
+
   switch (action) {
     case 'list': {
-      const statusFilter = ['pending', 'fired', 'cancelled', 'completed', 'failed', 'executing'].includes(rest) ? (rest as 'pending' | 'fired' | 'cancelled' | 'completed' | 'failed' | 'executing') : undefined;
-      const tasks = cronManager.listReminders(statusFilter);
-      if (tasks.length === 0) {
-        return {
-          type: 'message',
-          message: statusFilter
-            ? `No ${statusFilter} reminders.`
-            : 'No reminders yet.\nUse /remind to create one.',
-        };
-      }
-  const lines = [`Reminders (${tasks.length}${statusFilter ? ` — ${statusFilter}` : ''}):`];
-      for (const t of tasks) {
-        const timeStr = new Date(t.scheduledAt).toLocaleString();
-        const statusEmoji = t.status === 'pending' ? '⏳'
-          : t.status === 'fired' ? '🔔'
-          : t.status === 'executing' ? '⚙️'
-          : t.status === 'completed' ? '✅'
-          : t.status === 'failed' ? '❌'
-          : '❌';
-        const typeLabel = t.type === 'heartbeat'
-          ? `Heartbeat: ${t.schedule ? `[${scheduleLabel(t.schedule.type)}] ` : ''}`
-          : t.type === 'task'
-            ? 'Task: '
-            : 'Reminder: ';
-        lines.push(`  ${statusEmoji} ${typeLabel}${t.message}\n    Date: ${timeStr}\n    ID: ${t.id}`);
+      const allTasks = ctx.taskManager.list({ mode: 'notify' });
+      if (allTasks.length === 0) return { type: 'message', message: 'No scheduled reminders.\nUse /todo notify add "..." to create one.' };
+      const lines = [`Reminders (${allTasks.length}):`];
+      for (const t of allTasks.sort((a, b) => Number(a.scheduled_at ?? 0) - Number(b.scheduled_at ?? 0))) {
+        const timeStr = t.scheduled_at ? new Date(t.scheduled_at).toLocaleString() : '—';
+        lines.push(`  ${t.status} ${t.title}\n    Time: ${timeStr}\n    ID: ${t.id.slice(0, 8)}`);
       }
       return { type: 'message', message: lines.join('\n') };
     }
+
     case 'delete': {
-      if (!rest) {
-        return {
-          type: 'message',
-          message: 'Usage: /cron delete <id>\nExample: /cron delete abc-123',
-        };
-      }
-      const result = cronManager.cancelReminder(rest);
-      if (!result) {
-        return { type: 'message', message: `No reminder found with ID: ${rest}` };
-      }
-      return { type: 'message', message: `Reminder cancelled.` };
+      if (!rest) return { type: 'message', message: 'Usage: /cron delete <id>\nExample: /cron delete abc-123' };
+      const result = ctx.taskManager.cancelTask(rest);
+      if (result) return { type: 'message', message: 'Reminder cancelled.' };
+      return { type: 'message', message: `No reminder found with ID: ${rest}` };
     }
+
     case 'clear': {
-      const removed = cronManager.clearCompleted();
-      return { type: 'message', message: `Cleared ${removed} completed reminder(s).` };
+      const removed = ctx.taskManager.clearCompleted();
+      return { type: 'message', message: `Cleared ${removed} completed task(s).` };
     }
+
     default:
-      return {
-        type: 'message',
-        message: `Unknown cron action: "${action}". Use: list, delete, clear`,
-      };
+      return handleTodo('list personal', ctx);
   }
 }
 
@@ -1020,6 +1020,314 @@ function handleMemory(args: string, ctx: SlashCommandContext): SlashCommandResul
         type: 'message',
         message: 'Memory commands:\n  /memory status  — Show memory file sizes\n  /memory add <text>  — Capture a memory for the agent to organize',
       };
+    }
+  }
+}
+
+/**
+ * Parse /todo args: "/todo [scope:]add|list|complete|cancel|start|remove [title|id]"
+ * Optionally with mode keywords: "auto/add", "notify/add"
+ */
+function parseTodoArgs(args: string): { scope: 'personal' | 'project'; action: string; titleOrId: string } {
+  const parts = args.trim().split(/\s+/);
+  if (!parts.length) return { scope: 'project', action: '', titleOrId: '' };
+
+  let scope: 'personal' | 'project' = 'project';
+  let action = '';
+  let idx = 0;
+
+  // First token: scope, mode keyword, or action
+  const first = parts[0]!.toLowerCase();
+  if (first === 'personal' || first === 'project') {
+    scope = first;
+    idx = 1;
+  } else if (first === 'auto' || first === 'notify') {
+    // mode keyword: /todo auto add ..., /todo notify list ...
+    idx = 1;
+  }
+
+  // Second token: action or scope fallback
+  const second = parts[idx]?.toLowerCase() ?? '';
+  const actions = ['list', 'add', 'complete', 'cancel', 'start', 'remove'];
+  if (actions.includes(second)) {
+    action = second;
+    idx++;
+  } else if (first === 'personal' || first === 'project') {
+    // no scope given — second token is the action, third is the content
+    if (actions.includes(second)) action = second;
+    idx += actions.includes(second) ? 1 : 0;
+  }
+
+  const titleOrId = parts.slice(idx).join(' ').trim();
+  return { scope, action, titleOrId };
+}
+
+/** Result shape from reading a tasks file. */
+interface TasksData {
+  $schema?: string;
+  version?: number;
+  tasks: Array<Record<string, unknown>>;
+}
+
+/** Helper to read a tasks file (unified format), falls back to legacy todo.json. */
+function readTasksAtPath(path: string): TasksData | null {
+  if (!existsSync(path)) return null;
+  try {
+    const raw = readFileSync(path, 'utf-8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (Array.isArray(parsed.tasks)) return { tasks: parsed.tasks as Array<Record<string, unknown>> };
+    return null;
+  } catch { return null; }
+}
+
+/** Write a task record to file (unified format). */
+function writeTaskToFile(filePath: string, taskRecord: Record<string, unknown>): void {
+  let data = readTasksAtPath(filePath);
+  if (!data) {
+    data = { tasks: [] };
+  }
+
+  // Update/insert the task
+  const idx = data.tasks.findIndex((t: Record<string, unknown>) => t.id === taskRecord.id);
+  if (idx >= 0) {
+    data.tasks[idx] = taskRecord;
+  } else {
+    data.tasks.push(taskRecord);
+  }
+
+  writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+/** Remove a task from file by ID. */
+function removeTaskFromFile(filePath: string, id: string): boolean {
+  if (!existsSync(filePath)) return false;
+  try {
+    const raw = readFileSync(filePath, 'utf-8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const tasks = parsed.tasks as Array<Record<string, unknown>> | undefined;
+    if (!Array.isArray(tasks)) return false;
+    for (const t of tasks) normalizeTaskRecord(t);
+    const idx = tasks.findIndex((t: Record<string, unknown>) => t.id === id);
+    if (idx === -1) return false;
+    tasks.splice(idx, 1);
+    tasks.forEach((t, i) => { t.order = i; });
+    parsed.tasks = tasks;
+    writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8');
+    return true;
+  } catch { return false; }
+}
+
+/** Normalize and return the active+done task counts from a TasksData. */
+function getTaskCounts(tasks: Array<Record<string, unknown>>): { active: number; done: number } {
+  const active = tasks.filter((t) => !['done', 'canceled'].includes(String(t.status ?? '')));
+  const doneCount = tasks.filter((t) => t.status === 'done').length;
+  return { active: active.length, done: doneCount };
+}
+
+function handleTodo(args: string, ctx: SlashCommandContext): SlashCommandResult {
+  const parsed = parseTodoArgs(args);
+  const { scope, action, titleOrId } = parsed;
+  const path = resolveTaskPath(scope, ctx.cwd);
+
+  // Support both unified tasks.json and legacy todo.json
+  const fullPath = existsSync(path) ? path : (scope === 'personal'
+    ? join(homedir(), '.curie-agent', 'todo.json')
+    : join(ctx.cwd, 'todo.json'));
+
+  switch (action) {
+    case 'list': {
+      const data = readTasksAtPath(fullPath);
+      if (!data || !data.tasks.length) {
+        return { type: 'message', message: `No tasks in ${scope}.` };
+      }
+
+      // Normalize and filter
+      const normalizedTasks = (data.tasks as unknown[]).map((t: unknown) => normalizeTaskRecord(t as Record<string, unknown>)) as Array<Record<string, unknown>>;
+      let tasks = normalizedTasks;
+      const active = tasks.filter((t) => !['done', 'canceled'].includes(String(t.status ?? '')));
+      const done = tasks.filter((t) => t.status === 'done');
+
+      // Auto-detect mode from title (for user convenience)
+      const lower = args.toLowerCase();
+      const hasModeKeyword = /auto/.test(lower) || /notify/.test(lower);
+
+     const lines = [`Tasks (${scope}) — ${active.length} active, ${done.length} done:`];
+      for (const t of active.sort((a, b) => Number(a.order ?? 0) - Number(b.order ?? 0))) {
+        const icon = String(t.status) === 'in_progress' ? '[*]' : '-';
+        const prio = (t.priority !== 'medium' && t.priority) ? ` [${t.priority}]` : '';
+        const modeCol = t.mode ? `[${String(t.mode).toUpperCase()}]` : '[MANUAL]';
+        const scheduledAt = typeof t.scheduled_at === 'number' ? t.scheduled_at : undefined;
+        const timeStr = scheduledAt ? ` (at ${new Date(scheduledAt).toLocaleString()})` : '';
+        lines.push(`  ${icon} ${String(t.id).slice(0, 8)} ${modeCol}${prio} ${t.title}${timeStr}`);
+      }
+      return { type: 'message', message: lines.join('\n') };
+    }
+
+    case 'add': {
+      if (!titleOrId) {
+        return {
+          type: 'message',
+          message: `Usage: /todo add <title>\nExample: /todo add "Finish the report"\n  /todo auto add "build at 3pm"     — agent executes it\n  /todo notify add "remind about X" — notification only`,
+        };
+      }
+
+      // Detect mode from keyword or natural language time parsing
+      let mode: 'manual' | 'auto' | 'notify' = 'manual';
+      const lower = titleOrId.toLowerCase();
+
+      if (lower.startsWith('at ') || /\bat\b/.test(lower)) {
+        // Has time reference — try to parse with TaskManager
+        const taskMgr = ctx.taskManager;
+        let instruction: string;
+
+        // Check if "auto" was explicitly requested
+        if (/^auto\s+add\s*/i.test(args) || /^auto\b/.test(args)) {
+          mode = 'auto';
+        } else if (/^notify\s+add\s*/i.test(args) || /notify\s+/i.test(args)) {
+          mode = 'notify';
+        }
+
+        const timeKeywordPattern = /^(auto|notify)\s*add\s*/i;
+        instruction = titleOrId.replace(timeKeywordPattern, '');
+
+        if (!instruction) {
+          return { type: 'message', message: 'Usage: /todo add <title>\n  /todo auto add "build at 3pm"\n  /todo notify add "remind about X"' };
+        }
+
+        // Try natural language time parsing
+        let { parseReminderTime }: { parseReminderTime?: (input: string) => { message: string; scheduledAt: number } | null } = {} as any;
+        try {
+          parseReminderTime = require('../../core/src/reminder-parser.js').parseReminderTime;
+        } catch { /* module not available */ }
+
+        if (mode === 'manual' && parseReminderTime) {
+          const parsed = parseReminderTime(instruction);
+          if (parsed) {
+            instruction = parsed.message;
+            if (taskMgr) {
+              taskMgr.load();
+              taskMgr.create({ title: instruction, mode: 'auto', scope: 'personal', scheduled_at: parsed.scheduledAt });
+              const timeStr = new Date(parsed.scheduledAt).toLocaleString();
+              return { type: 'message', message: `Task scheduled:\nTime: ${timeStr}\nInstruction: ${instruction}` };
+            }
+          }
+        }
+
+        if (mode === 'notify' && parseReminderTime) {
+          const parsed = parseReminderTime(instruction);
+          if (parsed && taskMgr) {
+            taskMgr.load();
+            const task = taskMgr.create({ title: parsed.message, mode: 'notify', scope: 'personal', scheduled_at: parsed.scheduledAt });
+            const timeStr = new Date(task.scheduled_at!).toLocaleString();
+            return { type: 'message', message: `Reminder scheduled:\nTime: ${timeStr}\nMessage: ${parsed.message}` };
+          }
+        }
+
+        if (mode === 'auto' && parseReminderTime) {
+          const parsed = parseReminderTime(instruction);
+          if (parsed && taskMgr) {
+            taskMgr.load();
+            const task = taskMgr.create({ title: parsed.message, mode: 'auto', scope: 'personal', scheduled_at: parsed.scheduledAt });
+            const timeStr = new Date(task.scheduled_at!).toLocaleString();
+            return { type: 'message', message: `Scheduled task:\nTime: ${timeStr}\nInstruction: ${parsed.message}` };
+          }
+        }
+
+        // No time could be parsed — fall through to manual mode
+      } else if (/^auto\s+add\s*/i.test(args) || /^auto\b/.test(args)) {
+        mode = 'auto';
+      } else if (/^notify\s+add\s*/i.test(args) || /notify\s+/i.test(args)) {
+        mode = 'notify';
+      }
+
+      const title = (mode === 'manual' ? titleOrId : titleOrId.replace(/^(auto|notify)\s+add\s*/i, '').trim()) || titleOrId;
+      if (!title) return { type: 'message', message: `Usage: /todo add <title>\nExample: /todo add "Finish the report"` };
+
+      let data = readTasksAtPath(fullPath);
+      if (!data) {
+        data = { $schema: 'tasks.schema.json', version: 1, tasks: [] };
+      }
+      data.tasks = (data.tasks as unknown[]).map((t: unknown) => normalizeTaskRecord(t as Record<string, unknown>));
+
+      const id = crypto.randomUUID();
+      const task: Record<string, unknown> = {
+        id,
+        title,
+        description: '',
+        status: 'todo',
+        priority: 'medium',
+        tags: [],
+        order: data.tasks.length,
+        created_at: new Date().toISOString(),
+        completed_at: null,
+      };
+      // Add mode and scope fields
+      task.mode = mode;
+      task.scope = scope;
+
+      data.tasks.push(task);
+      writeFileSync(fullPath, JSON.stringify(data, null, 2), 'utf-8');
+
+      const modePrefix = mode === 'manual' ? '' : `[${mode}] `;
+      return { type: 'message', message: `${modePrefix}Added task: "${title}" (ID: ${id.slice(0, 8)})` };
+    }
+
+    case 'complete': {
+      if (!titleOrId) return { type: 'message', message: 'Usage: /todo complete <id>' };
+      let data = readTasksAtPath(fullPath);
+      if (!data) return { type: 'message', message: 'No tasks found.' };
+      data.tasks = (data.tasks as unknown[]).map((t: unknown) => normalizeTaskRecord(t as Record<string, unknown>));
+
+      const idx = data.tasks.findIndex((t: Record<string, unknown>) => String(t.id) === titleOrId || String(t.id).startsWith(titleOrId));
+      if (idx === -1) return { type: 'message', message: `Task not found: ${titleOrId}` };
+      data.tasks[idx]!.status = 'done';
+      data.tasks[idx]!.completed_at = new Date().toISOString();
+      writeFileSync(fullPath, JSON.stringify(data, null, 2), 'utf-8');
+      return { type: 'message', message: `Completed: "${data.tasks[idx]!.title}"` };
+    }
+
+    case 'cancel': {
+      if (!titleOrId) return { type: 'message', message: 'Usage: /todo cancel <id>' };
+      let data = readTasksAtPath(fullPath);
+      if (!data) return { type: 'message', message: 'No tasks found.' };
+      data.tasks = (data.tasks as unknown[]).map((t: unknown) => normalizeTaskRecord(t as Record<string, unknown>));
+
+      const idx = data.tasks.findIndex((t: Record<string, unknown>) => String(t.id) === titleOrId || String(t.id).startsWith(titleOrId));
+      if (idx === -1) return { type: 'message', message: `Task not found: ${titleOrId}` };
+      data.tasks[idx]!.status = 'canceled';
+      writeFileSync(fullPath, JSON.stringify(data, null, 2), 'utf-8');
+      return { type: 'message', message: `Canceled: "${data.tasks[idx]!.title}"` };
+    }
+
+    case 'start': {
+      if (!titleOrId) return { type: 'message', message: 'Usage: /todo start <id>' };
+      let data = readTasksAtPath(fullPath);
+      if (!data) return { type: 'message', message: 'No tasks found.' };
+      data.tasks = (data.tasks as unknown[]).map((t: unknown) => normalizeTaskRecord(t as Record<string, unknown>));
+
+      const idx = data.tasks.findIndex((t: Record<string, unknown>) => String(t.id) === titleOrId || String(t.id).startsWith(titleOrId));
+      if (idx === -1) return { type: 'message', message: `Task not found: ${titleOrId}` };
+      data.tasks[idx]!.status = 'in_progress';
+      writeFileSync(fullPath, JSON.stringify(data, null, 2), 'utf-8');
+      return { type: 'message', message: `Started: "${data.tasks[idx]!.title}"` };
+    }
+
+    case 'remove': {
+      if (!titleOrId) return { type: 'message', message: 'Usage: /todo remove <id>' };
+      if (removeTaskFromFile(fullPath, titleOrId)) {
+        return { type: 'message', message: `Removed task: ${titleOrId.slice(0, 8)}` };
+      }
+      return { type: 'message', message: `Task not found: ${titleOrId}` };
+    }
+
+    default: {
+      if (!action) {
+        return {
+          type: 'message',
+          message: 'Task commands:\n  /todo list [personal|project]      — List tasks\n  /todo add <title>                   — Add a manual task\n  /todo auto add "X at Y"             — Agent executes X at Y\n  /todo notify add "remind about X"   — Notification only\n  /todo complete <id>                 — Mark done\n  /todo cancel <id>                   — Cancel a task\n  /todo start <id>                    — Start working on it\n  /todo remove <id>                   — Delete permanently',
+        };
+      }
+      return { type: 'message', message: `Unknown todo action: "${action}". Use: list, add, complete, cancel, start, remove` };
     }
   }
 }
@@ -1500,87 +1808,67 @@ async function handleRevert(args: string, ctx: SlashCommandContext): Promise<Sla
 }
 
 function handleTask(args: string, ctx: SlashCommandContext): SlashCommandResult {
-  const cronManager = ctx.cronManager;
-  if (!cronManager) {
-    return {
-      type: 'message',
-      message: 'Task service not available. Please restart the application.',
-    };
-  }
-
-  cronManager.load();
+  // /task creates auto-mode scheduled tasks (LLM executes at given time).
+  // Uses unified TaskManager.
 
   const parts = args.trim().split(/\s+/);
   const action = parts[0]?.toLowerCase();
   const rest = parts.slice(1).join(' ').trim();
+
+  if (!ctx.taskManager) {
+    return { type: 'message', message: 'Task service not available. Please restart the application.' };
+  }
 
   switch (action) {
     case 'create': {
       if (!rest) {
         return {
           type: 'message',
-          message: 'Usage: /task create <instruction at time>\nExamples:\n  /task create "at 7:55 make a report about AI models"\n  /task create "tomorrow at 9am check abc.com and summarize"',
+          message: 'Usage: /task create <instruction at time>\nExample:\n  /task create "at 7:55 make a report about AI models"\nOr use /todo auto add "..." for the new unified format.',
         };
       }
-      const { parseReminderTime } = require('../../core/src/reminder-parser.js');
+
+      let { parseReminderTime }: { parseReminderTime?: (input: string) => { message: string; scheduledAt: number } | null } = {} as any;
+      try { Object.assign(require('../../core/src/reminder-parser.js'), { parseReminderTime }); } catch { /* not available */ }
+
+      if (!parseReminderTime) {
+        return { type: 'message', message: `Could not parse time from: "${rest}".\nTry: /todo auto add "at 7:55 do something"` };
+      }
+
       const parsed = parseReminderTime(rest);
       if (!parsed) {
-        return {
-          type: 'message',
-          message: `Could not parse time from: "${rest}".\nTry: /task create "at 7:55 do something"`,
-        };
+        return { type: 'message', message: `Could not parse time from: "${rest}".\nUse /todo auto add "instruction at time"` };
       }
-      const task = cronManager.createTask(parsed.message, parsed.scheduledAt);
-      const timeStr = new Date(task.scheduledAt).toLocaleString();
-      return {
-        type: 'message',
-        message: `Task scheduled:\nTime: ${timeStr}\nInstruction: ${parsed.message}\nID: ${task.id}`,
-      };
+
+      ctx.taskManager.load();
+      const task = ctx.taskManager.create({ title: parsed.message, mode: 'auto', scope: 'personal', scheduled_at: parsed.scheduledAt });
+      return { type: 'message', message: `Task scheduled:\nTime: ${new Date(task.scheduled_at!).toLocaleString()}\nInstruction: ${task.title}\nID: ${task.id}` };
     }
 
     case 'list': {
-      const validStatuses = ['pending', 'executing', 'completed', 'failed', 'cancelled'] as const;
-      const statusFilter = validStatuses.includes(rest as any) ? rest : undefined;
-      const tasks = cronManager.listTasks(statusFilter as 'pending' | 'executing' | 'completed' | 'failed' | 'cancelled' | undefined);
-      if (tasks.length === 0) {
-        return {
-          type: 'message',
-          message: statusFilter
-            ? `No ${statusFilter} tasks.`
-            : 'No tasks yet.\nUse /task create to schedule one.',
-        };
-      }
-      const lines = [`Tasks (${tasks.length}${statusFilter ? ` — ${statusFilter}` : ''}):`];
+      ctx.taskManager.load();
+      const tasks = ctx.taskManager.list({ mode: 'auto' });
+      if (!tasks.length) return { type: 'message', message: 'No scheduled tasks.\nUse /todo auto add "..." to create one.' };
+      const lines = [`Tasks (${tasks.length}):`];
       for (const t of tasks) {
-        const timeStr = new Date(t.scheduledAt).toLocaleString();
-        const statusLabel = t.status === 'pending' ? 'PENDING'
-          : t.status === 'executing' ? 'RUNNING'
-          : t.status === 'completed' ? 'DONE'
-          : t.status === 'failed' ? 'FAILED'
-          : 'CANCELLED';
-        lines.push(`  [${statusLabel}] ${t.message}\n    Time: ${timeStr}\n    ID: ${t.id.slice(0, 8)}`);
+        const timeStr = t.scheduled_at ? new Date(t.scheduled_at).toLocaleString() : '—';
+        const statusLabel = t.status === 'pending' ? 'PENDING' : t.status === 'executing' ? 'RUNNING' : t.status.toUpperCase();
+        lines.push(`  [${statusLabel}] ${t.title}\n    Time: ${timeStr}\n    ID: ${t.id.slice(0, 8)}`);
       }
       return { type: 'message', message: lines.join('\n') };
     }
 
     case 'delete': {
-      if (!rest) {
-        return {
-          type: 'message',
-          message: 'Usage: /task delete <id>',
-        };
-      }
-      const result = cronManager.cancelReminder(rest);
-      if (!result) {
-        return { type: 'message', message: `No task found with ID: ${rest}` };
-      }
-      return { type: 'message', message: 'Task cancelled.' };
+      if (!rest) return { type: 'message', message: 'Usage: /task delete <id>' };
+      const result = ctx.taskManager.cancelTask(rest);
+      if (result) return { type: 'message', message: 'Task cancelled.' };
+      return { type: 'message', message: `No task found with ID: ${rest}` };
     }
 
     default:
       return {
         type: 'message',
-        message: 'Usage: /task <create|list|delete>\n  create <instruction at time>  — Schedule a task\n  list [status]                   — List tasks\n  delete <id>                     — Cancel a task',
+        message: 'Usage: /task <create|list|delete>\n  create <instruction at time>  — Schedule a task\n  list                          — List scheduled tasks\n  delete <id>                   — Cancel a task\nOr use /todo auto add "..." for the new unified format.',
       };
   }
 }

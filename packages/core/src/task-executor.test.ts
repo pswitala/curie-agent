@@ -95,7 +95,7 @@ describe('TaskExecutor', () => {
     fs.mkdirSync(curieDir, { recursive: true });
     fs.writeFileSync(path.join(curieDir, 'MEMORY.md'), '# Memory');
     fs.writeFileSync(path.join(curieDir, 'USER.md'), '# User');
-    fs.writeFileSync(path.join(tmpDir, 'TODO.md'), '# TODO');
+    fs.writeFileSync(path.join(tmpDir, 'todo.json'), JSON.stringify({ version: 1, tasks: [{ id: 'abc', title: 'Test task', status: 'todo' }] }));
 
     const executor = new TaskExecutor({
       provider: createMockProvider(),
@@ -112,8 +112,8 @@ describe('TaskExecutor', () => {
     expect(context).toContain('# Memory');
     expect(context).toContain('=== USER.md ===');
     expect(context).toContain('# User');
-    expect(context).toContain('=== TODO.md ===');
-    expect(context).toContain('# TODO');
+    expect(context).toContain('=== Project Tasks ===');
+    expect(context).toContain('Test task');
   });
 
   it('gathers context without crashing when files are missing', () => {

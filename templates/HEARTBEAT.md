@@ -9,21 +9,20 @@ Before outputting any response to the user, calculate the estimated length. **If
 
 ## 1. INTRADAY (Execute on EVERY Heartbeat)
 *   **Triage:** Scan the mailbox/channels for critical unread items. Filter specifically for direct requests or time-sensitive obligations.
-*   **Align:** Cross-reference new inputs against `[P1]` active tasks in `TODO.md`. Flag immediate conflicts or priority shifts.
+*   **Align:** Use the `Todo` tool to list project tasks and cross-reference against new inputs. Flag immediate conflicts or priority shifts.
 
 ## 2. DAILY (Execute once per day)
 *   **Ingest & Update:** Read yesterday's daily log (e.g., `memory/YYYY-MM-DD.md`). Extract any persistent facts, preferences, or major events missed, and append them to `MEMORY.md`.
-*   **Rollover:** Review `TODO.md`. Draft newly identified obligations from the day's logs/emails as staged `[P2]` or `[P3]` tasks. Do not delete incomplete tasks.
-*   **Report:** Generate a highly concise Daily Brief for the user containing: 1-2 actionable insights (based on friction points), proposed `TODO.md` additions, and a brief system status.
+*   **Rollover:** Use the `Todo` tool to list active project tasks. Draft newly identified obligations from the day's logs/emails as staged medium or low priority tasks. Do not remove incomplete tasks.
+*   **Report:** Generate a highly concise Daily Brief for the user containing: 1-2 actionable insights (based on friction points), proposed `tasks.json` additions, and a brief system status.
 
 ## 3. WEEKLY (Execute on Sunday/End of Week)
 *   **Analyze:** Review the past 7 daily logs. Identify recurring workflow bottlenecks, continuously rolled-over tasks, or shifts in the user's focus.
-*   **Groom Backlog:** Review all `[P3]` tasks in `TODO.md`. Flag stale tasks (untouched for 14+ days) for deletion, or suggest elevating them to `[P2]`.
+*   **Groom Backlog:** Use the `Todo` tool to list project tasks with backlog status. Flag stale tasks (untouched for 14+ days) for removal, or suggest moving them to todo status.
 *   **Map Dependencies:** Compare the upcoming week's calendar/reminders against current `[P1]` and `[P2]` tasks to flag immediate schedule conflicts.
 
 ## 4. MONTHLY (Execute on the 1st of the Month)
 *   **Consolidate:** Extract macro-level developments and milestones from the entire month's logs. Append this distilled summary to `MEMORY.md` to convert short-term events into long-term knowledge.
-*   **Archive:** Move completed `[x]` tasks in `TODO.md` that are older than 30 days into `memory/TODO-ARCHIVE.md` to keep the active file lightweight.
 *   **Strategize:** Draft a brief macro-level report of productivity trends, major achievements, and proposed adjustments to the user's organizational system.
 
 ## 5. DREAMING (Execute during quiet hours)

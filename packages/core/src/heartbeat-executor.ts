@@ -4,7 +4,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { EventBus } from './event-bus.js';
 import { TurnLoop, type ReasoningEffort, type ProviderStream, type Tool } from './turn-loop.js';
 import type { CurieSettings } from './settings.js';
-import type { ScheduleType } from './cron-manager.js';
+import type { ScheduleType } from './unified-task.js';
+import { readTaskSummary } from './task-summary.js';
 
 export interface HeartbeatExecutorConfig {
   provider: ProviderStream;
@@ -25,6 +26,8 @@ export interface HeartbeatResult {
   sessionId: string;
   text: string;
   toolCalls: number;
+  maxTurns?: number;
+  reason: string;
   usage: { inputTokens: number; outputTokens: number };
   errors: string[];
 }
@@ -108,7 +111,7 @@ AI AGENT INSTRUCTIONS: This file dictates your periodic proactive routine. Execu
 
 ## Data Ingestion & State Check
 Scan and load the current state of:
-- TODO.md: Parse active tasks
+- tasks.json (or todo.json): Parse active tasks in the current project
 - Short-Term Memory: Ingest recent daily logs from ~/.curie-agent/memory/
 
 ## Synthesis & Insight Generation
@@ -121,7 +124,7 @@ Cross-reference ingested data to formulate proactive insights (1-3 concise, acti
 ## User Output (The Heartbeat Brief)
 Generate a strictly formatted status report:
 - Insights: [Brief bullet points]
-- Proposed Actions: [Tasks ready to be added to TODO.md]
+- Proposed Actions: [Tasks ready to be added to tasks.json]
 - System Status: [Confirmation of updates]`;
 
 export class HeartbeatExecutor {
@@ -155,10 +158,13 @@ export class HeartbeatExecutor {
       system: this.config.system || 'You are running a Heartbeat cycle.',
     }).run(prompt);
 
+    const maxTurns = this.config.maxTurns ?? 30;
     return {
       sessionId: batchResult.sessionId,
       text: batchResult.text,
       toolCalls: batchResult.toolCalls,
+      maxTurns,
+      reason: batchResult.reason,
       usage: { inputTokens: 0, outputTokens: 0 },
       errors: batchResult.errors,
     };
@@ -193,10 +199,15 @@ export class HeartbeatExecutor {
       sections.push('=== AGENTS.md ===\n' + readFileSync(agentsPath, 'utf-8'));
     }
 
-    // Gather TODO.md from cwd
-    const todoPath = join(this.config.cwd, 'TODO.md');
-    if (existsSync(todoPath)) {
-      sections.push('=== TODO.md ===\n' + readFileSync(todoPath, 'utf-8'));
+    // Gather project tasks/todo file from cwd (try unified format first, fall back to legacy)
+    const taskPath = join(this.config.cwd, 'tasks.json');
+    if (!existsSync(taskPath)) {
+      const todoPath = join(this.config.cwd, 'todo.json');
+      if (existsSync(todoPath)) {
+        sections.push('=== Project Tasks ===\n' + readTaskSummary(todoPath));
+      }
+    } else {
+      sections.push('=== Project Tasks ===\n' + readTaskSummary(taskPath));
     }
 
     // Gather daily memory logs (last 3)

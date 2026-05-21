@@ -128,7 +128,7 @@ export const CronTaskFiredEvent = z.object({
   type: z.literal('cron-task-fired'),
   id: z.string(),
   taskId: z.string(),
-  taskType: z.enum(['reminder', 'heartbeat', 'task']),
+  taskType: z.enum(['notify', 'auto']),
   message: z.string(),
   timestamp: z.number(),
 });

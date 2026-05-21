@@ -100,7 +100,7 @@ function ToolGroupBlock({ toolCalls }: { toolCalls: ToolCallEntry[] }) {
               <span className="text-[11.5px] font-semibold font-mono" style={{ color: 'var(--gold)' }}>{tc.name}</span>
               <span className="text-xs text-muted font-mono truncate max-w-[250px]">{tc.args}</span>
             </div>
-            <pre className="text-[11px] text-muted font-mono leading-[1.5] overflow-x-auto whitespace-pre-wrap">{tc.input ? JSON.stringify(tc.input, null, 2) : ''}</pre>
+            <pre className="text-[11px] text-muted font-mono leading-[1.5] overflow-x-auto whitespace-pre-wrap">{tc.input ? stringifyInput(tc.input) : ''}</pre>
           </div>
         ))}
       </div>
@@ -185,6 +185,23 @@ function ReminderBlock({ message, time }: { message: string; time: string }) {
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function stringifyInput(input: Record<string, unknown>): string {
+  if (!input || Object.keys(input).length === 0) return '';
+  const entries = Object.entries(input);
+  if (entries.length === 1) {
+    const entry = entries[0];
+    if (!entry) return '';
+    const k = entry[0];
+    const v = entry[1];
+    const val = typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v);
+    return `${k}: ${val}`;
+  }
+  return entries.map(([k, v]) => {
+    const val = typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v);
+    return `${k}: ${val}`;
+  }).join('\n');
 }
 
 function escapeHtml(text: string): string {
@@ -306,7 +323,7 @@ function ApprovalBlock({ toolCallId, name, input, decision, events, rpc, mode }:
         <div className="bg-s1 rounded-xl border border-b1 p-4 mb-6 max-h-[220px] overflow-y-auto scrollbar-thin">
           <div className="text-[9px] text-muted2 font-mono uppercase tracking-wider mb-1.5 select-none">Arguments</div>
           <pre className="font-mono text-[11.5px] text-text overflow-x-auto m-0 leading-normal">
-            {JSON.stringify(input, null, 2)}
+            {stringifyInput(input)}
           </pre>
         </div>
 
@@ -346,7 +363,8 @@ type MessageEntry =
   | { type: 'tool-group'; content: ''; time: ''; toolCalls: ToolCallEntry[] }
   | { type: 'heartbeat-brief'; content: string; time: string; event: any }
   | { type: 'approval-request'; toolCallId: string; name: string; input: Record<string, unknown>; decision: string; mode?: string; time: string }
-  | { type: 'reminder-fired'; message: string; taskId: string; time: string };
+  | { type: 'reminder-fired'; message: string; taskId: string; time: string }
+  | { type: 'error'; content: string; time: string };
 
 function eventToMessage(event: WsEvent): MessageEntry | null {
   switch (event.type) {
@@ -410,30 +428,38 @@ function eventToMessage(event: WsEvent): MessageEntry | null {
         content: (event as any).message || '',
         time: formatTime(event.timestamp),
       };
+    case 'error':
+      return {
+        type: 'error',
+        content: (event as any).message || `An error occurred (code: ${(event as any).code || 'unknown'})`,
+        time: formatTime(event.timestamp),
+      };
     default:
       return null;
   }
 }
 
 export default function ChatView({ cmdResult, rpc, className, activeSessionId, onCreateSession, onClearCmdResult, events, addLiveEvent, totalTokens, contextTokens, costUsd }: Props) {
-  const { ws, connected } = useApi();
+  const { ws, connected, connectionStatus } = useApi();
   const [typing, setTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [localCmd, setLocalCmd] = useState('');
   const chatRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (connected) {
-      setError(prev => prev === 'Disconnected from daemon. Check that the daemon is running.' ? null : prev);
+    if (connectionStatus === 'connected') {
+      setError(null);
+    } else if (connectionStatus === 'reconnecting') {
+      // Actively trying to reconnect — no error banner
+      setError(null);
     } else {
-      // Delay showing the disconnection error slightly to avoid a visual flash
-      // on initial connect/handshake which typically completes in <200ms.
+      // Truly disconnected (no reconnect pending) — show after delay
       const timer = setTimeout(() => {
         setError('Disconnected from daemon. Check that the daemon is running.');
-      }, 1000);
+      }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [connected]);
+  }, [connected, connectionStatus]);
 
   // The server returns the new sessionId immediately via rpc.sessionSend.
   // We no longer listen to global user-prompt events here because it causes
@@ -847,7 +873,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
 
             if (msg.type === 'user') {
                return (
-                 <div key={i} className="flex flex-row-reverse px-5 py-0.5 transition-colors duration-100">
+                 <div key={i} className="flex flex-row-reverse px-5 py-0.5 animate-fadeIn transition-colors duration-100">
                    <div className="flex flex-1 flex-col items-end min-w-0">
                      <div className="flex flex-row-reverse items-baseline gap-2 mb-1">
                        <span className="text-xs font-semibold" style={{ color: 'var(--cream)' }}>you</span>
@@ -893,8 +919,24 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
                return <ReminderBlock key={i} message={msg.message} time={msg.time} />;
              }
 
+             if (msg.type === 'error') {
+               return (
+                 <div key={i} className="px-5 py-0.5 animate-fadeIn transition-colors duration-100">
+                   <div className="flex items-baseline gap-2 mb-1">
+                     <span className="text-xs font-semibold" style={{ color: 'var(--red)' }}>error</span>
+                     <span className="text-xs text-muted font-mono">{msg.time}</span>
+                   </div>
+                   <div
+                     className="text-[13px] text-red leading-[1.65] rounded-lg px-3 py-2 bg-red/5 border border-red/10"
+                   >
+                     {msg.content}
+                   </div>
+                 </div>
+               );
+             }
+
              return (
-               <div key={i} className="px-5 py-0.5 transition-colors duration-100">
+               <div key={i} className="px-5 py-0.5 animate-fadeIn transition-colors duration-100">
                  <div className="flex items-baseline gap-2 mb-1">
                    <span className="text-xs font-semibold" style={{ color: 'var(--gold)' }}>curie-agent</span>
                    <span className="text-xs text-muted font-mono">{msg.time}</span>

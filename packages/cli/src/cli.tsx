@@ -743,8 +743,8 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
 
     ws.on('cron-task-fired', (event: WsEvent) => {
       const msg = {
-        role: event.taskType === 'task' ? 'task' as const : 'system' as const,
-        title: event.taskType === 'task' ? String(event.message || '') : undefined,
+        role: event.taskType === 'auto' ? 'task' as const : 'system' as const,
+        title: event.taskType === 'auto' ? String(event.message || '') : undefined,
         content: String(event.message || ''),
       };
       if (busyRef.current) {
@@ -1007,6 +1007,51 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
             // Legacy: treat as direct API key
             settingsMgrRef.current.setProviderKey('anthropic', 'api_key', args.trim());
             setMessages(prev => [...prev, { role: 'system', content: `API key configured for anthropic.` }]);
+          }
+          break;
+        }
+
+        case 'todo': {
+          try {
+            await rpcRef.current.sessionSend(sessionIdRef.current, `/todo ${args}`, 'tui');
+          } catch {
+            setMessages(prev => [...prev, { role: 'system', content: `Todo command failed.` }]);
+          }
+          break;
+        }
+
+        case 'task': {
+          try {
+            await rpcRef.current.sessionSend(sessionIdRef.current, `/task ${args}`, 'tui');
+          } catch {
+            setMessages(prev => [...prev, { role: 'system', content: `Task command failed.` }]);
+          }
+          break;
+        }
+
+        case 'todo': {
+          try {
+            await rpcRef.current.sessionSend(sessionIdRef.current, `/todo ${args}`, 'tui');
+          } catch {
+            setMessages(prev => [...prev, { role: 'system', content: `Todo command failed.` }]);
+          }
+          break;
+        }
+
+        case 'task': {
+          try {
+            await rpcRef.current.sessionSend(sessionIdRef.current, `/task ${args}`, 'tui');
+          } catch {
+            setMessages(prev => [...prev, { role: 'system', content: `Task command failed.` }]);
+          }
+          break;
+        }
+
+        case 'remind': {
+          try {
+            await rpcRef.current.sessionSend(sessionIdRef.current, `/remind ${args}`, 'tui');
+          } catch {
+            setMessages(prev => [...prev, { role: 'system', content: `Reminder command failed.` }]);
           }
           break;
         }

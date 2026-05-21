@@ -16,7 +16,7 @@
 - *(Pending)*
 
 ## 🚀 Active Projects (Macro View)
-*AI Note: Maintain a high-level summary of ongoing projects. For granular task tracking, use `TODO.md`.*
+*AI Note: Maintain a high-level summary of ongoing projects. Use the `Todo` tool for granular task tracking.*
 - *(Pending)*
 
 ## 📜 Shared History & Milestones

@@ -2,10 +2,13 @@ import { createContext, useContext, useState, useEffect, type ReactNode } from '
 import { JsonRpcClient } from './jsonrpc-client.js';
 import { WsClient } from './ws-client.js';
 
+type ConnectionStatus = 'connected' | 'reconnecting' | 'disconnected';
+
 interface ApiContext {
   rpc: JsonRpcClient | null;
   ws: WsClient | null;
   connected: boolean;
+  connectionStatus: ConnectionStatus;
   token: string | null;
   setToken: (token: string) => void;
 }
@@ -14,6 +17,7 @@ const ApiContext = createContext<ApiContext>({
   rpc: null,
   ws: null,
   connected: false,
+  connectionStatus: 'disconnected',
   token: null,
   setToken: () => {},
 });
@@ -32,7 +36,8 @@ export function ApiProvider({ children }: ApiProviderProps) {
     rpc: JsonRpcClient | null;
     ws: WsClient | null;
     connected: boolean;
-  }>({ rpc: null, ws: null, connected: false });
+    connectionStatus: ConnectionStatus;
+  }>({ rpc: null, ws: null, connected: false, connectionStatus: 'disconnected' });
 
   // Initial load: parse URL or fallback to localStorage
   useEffect(() => {
@@ -52,7 +57,7 @@ export function ApiProvider({ children }: ApiProviderProps) {
 
   useEffect(() => {
     if (!token) {
-      setContextState({ rpc: null, ws: null, connected: false });
+      setContextState({ rpc: null, ws: null, connected: false, connectionStatus: 'disconnected' });
       return;
     }
 
@@ -60,16 +65,30 @@ export function ApiProvider({ children }: ApiProviderProps) {
     const rpc = new JsonRpcClient(baseUrl, token);
     const ws = new WsClient(baseUrl, token);
 
-    setContextState({ rpc, ws, connected: false });
+    setContextState({ rpc, ws, connected: false, connectionStatus: 'reconnecting' });
 
     ws.connect();
 
-    const unsubscribe = ws.on('connection-status', (evt) => {
-      setContextState(prev => ({ ...prev, connected: !!(evt as any).connected }));
-    });
+  const unsubscribe = ws.on('connection-status', (evt) => {
+    const connected = !!(evt as any).connected;
+    let status: ConnectionStatus;
+    if (connected) {
+      status = 'connected';
+    } else if (ws.isReconnecting()) {
+      status = 'reconnecting';
+    } else {
+      status = 'disconnected';
+    }
+    setContextState(prev => ({ ...prev, connected, connectionStatus: status }));
+  });
 
     const checkInterval = setInterval(() => {
-      setContextState(prev => ({ ...prev, connected: ws.isConnected() }));
+      const isConnected = ws.isConnected();
+      setContextState(prev => ({
+        ...prev,
+        connected: isConnected,
+        connectionStatus: isConnected ? 'connected' : prev.connectionStatus === 'reconnecting' ? 'reconnecting' : 'disconnected',
+      }));
     }, 2000);
 
     return () => {
@@ -83,6 +102,7 @@ export function ApiProvider({ children }: ApiProviderProps) {
     rpc: contextState.rpc,
     ws: contextState.ws,
     connected: contextState.connected,
+    connectionStatus: contextState.connectionStatus,
     token,
     setToken,
   };

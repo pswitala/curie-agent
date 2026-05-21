@@ -86,6 +86,13 @@ export type Message =
 // event so pressing Esc closes the stream immediately instead of waiting for
 // the next SSE event from the server.
 
+// Brief delay to let WebSocket events flush to clients between approval requests.
+const approvalThrottleMs = 50;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class TurnLoop {
   private bus: EventBus;
   private store: SessionStore;
@@ -472,6 +479,9 @@ export class TurnLoop {
             mode: this.permission.mode,
             timestamp: Date.now(),
           });
+
+          // Yield briefly so WebSocket events flush to clients before processing the next tool.
+          await sleep(approvalThrottleMs);
 
           if (permResult.decision === 'deny') {
             emit({ type: 'approval-decision', id: session.id, toolCallId: tc.id, decision: 'deny', timestamp: Date.now() });

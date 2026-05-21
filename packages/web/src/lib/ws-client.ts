@@ -11,6 +11,7 @@ export class WsClient {
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 1000;
+  private _reconnecting = false;
   private handlers: Map<string, Set<EventHandler>> = new Map();
   private connected = false;
 
@@ -27,6 +28,7 @@ export class WsClient {
 
     this.ws.onopen = () => {
       this.connected = true;
+      this._reconnecting = false;
       this.reconnectDelay = 1000;
       this.dispatch({ type: 'connection-status', id: 'status', timestamp: Date.now(), connected: true });
     };
@@ -42,6 +44,7 @@ export class WsClient {
 
     this.ws.onclose = () => {
       this.connected = false;
+      this._reconnecting = true;
       this.ws = null;
       this.dispatch({ type: 'connection-status', id: 'status', timestamp: Date.now(), connected: false });
       this.scheduleReconnect();
@@ -62,11 +65,16 @@ export class WsClient {
       this.ws.close();
       this.ws = null;
     }
+    this._reconnecting = false;
     this.connected = false;
   }
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  isReconnecting(): boolean {
+    return this._reconnecting;
   }
 
   on(eventType: string, handler: EventHandler): () => void {

@@ -1,0 +1,193 @@
+{
+  "$schema": "todo.schema.json",
+  "version": 1,
+  "tasks": [
+    {
+      "id": "b39b7bcb-9a9f-4e94-86ff-d97a6c752bf8",
+      "title": "Test task",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 0,
+      "created_at": "2026-05-21T05:42:57.953Z",
+      "completed_at": null
+    },
+    {
+      "id": "22b19946-a689-47e5-9197-ff34969861b8",
+      "title": "High priority",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 1,
+      "created_at": "2026-05-21T05:42:57.959Z",
+      "completed_at": null
+    },
+    {
+      "id": "d66184ab-8a91-4ebf-b627-aec96d08c025",
+      "title": "Low priority",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 2,
+      "created_at": "2026-05-21T05:42:57.959Z",
+      "completed_at": null
+    },
+    {
+      "id": "d54a0de3-d503-4685-8b22-a64c62eefc67",
+      "title": "In progress",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 3,
+      "created_at": "2026-05-21T05:42:57.959Z",
+      "completed_at": null
+    },
+    {
+      "id": "928706a0-7926-4dc2-89cd-2151df676ad4",
+      "title": "Original",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 4,
+      "created_at": "2026-05-21T05:42:57.960Z",
+      "completed_at": null
+    },
+    {
+      "id": "1433a04e-3e4f-4cdc-af98-44697474cdcb",
+      "title": "Task",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 5,
+      "created_at": "2026-05-21T05:42:57.961Z",
+      "completed_at": null
+    },
+    {
+      "id": "f3f5990e-d53b-4291-ae03-4bf31dbf0adc",
+      "title": "Task",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 6,
+      "created_at": "2026-05-21T05:42:57.962Z",
+      "completed_at": null
+    },
+    {
+      "id": "cfd9d686-b77a-494d-9615-f533d9c92e8b",
+      "title": "Task",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 7,
+      "created_at": "2026-05-21T05:42:57.963Z",
+      "completed_at": null
+    },
+    {
+      "id": "9df84932-425c-4755-b6d8-9e0aca683be8",
+      "title": "Task",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 8,
+      "created_at": "2026-05-21T05:42:57.964Z",
+      "completed_at": null
+    },
+    {
+      "id": "6e0e81f0-a24d-4445-94fb-df3f0f3e60ba",
+      "title": "First",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 9,
+      "created_at": "2026-05-21T05:42:57.964Z",
+      "completed_at": null
+    },
+    {
+      "id": "fd5cf98e-20e1-4356-a02d-7f77f8c173f6",
+      "title": "Second",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 10,
+      "created_at": "2026-05-21T05:42:57.965Z",
+      "completed_at": null
+    },
+    {
+      "id": "f58b0010-18a4-481c-abb4-684e63c2c308",
+      "title": "Third",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 11,
+      "created_at": "2026-05-21T05:42:57.965Z",
+      "completed_at": null
+    },
+    {
+      "id": "7768edb1-76c3-4e6b-a39d-a1e6df3a84d0",
+      "title": "A",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 12,
+      "created_at": "2026-05-21T05:42:57.967Z",
+      "completed_at": null
+    },
+    {
+      "id": "ed303524-f75e-44f0-a48a-6d18e25c59c8",
+      "title": "B",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 13,
+      "created_at": "2026-05-21T05:42:57.967Z",
+      "completed_at": null
+    },
+    {
+      "id": "0cbd8d61-3233-419d-af02-39eaf7b4aff1",
+      "title": "C",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 14,
+      "created_at": "2026-05-21T05:42:57.967Z",
+      "completed_at": null
+    },
+    {
+      "id": "c9b81d22-69fe-44f6-bc89-c563f7101d67",
+      "title": "First",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 15,
+      "created_at": "2026-05-21T05:42:57.968Z",
+      "completed_at": null
+    },
+    {
+      "id": "f5ca3c47-db9e-4522-a2f0-fc4866a5f719",
+      "title": "Second",
+      "description": "",
+      "status": "todo",
+      "priority": "medium",
+      "tags": [],
+      "order": 16,
+      "created_at": "2026-05-21T05:42:57.968Z",
+      "completed_at": null
+    }
+  ]
+}

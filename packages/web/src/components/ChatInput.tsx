@@ -76,7 +76,7 @@ export default function ChatInput({ onSend, cmdInput, onClearCmdInput, totalToke
         <div className="flex items-center gap-2 px-3 py-1.5 text-[10.5px]">
           <span className="w-[6px] h-[6px] rounded-full shrink-0" style={{ background: currentProvider ? 'var(--green)' : 'var(--muted2)', opacity: currentProvider ? 1 : 0.3 }} />
           <span style={{ color: 'var(--gold)', opacity: 0.8 }}>{activeProvider.name}</span>
-          <span className="text-muted">·</span>
+          <span className="text-muted"> · </span>
           <span className="text-muted">{model || 'no model set'}</span>
         </div>
 
@@ -97,9 +97,9 @@ export default function ChatInput({ onSend, cmdInput, onClearCmdInput, totalToke
           {totalTokens !== undefined ? (
             <>
               <span className="text-[10px] text-muted font-mono" style={{ opacity: 0.6 }}>{formatTokenCount(totalTokens)} tokens</span>
-              <span className="opacity-30 mx-1">|</span>
+              <span className="opacity-30 mx-1"> · </span>
               <span className="text-[10px] text-muted font-mono" style={{ opacity: 0.6 }}>ctx {formatTokenCount(contextTokens ?? 0)}</span>
-              <span className="opacity-30 mx-1">|</span>
+              <span className="opacity-30 mx-1"> · </span>
               <span className="text-[10px] text-muted font-mono" style={{ color: 'var(--green)', opacity: 0.6 }}>${(costUsd ?? 0).toFixed(4)}</span>
               <div className="flex-1" />
             </>

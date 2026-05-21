@@ -2,6 +2,23 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { ThemeColors } from '../../render/src/themes.js';
 
+function stringifyInput(input: Record<string, unknown>): string {
+  if (!input || Object.keys(input).length === 0) return '';
+  const entries = Object.entries(input);
+  if (entries.length === 1) {
+    const entry = entries[0];
+    if (!entry) return '';
+    const k = entry[0];
+    const v = entry[1];
+    const val = typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v);
+    return `${k}: ${val}`;
+  }
+  return entries.map(([k, v]) => {
+    const val = typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v);
+    return `${k}: ${val}`;
+  }).join('\n');
+}
+
 interface ApprovalPickerProps {
   toolName: string;
   input: Record<string, unknown>;
@@ -18,7 +35,7 @@ export function ApprovalPicker({ toolName, input, reason, selected, theme }: App
   const bg = theme?.background || '#1a1b26';
   const warning = theme?.warning || '#e0af68';
 
-  const preview = JSON.stringify(input);
+  const preview = stringifyInput(input);
   const truncated = preview.length > 80 ? preview.slice(0, 77) + '…' : preview;
 
   return (

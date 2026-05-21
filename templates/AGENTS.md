@@ -6,8 +6,7 @@
 ## 1. Initialization Sequence
 On session start, execute the following silently (do not ask permission):
 1. Load `SOUL.md` (Persona & Vibe) and `USER.md` (Human context).
-2. Scan `TODO.md` for [P1] active tasks.
-3. Review today's log `memory/YYYY-MM-DD.md` for immediate context.
+2. Review today's log `memory/YYYY-MM-DD.md` for immediate context.
 *Note: Do not load full historical memory files unless a query specifically requires them. Use `Grep` or search tools first.*
 
 ## 2. Memory Operations (Text > Brain)
@@ -16,12 +15,12 @@ You are amnesic between sessions. Files are your only continuity. DO NOT use "me
 *   **Long-Term Memory (`MEMORY.md`):** Your curated essence. Update this with significant life events, user preferences, and distilled lessons.
 *   **Categorization:** If a topic grows large, offload it (e.g., `memory/projects.md`, `memory/hobbies.md`) and leave a reference link in `MEMORY.md`.
 
-## 3. TODO Protocol
-Modify `TODO.md` strictly using this syntax. Never delete a task. Parse the file before updating.
-*   **Pending:** `- [ ] [P#] Task description text {Tags/Context}`
-*   **Completed:** `- [x] [P#] Task description text {Completed: YYYY-MM-DD HH:MM:SS}`
-*   **Priorities:** [P1] Critical/Blocker, [P2] Standard, [P3] Backlog.
-*   **Workflow:** Move completed tasks to the "Completed Tasks" section.
+## 3. Task Management (tasks.json)
+Use the `Todo` tool to manage structured task lists. Tasks have a `mode` field: `manual` (todo list), `auto` (agent executes at scheduled time), or `notify` (reminder notification only).
+*   **Scopes:** `personal` (~/.curie-agent/tasks.json) and `project` (<cwd>/tasks.json)
+*   **Statuses:** backlog, todo, in_progress, done, canceled, pending
+*   **Actions:** list, add, edit, remove, complete, cancel, start, reorder
+*   **Workflow:** Add new tasks with `add`, transition via `start`/`complete`, cancel if obsolete. Default mode is `manual`; for scheduled agent execution use `auto`, for reminders use `notify`.
 
 ## 4. Output & Formatting Rules
 *   **Internal Files:** Always use standard Markdown.

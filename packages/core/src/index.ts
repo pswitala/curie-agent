@@ -9,7 +9,13 @@ export type { TurnLoopConfig, TurnLoopResult, ReasoningEffort, Message, Assistan
 export { SettingsManager } from './settings.js';
 export type { CurieSettings } from './settings.js';
 export { DEFAULT_SETTINGS } from './settings.js';
-export { CronManager } from './cron-manager.js';
+export { TaskManager } from './task-manager.js';
+export type { UnifiedTask, TasksFile, ScheduleType, TaskMode, TaskStatus, TaskPriority, TaskScope } from './unified-task.js';
+export { scheduleLabel, createTaskDefaults, generateTaskId, taskTimestamp } from './unified-task.js';
+export { migrateTasks } from './task-migration.js';
+export { readTaskSummary } from './task-summary.js';
+
+
 export { parseReminderTime } from './reminder-parser.js';
 export { TelegramGateway } from './telegram-gateway.js';
 export type { TelegramMessageContext } from './telegram-gateway.js';
@@ -19,8 +25,7 @@ export { ChannelRouter } from './channel-router.js';
 export type { RouteResult } from './channel-router.js';
 export { HeartbeatExecutor } from './heartbeat-executor.js';
 export type { HeartbeatExecutorConfig, HeartbeatResult } from './heartbeat-executor.js';
-export type { ScheduleType, CronTask, CronTaskType, CronTaskStatus } from './cron-manager.js';
-export { pickNextSchedule, scheduleLabel, computeNextFire } from './cron-manager.js';
+export { pickNextSchedule, computeNextFire } from './unified-task.js';
 export { HeartbeatDelivery } from './heartbeat-delivery.js';
 export type { HeartbeatDeliveryConfig } from './heartbeat-delivery.js';
 export { TaskExecutor } from './task-executor.js';

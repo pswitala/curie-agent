@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
 import { BatchTurnLoop } from './heartbeat-executor.js';
+import { readTaskSummary } from './task-summary.js';
 import type { Tool, ReasoningEffort, ProviderStream } from './turn-loop.js';
 import type { CurieSettings } from './settings.js';
 
@@ -69,7 +70,28 @@ export class TaskExecutor {
     readIf('MEMORY.md', this.curieDir);
     readIf('USER.md', this.curieDir);
     readIf('AGENTS.md', this.curieDir);
-    readIf('TODO.md', this.config.cwd);
+
+    // Read project tasks/todo file (if exists) and format as task list summary
+    const projectTaskPath = join(this.config.cwd, 'tasks.json');
+    if (!existsSync(projectTaskPath)) {
+      const projectLegacyPath = join(this.config.cwd, 'todo.json');
+      if (existsSync(projectLegacyPath)) {
+        sections.push(`=== Project Tasks ===\n` + readTaskSummary(projectLegacyPath));
+      }
+    } else {
+      sections.push(`=== Project Tasks ===\n` + readTaskSummary(projectTaskPath));
+    }
+
+    // Read personal tasks/todo file from ~/.curie-agent/
+    const personalTaskPath = join(this.curieDir, 'tasks.json');
+    if (!existsSync(personalTaskPath)) {
+      const personalLegacyPath = join(this.curieDir, 'todo.json');
+      if (existsSync(personalLegacyPath)) {
+        sections.push(`=== Personal Tasks ===\n` + readTaskSummary(personalLegacyPath));
+      }
+    } else {
+      sections.push(`=== Personal Tasks ===\n` + readTaskSummary(personalTaskPath));
+    }
 
     const memoryDir = join(this.curieDir, 'memory');
     if (existsSync(memoryDir)) {
