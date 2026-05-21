@@ -99,6 +99,7 @@ export class TaskManager {
     tags?: string[];
     scheduled_at?: number;
     frequency?: { type: ScheduleType; value: string } | null;
+    metadata?: Record<string, unknown>;
   }): UnifiedTask {
     const defaults = createTaskDefaults(options.mode, options.scope);
     const task: UnifiedTask = {
@@ -112,6 +113,7 @@ export class TaskManager {
       scheduled_at: options.scheduled_at,
       frequency: options.frequency ?? null,
       scope: options.scope,
+      metadata: options.metadata,
       order: this.data.tasks.length,
       created_at: taskTimestamp(),
       completed_at: undefined,

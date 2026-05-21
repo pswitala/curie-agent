@@ -1,11 +1,12 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
 import type {
   EventBus, Event, SessionStore, SettingsManager,
   CurieSettings, ProviderStream, Tool,
 } from '@curie-agent/core';
-import { TaskManager, TelegramGateway, HeartbeatExecutor, HeartbeatDelivery, TaskExecutor, SubagentExecutor, computeNextFire, migrateTasks } from '@curie-agent/core';
-import type { ScheduleType, UnifiedTask } from '@curie-agent/core';
+import { TaskManager, TelegramGateway, HeartbeatExecutor, HeartbeatDelivery, SubagentExecutor, computeNextFire, migrateTasks } from '@curie-agent/core';
+import type { ScheduleType, UnifiedTask, SubagentHandle } from '@curie-agent/core';
 import type { ProviderFactory } from './server.js';
 import { ApprovalTracker } from './approval-tracker.js';
 import { ChannelManager } from './channel-manager.js';
@@ -45,6 +46,10 @@ export class DaemonApp {
 
   private checkerTimer: ReturnType<typeof setInterval> | null = null;
   private unsubscribes: Array<() => void> = [];
+  /** Maps task ID → subagent agentId for auto-mode tasks. */
+  private taskIdAgentMap = new Map<string, string>();
+  /** Reverse map: subagent agentId → task ID. */
+  private agentIdTaskMap = new Map<string, string>();
 
   constructor(
     private eventBus: EventBus,
@@ -125,6 +130,45 @@ export class DaemonApp {
 
     // Start cron checker
     this.startCronChecker();
+
+    // Subscribe to subagent lifecycle events for auto-mode task status updates
+    this.unsubscribes.push(
+      this.eventBus.subscribe('agent-done' as any, (event: Event) => {
+        const meta = (event as any).metadata as Record<string, unknown> | undefined;
+        if (meta?.taskId && meta?.taskType === 'auto') {
+          const taskId = meta.taskId as string;
+          this.taskManager.load();
+          const task = this.taskManager.findTask(taskId);
+          if (task) {
+            // Clear the map entries
+            this.taskIdAgentMap.delete(taskId);
+            const agentId = this.agentIdTaskMap.get(taskId);
+            if (agentId) this.agentIdTaskMap.delete(agentId);
+            // Update task status; store result text if available
+            const text = (event as any).text as string | undefined;
+            this.taskManager.updateTaskStatus(taskId, 'completed');
+            if (task.metadata) {
+              (task.metadata as Record<string, unknown>).resultText = text;
+              this.taskManager.save();
+            }
+          }
+        }
+      }),
+    );
+
+    this.unsubscribes.push(
+      this.eventBus.subscribe('agent-error' as any, (event: Event) => {
+        const meta = (event as any).metadata as Record<string, unknown> | undefined;
+        if (meta?.taskId && meta?.taskType === 'auto') {
+          const taskId = meta.taskId as string;
+          this.taskManager.load();
+          this.taskManager.updateTaskStatus(taskId, 'failed');
+          this.taskIdAgentMap.delete(taskId);
+          const agentId = this.agentIdTaskMap.get(taskId);
+          if (agentId) this.agentIdTaskMap.delete(agentId);
+        }
+      }),
+    );
 
     // Emit daemon-ready event
     this.eventBus.emit({
@@ -351,33 +395,96 @@ export class DaemonApp {
       const settings = this.settingsManager.get();
       const provider = this.createProvider(settings);
 
-      this.taskManager.updateTaskStatus(task.id, 'in_progress');
+      // Build prompt with context from task title + gathered files
+      const prompt = this.buildAutoTaskPrompt(task.title);
 
-      const executor = new TaskExecutor({
+      this.taskManager.updateTaskStatus(task.id, 'executing');
+
+      const metadata = { taskId: task.id, taskType: 'auto' };
+
+      // Parse optional spawn overrides from task metadata (set via WebUI schedule form)
+      const spawnOverrides = task.metadata as Record<string, unknown> | undefined;
+      const effectiveModel = (spawnOverrides?.model as string) || settings.model_override || settings.model;
+      const effectiveEffort = (spawnOverrides?.effort as 'low' | 'medium' | 'high' | 'max' | 'auto') || settings.effort;
+
+      const handle: SubagentHandle = await this.subagentExecutor.spawn({
         provider,
-        model: settings.model_override || settings.model,
+        model: effectiveModel,
         tools: this.tools,
         cwd: join(homedir(), '.curie-agent'),
         settings,
-        instruction: task.title,
+        prompt,
         system: this.systemPrompt,
-      });
+        mode: 'yolo', // unsupervised — tasks always run with full autonomy
+        effort: effectiveEffort,
+        type: 'subagent',
+        metadata,
+      } as any);
 
-      const result = await executor.execute();
-      this.taskManager.updateTaskStatus(task.id, 'done');
-
-      this.eventBus.emit({
-        type: 'cron-task-fired',
-        id: crypto.randomUUID(),
-        taskId: task.id,
-        taskType: 'auto',
-        message: `Task completed: ${task.title} (${result.toolCalls} tool calls)`,
-        timestamp: Date.now(),
-      } as unknown as Event);
+      // Track linkage for completion/cancel sync
+      this.taskIdAgentMap.set(task.id, handle.agentId);
+      this.agentIdTaskMap.set(handle.agentId, task.id);
     } catch (err) {
       this.taskManager.updateTaskStatus(task.id, 'canceled');
-      console.error('[unified task] Execution failed:', err);
+      console.error('[auto task] spawn failed:', err);
     }
+  }
+
+   /** Build prompt for an auto-mode task — gathers context files + current time. */
+  private buildAutoTaskPrompt(instruction: string): string {
+    const sections: string[] = [];
+    const readIf = (dir: string, name: string) => {
+      const path = join(dir, name);
+      if (existsSync(path)) {
+        sections.push(`=== ${name} ===\n` + readFileSync(path, 'utf-8'));
+      }
+    };
+
+    const curieDir = join(homedir(), '.curie-agent');
+    readIf(curieDir, 'MEMORY.md');
+    readIf(curieDir, 'USER.md');
+    readIf(curieDir, 'AGENTS.md');
+
+    // Read personal tasks/todo file (unified format or legacy todo.json)
+    const taskPath = join(curieDir, 'tasks.json');
+    if (!existsSync(taskPath)) {
+      const todoPath = join(curieDir, 'todo.json');
+      if (existsSync(todoPath)) {
+        const raw = readFileSync(todoPath, 'utf-8');
+        try {
+          const parsed = JSON.parse(raw) as { tasks?: Array<{ id: string; title: string; status: string; priority?: string }> };
+          if (parsed.tasks?.length) {
+            sections.push('=== Tasks ===\n' + parsed.tasks.filter(t => t.status !== 'done').map(t => `  [${t.status}] ${t.title}`).join('\n'));
+          }
+        } catch { /* skip */ }
+      }
+    } else {
+      const raw = readFileSync(taskPath, 'utf-8');
+      try {
+        const parsed = JSON.parse(raw) as { tasks?: Array<{ id: string; title: string; status: string; priority?: string }> };
+        if (parsed.tasks?.length) {
+          sections.push('=== Tasks ===\n' + parsed.tasks.filter(t => t.status !== 'done').map(t => `  [${t.status}] ${t.title}`).join('\n'));
+        }
+      } catch { /* skip */ }
+    }
+
+    const now = new Date().toLocaleString('en-US', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    });
+
+    return [
+      '=== TASK INSTRUCTION ===',
+      instruction,
+      '',
+      '=== GATHERED CONTEXT ===',
+      sections.length ? sections.join('\n\n') : '(no context files found)',
+      '',
+      '=== CURRENT TIME ===',
+      now,
+      '',
+      'Execute the task instruction above. Use available tools to gather data, browse websites, read files, and produce results. Deliver a clear summary of what you accomplished.',
+    ].join('\n');
   }
 
   /** Execute a heartbeat from unified TaskManager (auto mode + frequency). */

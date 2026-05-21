@@ -63,6 +63,9 @@ export interface UnifiedTask {
   /** Execution result summary (auto mode only, after LLM completes). */
   result?: string;
 
+  /** Spawn overrides stored when scheduling from WebUI (provider, model, effort, etc.). */
+  metadata?: Record<string, unknown>;
+
   // Timing
   /** When the task should fire (epoch ms). Required for auto/notify. Optional for manual. */
   scheduled_at?: number;

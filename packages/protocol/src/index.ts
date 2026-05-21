@@ -74,6 +74,7 @@ export {
   SubagentCancelSchema,
   SubagentStatsSchema,
   SubagentSendSchema,
+  TaskScheduleRequestSchema,
 } from './methods.js';
 
 export {

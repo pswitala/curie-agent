@@ -13,11 +13,20 @@ export default function SubagentsView({ rpc, sessionId, className }: Props) {
   const { ws } = useApi();
   const { agents, running, completed, failed, spawn, cancel, send } = useSubagents();
   const [spawnOpen, setSpawnOpen] = useState(false);
+  const [showSchedule, setShowSchedule] = useState(false);
   const [spawnPrompt, setSpawnPrompt] = useState('');
   const [spawnMode, setSpawnMode] = useState<string>('auto');
   const [spawnEffort, setSpawnEffort] = useState<string>('auto');
   const [spawnProvider, setSpawnProvider] = useState<string>('');
   const [spawnModel, setSpawnModel] = useState('');
+  // Schedule form state
+  const [schedPrompt, setSchedPrompt] = useState('');
+  const [schedDate, setSchedDate] = useState('');
+  const [schedTime, setSchedTime] = useState('');
+  const [schedProvider, setSchedProvider] = useState('');
+  const [schedModel, setSchedModel] = useState('');
+  const [schedEffort, setSchedEffort] = useState<'low' | 'medium' | 'high' | 'max' | 'auto'>('auto');
+  const [schedError, setSchedError] = useState<string>('');
   const [messageAgentId, setMessageAgentId] = useState('');
   const [messageText, setMessageText] = useState('');
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
@@ -48,6 +57,30 @@ export default function SubagentsView({ rpc, sessionId, className }: Props) {
     setSpawnProvider('');
   }, [spawnPrompt, spawnMode, spawnEffort, spawnProvider, spawnModel, sessionId, rpc, spawn]);
 
+  const handleSchedule = useCallback(async () => {
+    if (!rpc || !schedPrompt.trim() || !schedDate || !schedTime) {
+      setSchedError('Please fill in prompt and date/time');
+      return;
+    }
+    setSchedError('');
+    const scheduledAt = `${schedDate}T${schedTime}:00`;
+    try {
+      await rpc.taskSchedule({
+        instruction: schedPrompt.trim(),
+        scheduled_at: scheduledAt,
+        provider: schedProvider || undefined,
+        model: schedModel || undefined,
+        effort: schedEffort !== 'auto' ? schedEffort : undefined,
+      });
+      setSchedPrompt('');
+      setSchedDate('');
+      setSchedTime('');
+      setShowSchedule(false);
+    } catch (err) {
+      setSchedError(err instanceof Error ? err.message : 'Failed to schedule task');
+    }
+  }, [schedPrompt, schedDate, schedTime, schedProvider, schedModel, schedEffort, rpc]);
+
   const handleSend = useCallback(async () => {
     if (!messageAgentId || !messageText.trim()) return;
     await send(messageAgentId, messageText.trim());
@@ -72,12 +105,20 @@ export default function SubagentsView({ rpc, sessionId, className }: Props) {
           <h2 className="text-base font-semibold text-fg tracking-tight">Agents</h2>
           <p className="text-[11.5px] text-muted mt-0.5">Parallel subagent orchestration and monitoring.</p>
         </div>
-        <button
-          onClick={() => setSpawnOpen(!spawnOpen)}
-          className="self-start sm:self-auto text-xs font-medium bg-green/10 text-green border border-green/20 rounded-[8px] px-4 py-2 hover:bg-green/20 transition-colors duration-150 select-none"
-        >
-          {spawnOpen ? 'Cancel' : '+ Spawn Agent'}
-        </button>
+        <div className="flex gap-2 self-start sm:self-auto">
+          <button
+            onClick={() => setShowSchedule(!showSchedule)}
+            className={`text-xs font-medium border rounded-[8px] px-4 py-2 transition-colors select-none ${showSchedule ? 'bg-blue/15 text-blue border-blue/30' : 'bg-s2 text-muted border-b1 hover:text-fg'}`}
+          >
+            Schedule
+          </button>
+          <button
+            onClick={() => setSpawnOpen(!spawnOpen)}
+            className="text-xs font-medium bg-green/10 text-green border border-green/20 rounded-[8px] px-4 py-2 hover:bg-green/20 transition-colors duration-150 select-none"
+          >
+            {spawnOpen ? 'Cancel' : '+ Spawn Agent'}
+          </button>
+        </div>
       </div>
 
       {/* Spawn Panel */}
@@ -140,6 +181,71 @@ export default function SubagentsView({ rpc, sessionId, className }: Props) {
                 Spawn
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Schedule Panel */}
+      {showSchedule && (
+        <div className="bg-s1 border border-b1 rounded-[10px] p-5 mb-6 animate-in">
+          <div className="flex flex-col gap-3">
+            <textarea
+              className="bg-s2 border border-b1 rounded-[8px] p-3 text-[13px] text-fg font-mino resize-y min-h-[60px] focus:border-fg/30 outline-none transition-colors duration-150"
+              placeholder="What should the scheduled agent do?"
+              value={schedPrompt}
+              onChange={(e) => setSchedPrompt(e.target.value)}
+            />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <input
+                type="date"
+                className="bg-s2 border border-b1 rounded-[8px] px-3 py-2 text-xs text-fg outline-none"
+                value={schedDate}
+                onChange={(e) => setSchedDate(e.target.value)}
+              />
+              <input
+                type="time"
+                className="bg-s2 border border-b1 rounded-[8px] px-3 py-2 text-xs text-fg outline-none"
+                value={schedTime}
+                onChange={(e) => setSchedTime(e.target.value)}
+              />
+              <select
+                className="bg-s2 border border-b1 rounded-[8px] px-3 py-2 text-xs text-fg outline-none"
+                value={schedEffort}
+                onChange={(e) => setSchedEffort(e.target.value as typeof schedEffort)}
+              >
+                <option value="auto">Effort: auto</option>
+                <option value="low">Effort: low</option>
+                <option value="medium">Effort: medium</option>
+                <option value="high">Effort: high</option>
+                <option value="max">Effort: max</option>
+              </select>
+              <select
+                className="bg-s2 border border-b1 rounded-[8px] px-3 py-2 text-xs text-fg outline-none"
+                value={schedProvider}
+                onChange={(e) => setSchedProvider(e.target.value)}
+              >
+                <option value="">Provider: inherit</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="openai">OpenAI</option>
+                <option value="google">Google</option>
+                <option value="ollama">Ollama</option>
+                <option value="openrouter">OpenRouter</option>
+              </select>
+              <input
+                className="bg-s2 border border-b1 rounded-[8px] px-3 py-2 text-xs text-fg outline-none font-mono col-span-2 md:col-span-4"
+                placeholder="Model override (optional)"
+                value={schedModel}
+                onChange={(e) => setSchedModel(e.target.value)}
+              />
+            </div>
+            {schedError && <div className="text-[11px] text-red bg-red/5 rounded-[6px] p-2">{schedError}</div>}
+            <button
+              onClick={handleSchedule}
+              disabled={!schedPrompt.trim() || !schedDate || !schedTime}
+              className="bg-blue/20 text-blue border border-blue/30 rounded-[8px] px-4 py-2 text-xs font-medium hover:bg-blue/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed self-start"
+            >
+              Schedule Agent
+            </button>
           </div>
         </div>
       )}

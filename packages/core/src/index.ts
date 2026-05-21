@@ -28,8 +28,6 @@ export type { HeartbeatExecutorConfig, HeartbeatResult } from './heartbeat-execu
 export { pickNextSchedule, computeNextFire } from './unified-task.js';
 export { HeartbeatDelivery } from './heartbeat-delivery.js';
 export type { HeartbeatDeliveryConfig } from './heartbeat-delivery.js';
-export { TaskExecutor } from './task-executor.js';
-export type { TaskExecutorConfig, TaskResult } from './task-executor.js';
 export { BatchTurnLoop } from './heartbeat-executor.js';
 export type { BatchResult } from './heartbeat-executor.js';
 export { SubagentExecutor } from './subagent-executor.js';

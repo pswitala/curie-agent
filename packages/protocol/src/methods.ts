@@ -93,6 +93,13 @@ export const SubagentListSchema = z.object({
 export const SubagentCancelSchema = z.object({ agentId: z.string() });
 export const SubagentStatsSchema = z.object({ agentId: z.string() });
 export const SubagentSendSchema = z.object({ agentId: z.string(), message: z.string() });
+export const TaskScheduleRequestSchema = z.object({
+  instruction: z.string(),
+  scheduled_at: z.string(), // ISO datetime string
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  effort: z.enum(['low', 'medium', 'high', 'max', 'auto']).optional(),
+});
 
 export const Method = {
   SESSION_LIST: 'session.list',
@@ -127,6 +134,8 @@ export const Method = {
   CHANNEL_GET: 'channel.get',
   // MCP
   MCP_LIST: 'mcp.list',
+  // Task scheduling (from WebUI)
+  TASK_SCHEDULE: 'task.schedule',
   // Identity setup
   IDENTITY_SETUP: 'identity.setup',
   // Subagent management

@@ -170,4 +170,15 @@ export class JsonRpcClient {
   async subagentSend(agentId: string, message: string): Promise<unknown> {
     return this.request('subagent.send', { agentId, message });
   }
+
+  // Task scheduling (from WebUI)
+  async taskSchedule(params: {
+    instruction: string;
+    scheduled_at: string;
+    provider?: string;
+    model?: string;
+    effort?: 'low' | 'medium' | 'high' | 'max' | 'auto';
+  }): Promise<{ taskId: string; scheduledAt: string; instruction: string }> {
+    return this.request('task.schedule', params) as Promise<{ taskId: string; scheduledAt: string; instruction: string }>;
+  }
 }

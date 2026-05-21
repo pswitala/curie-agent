@@ -681,7 +681,18 @@ export class JsonRpcHandler {
             return { jsonrpc: '2.0', id, error: { code: -32603, message: 'Daemon not initialized' } };
           }
 
+          // Look up the linked task before cancelling (maps are private)
+          const handle = this.daemonApp.subagentExecutor.stats(agentId);
+          const taskId = handle?.taskId;
+
           const cancelled = this.daemonApp.subagentExecutor.cancel(agentId);
+
+          // Cancel linked auto-mode task if present
+          if (taskId && this.daemonApp.taskManager) {
+            this.daemonApp.taskManager.load();
+            this.daemonApp.taskManager.updateTaskStatus(taskId, 'canceled');
+          }
+
           result = { cancelled };
           break;
         }
@@ -712,7 +723,7 @@ export class JsonRpcHandler {
           break;
         }
 
-        case Method.SUBAGENT_SEND: {
+         case Method.SUBAGENT_SEND: {
           const p = params as Record<string, unknown>;
           const agentId = this.getStringParam(p, 'agentId');
           const message = this.getStringParam(p, 'message');
@@ -724,6 +735,47 @@ export class JsonRpcHandler {
 
           const sent = this.daemonApp.subagentExecutor.sendMessage(agentId, message);
           result = { sent };
+          break;
+        }
+
+        case Method.TASK_SCHEDULE: {
+          const p = params as Record<string, unknown>;
+          const instruction = this.getStringParam(p, 'instruction');
+          const scheduledAt = this.getStringParam(p, 'scheduled_at');
+          if (!instruction || !scheduledAt) return this.paramError('instruction, scheduled_at');
+
+          if (!this.daemonApp) {
+            return { jsonrpc: '2.0', id, error: { code: -32603, message: 'Daemon not initialized' } };
+          }
+
+          const scheduledAtMs = new Date(scheduledAt).getTime();
+          if (isNaN(scheduledAtMs)) return this.paramError('scheduled_at must be a valid ISO datetime');
+
+          // Build metadata with optional overrides
+          const provider = p.provider as string | undefined;
+          const model = p.model as string | undefined;
+          const effort = p.effort as string | undefined;
+          const metadata: Record<string, unknown> = {};
+          if (provider) metadata.provider = provider;
+          if (model) metadata.model = model;
+          if (effort) metadata.effort = effort;
+
+          this.daemonApp.taskManager.load();
+          const task = this.daemonApp.taskManager.create({
+            title: instruction,
+            mode: 'auto',
+            scope: 'personal',
+            scheduled_at: scheduledAtMs,
+            description: Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : '',
+            metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+          });
+
+          const timeStr = new Date(task.scheduled_at!).toLocaleString();
+          result = {
+            taskId: task.id,
+            scheduledAt: timeStr,
+            instruction: task.title,
+          };
           break;
         }
 

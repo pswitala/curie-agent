@@ -23,6 +23,8 @@ export interface SubagentConfig {
   context?: string;
   /** Session type / entrypoint (e.g. 'subagent') */
   type?: string;
+  /** Extra data attached to this agent — stored in handle and emitted with lifecycle events */
+  metadata?: Record<string, unknown>;
 }
 
 export interface SubagentHandle {
@@ -38,6 +40,12 @@ export interface SubagentHandle {
   outputTokens: number;
   startedAt: number;
   doneAt?: number;
+  /** Link back to a scheduled task (auto-mode tasks only). */
+  taskId?: string;
+  /** Type of spawn: 'subagent' (manual) or 'auto' (scheduled task). */
+  taskType?: string;
+  /** Extra data — passed through from spawn config. */
+  metadata?: Record<string, unknown>;
 }
 
 export class SubagentExecutor {
@@ -77,6 +85,9 @@ export class SubagentExecutor {
       inputTokens: 0,
       outputTokens: 0,
       startedAt: Date.now(),
+      taskId: (config.metadata as Record<string, unknown> | undefined)?.taskId as string | undefined,
+      taskType: (config.metadata as Record<string, unknown> | undefined)?.taskType as string | undefined,
+      metadata: config.metadata,
     };
     this.agents.set(agentId, handle);
 
@@ -211,6 +222,7 @@ export class SubagentExecutor {
         errors,
         durationMs: handle?.doneAt ? handle.doneAt - (handle?.startedAt || handle?.doneAt) : 0,
         timestamp: Date.now(),
+        metadata: config.metadata,
       } as unknown as Event);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -232,6 +244,7 @@ export class SubagentExecutor {
         sessionId: config.sessionId,
         message: msg,
         timestamp: Date.now(),
+        metadata: config.metadata,
       } as unknown as Event);
     } finally {
       unsubs.forEach((u) => u());
