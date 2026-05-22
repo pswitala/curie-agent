@@ -5,6 +5,25 @@ import ChatInput from './ChatInput.js';
 import type { JsonRpcClient } from '../lib/jsonrpc-client.js';
 import type { WsEvent } from '../lib/ws-client.js';
 
+const GREETINGS = [
+  'what are we discovering today?',
+  'greetings from the lab',
+  'lab coat is on.',
+  'he system is radioactive',
+  'what is our next experiment',
+  'atomic levels are stable',
+  'what is our next reaction?',
+  'geiger counter is ticking',
+  "mobile X-ray unit deployed",
+  'nobel-tier assist activated',
+  'emitting helpful isotopes',
+  'cathode rays engaged',
+];
+
+function randomGreeting() {
+  return GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+}
+
 interface Props {
   cmdResult: string;
   rpc: JsonRpcClient | null;
@@ -445,6 +464,16 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
   const [error, setError] = useState<string | null>(null);
   const [localCmd, setLocalCmd] = useState('');
   const chatRef = useRef<HTMLDivElement>(null);
+  const prevSessionIdRef = useRef<string | null>(null);
+  const [splashGreeting, setSplashGreeting] = useState(randomGreeting);
+
+  useEffect(() => {
+    if (prevSessionIdRef.current && !activeSessionId) {
+      // Transitioned from an active session to "New Chat"
+      setSplashGreeting(randomGreeting());
+    }
+    prevSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
 
   useEffect(() => {
     if (connectionStatus === 'connected') {
@@ -873,8 +902,8 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin" ref={chatRef}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-muted">
-            <div className="text-lg mb-2 font-display" style={{ color: 'var(--cream)' }}>No messages yet</div>
-            <div className="text-sm text-muted2">Send a message to start</div>
+            <div className="text-lg mb-2 font-display" style={{ color: 'var(--cream)' }}>curie</div>
+            <div className="text-sm text-muted2">{splashGreeting}</div>
           </div>
         )}
 

@@ -26,7 +26,7 @@ export function useWebSessions() {
   useEffect(() => {
     if (!ws) return;
 
-    const refreshEvents = ['user-prompt', 'assistant-stop', 'error'] as const;
+    const refreshEvents = ['user-prompt', 'assistant-stop', 'error', 'session-start', 'session-resumed'] as const;
     const unsubscribes: Array<() => void> = [];
     for (const eventType of refreshEvents) {
       unsubscribes.push(ws.on(eventType, fetchSessions));

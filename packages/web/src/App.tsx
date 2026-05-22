@@ -260,7 +260,7 @@ function AppContent() {
 
             {/* Commands button — icon only on mobile */}
             <button
-              className={`flex items-center justify-center rounded-lg transition-all duration-150 hover:scale-[1.02] ${isMobile ? 'w-10 h-10' : 'px-2.5 py-1 gap-1.5 text-xs'
+              className={`flex items-center justify-center rounded-lg transition-all duration-150 ${isMobile ? 'w-10 h-10' : 'px-2.5 py-1 gap-1.5 text-xs'
                 }`}
               style={{
                 background: 'transparent',
@@ -276,8 +276,7 @@ function AppContent() {
               </svg>
               {!isMobile && (
                 <>
-                  Commands
-                  <span className="rounded-[3px] px-1.5 py-0.5 text-[10px] font-mono" style={{ background: 'var(--s3)', color: 'var(--muted)', border: '1px solid var(--b1)' }}>K</span>
+                  Ctrl+k
                 </>
               )}
             </button>

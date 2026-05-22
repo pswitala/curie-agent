@@ -420,8 +420,6 @@
 
 /* Premium top bar with wood strip */
 .topbar-wood {
-  background: linear-gradient(180deg, var(--s2) 0%, var(--s1) 100%);
-  border-bottom: 1px solid var(--b1);
   position: relative;
 }
 
