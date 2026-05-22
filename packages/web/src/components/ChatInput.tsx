@@ -3,6 +3,7 @@ import { useConfig } from '../hooks/useConfig.js';
 
 interface Props {
   onSend: (text: string) => void;
+  onCancel?: () => void;
   cmdInput?: string;
   onClearCmdInput?: () => void;
   totalTokens?: number;
@@ -15,7 +16,7 @@ function formatTokenCount(n: number): string {
   return `${(n / 1000).toFixed(1)}k`;
 }
 
-export default function ChatInput({ onSend, cmdInput, onClearCmdInput, totalTokens, contextTokens, costUsd }: Props) {
+export default function ChatInput({ onSend, onCancel, cmdInput, onClearCmdInput, totalTokens, contextTokens, costUsd }: Props) {
   const { providers, get } = useConfig();
   const currentProvider = get('current_provider') as string | undefined;
   const model = get('model') as string | undefined;
@@ -104,18 +105,31 @@ export default function ChatInput({ onSend, cmdInput, onClearCmdInput, totalToke
               <div className="flex-1" />
             </>
           ) : null}
-          <button
-            className="btn-gold rounded-lg w-8 h-8 flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95"
-            onClick={() => {
-              const text = value.trim();
-              if (text) { onSend(text); setValue(''); }
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1a1410" strokeWidth="2.5">
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </svg>
-          </button>
+          {onCancel ? (
+            <button
+              className="w-8 h-8 flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95 rounded-lg"
+              style={{ background: 'var(--red)', color: '#fff' }}
+              onClick={onCancel}
+              title="Stop agent"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="6" width="12" height="12" rx="1.5" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              className="btn-gold rounded-lg w-8 h-8 flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95"
+              onClick={() => {
+                const text = value.trim();
+                if (text) { onSend(text); setValue(''); }
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1a1410" strokeWidth="2.5">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
     </div>

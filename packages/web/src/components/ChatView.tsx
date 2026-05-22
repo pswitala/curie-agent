@@ -855,6 +855,19 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
     ws.on('error', () => setTyping(false));
   }, [ws]);
 
+  const onCancel = useCallback(async () => {
+    if (!rpc || !activeSessionId) return;
+    setTyping(false);
+    setError(null);
+    scrollToBottom();
+    try {
+      await rpc.sessionCancel(activeSessionId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`Failed to cancel: ${msg}`);
+    }
+  }, [rpc, activeSessionId, scrollToBottom]);
+
   return (
     <div className={`flex flex-col h-full ${className || ''}`}>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin" ref={chatRef}>
@@ -972,6 +985,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
         )}
         <ChatInput
           onSend={handleSend}
+          onCancel={typing ? onCancel : undefined}
           cmdInput={localCmd}
           onClearCmdInput={() => setLocalCmd('')}
           totalTokens={totalTokens}

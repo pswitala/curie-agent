@@ -1,3 +1,11 @@
+import { platform, arch, hostname } from 'node:os';
+
+/** Format OS info for system prompt injection. */
+export function getOsInfo(): string {
+  const osName = platform() === 'win32' ? 'Windows' : platform() === 'darwin' ? 'macOS' : 'Linux';
+  return `${osName} (${arch()}, ${hostname()})`;
+}
+
 export function getTzOffsetString(timeZone: string, date: Date = new Date()): string {
   if (timeZone === 'UTC') return 'Z';
   try {
@@ -52,5 +60,5 @@ export function formatDate(): string {
  */
 export function withDateContext(systemPrompt: string | undefined): string | undefined {
   if (!systemPrompt) return undefined;
-  return `[Current date and time: ${formatDate()}]\n\n${systemPrompt}`;
+  return `[Current date and time: ${formatDate()}]\n[Operating system: ${getOsInfo()}]\n\n${systemPrompt}`;
 }
