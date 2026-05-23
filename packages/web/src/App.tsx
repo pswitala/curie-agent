@@ -174,9 +174,9 @@ function AppContent() {
 
       <main className="flex flex-1 flex-col overflow-hidden bg-bg">
           {/* Topbar — premium wood strip */}
-          <div className="topbar-wood flex h-12 items-center gap-1 px-2 shrink-0">
+          <div className="topbar-wood flex h-12 items-center gap-3 px-4 shrink-0">
             {/* Left: session button + nav icons */}
-            <div className="flex items-center gap-0.5">
+            <div className="flex items-center gap-1.5">
               {/* Session button (always visible) */}
               <button
                 className={`relative flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150`}
@@ -254,14 +254,17 @@ function AppContent() {
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
-                Install App
+                {!isMobile && (
+                <>
+                  Install
+                </>
+              )}
               </button>
             )}
 
             {/* Commands button — icon only on mobile */}
             <button
-              className={`flex items-center justify-center rounded-lg transition-all duration-150 ${isMobile ? 'w-10 h-10' : 'px-2.5 py-1 gap-1.5 text-xs'
-                }`}
+              className="flex items-center justify-center rounded-lg transition-all duration-150 px-2.5 py-1 gap-1.5 text-xs font-semibold cursor-pointer shrink-0"
               style={{
                 background: 'transparent',
                 border: '1px solid var(--b2)',
@@ -270,7 +273,7 @@ function AppContent() {
               onClick={() => setCmdOpen(true)}
               title="Open Commands"
             >
-              <svg width={isMobile ? "21" : "12"} height={isMobile ? "21" : "12"} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <svg width={isMobile ? "13" : "13"} height={isMobile ? "13" : "13"} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <circle cx="11" cy="11" r="8" />
                 <line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>

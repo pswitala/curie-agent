@@ -446,7 +446,6 @@
 }
 
 .chat-msg-agent {
-  border-left: 2px solid color-mix(in srgb, var(--gold) 40%, transparent);
 }
 
 /* Send button gold */
