@@ -375,6 +375,111 @@ function ApprovalBlock({ toolCallId, name, input, decision, events, rpc, mode }:
   );
 }
 
+interface AgentActionsWrapperProps {
+  blocks: MessageEntry[];
+  blockCount: number;
+  response?: string;
+  time: string;
+  events?: WsEvent[];
+  rpc?: JsonRpcClient | null;
+}
+
+function AgentActionsWrapper({ blocks, blockCount, response, time, events: wsEvents, rpc: wsRpc }: AgentActionsWrapperProps) {
+  const [expanded, setExpanded] = useState(false);
+  const hasContent = (blocks && blocks.length > 0) || !!response;
+
+  if (!hasContent) return null;
+
+  return (
+    <div className="px-5 py-1 animate-fadeIn">
+      <div
+        className="rounded-lg overflow-hidden cursor-pointer select-none transition-all duration-150"
+        style={{
+          background: 'linear-gradient(135deg, var(--s2) 0%, var(--s1) 100%)',
+          border: '1px solid var(--b1)',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+        }}
+        onClick={() => setExpanded(!expanded)}
+      >
+        {/* Header row — shows count + response preview */}
+        <div className="flex items-center gap-2 px-3 py-2" style={{ background: 'color-mix(in srgb, var(--s2) 80%, transparent)' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" className="shrink-0" style={{ opacity: 0.7 }}>
+            <circle cx="12" cy="12" r="2" />
+            <ellipse cx="12" cy="12" rx="10" ry="4" />
+            <ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)" />
+            <ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)" />
+          </svg>
+          <span className="text-[11.5px] font-medium text-text font-mono">
+            {blockCount} agent action{blockCount > 1 ? 's' : ''}
+          </span>
+          {response && (
+            <span className="text-[10px] text-muted2 font-mono truncate max-w-[120px]" title={response}>
+              {"“"}{response.slice(0, 60)}...{"”"}
+            </span>
+          )}
+          {time && (
+            <span className="text-[10px] text-muted2 font-mono">{time}</span>
+          )}
+          <div className="flex-1" />
+          <svg
+            width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            className={`text-muted transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </div>
+
+        {/* Expanded content — nested blocks keep their native interactivity */}
+        {expanded && (
+          <div
+            className="px-3 py-2.5"
+            style={{ borderTop: '1px solid var(--b1)', background: 'color-mix(in srgb, var(--s1) 60%, transparent)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {blocks.map((block, bi) => {
+              if (block.type === 'thinking') {
+                return <ThinkingBlock key={bi} content={block.content} />;
+              }
+              if (block.type === 'tool-group') {
+                const tg = block as MessageEntry & { toolCalls: ToolCallEntry[] };
+                return tg.toolCalls.length > 0 ? <ToolGroupBlock key={bi} toolCalls={tg.toolCalls} /> : null;
+              }
+              if (block.type === 'approval-request') {
+                return (
+                  <ApprovalBlock
+                    key={bi}
+                    toolCallId={block.toolCallId}
+                    name={block.name}
+                    input={block.input}
+                    decision={block.decision}
+                    events={wsEvents || []}
+                    rpc={wsRpc || null}
+                    mode={block.mode}
+                  />
+                );
+              }
+              return null;
+            })}
+
+            {/* Curie's response at the bottom */}
+            {response && (
+              <div className="mt-3">
+                <div className="flex items-baseline gap-2 mb-1">
+                  <span className="text-[10px] font-semibold text-fg" style={{ color: 'var(--gold)' }}>curie-agent</span>
+                </div>
+                <div
+                  className="text-[13px] text-text leading-[1.65] markdown-body chat-msg-agent pl-3"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(response) }}
+                />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 type MessageEntry =
   | { type: 'thinking'; content: string; key: string }
   | { type: 'user'; content: string; time: string }
@@ -383,7 +488,16 @@ type MessageEntry =
   | { type: 'heartbeat-brief'; content: string; time: string; event: any }
   | { type: 'approval-request'; toolCallId: string; name: string; input: Record<string, unknown>; decision: string; mode?: string; time: string }
   | { type: 'reminder-fired'; message: string; taskId: string; time: string }
-  | { type: 'error'; content: string; time: string };
+  | { type: 'error'; content: string; time: string }
+  | AgentActionEntry;
+
+interface AgentActionEntry {
+  type: 'agent-actions';
+  blocks: MessageEntry[];
+  blockCount: number;
+  response?: string;
+  time: string;
+}
 
 function eventToMessage(event: WsEvent): MessageEntry | null {
   switch (event.type) {
@@ -458,6 +572,120 @@ function eventToMessage(event: WsEvent): MessageEntry | null {
   }
 }
 
+// Single-pass coalesce + group.
+// All agent internals (thinking / tool-group / approval-request) between boundary events
+// are accumulated into a single collapsible "agent-actions" wrapper.
+// Assistant response deltas are emitted as standalone 'assistant' entries (not wrapped),
+// so they render visible in the chat flow after the wrapper.
+//
+// Key: assistant-delta can stream in DURING the agent's work (between tool calls),
+// so it must NOT trigger turn boundaries. The only real boundaries are:
+// - user / error / heartbeat-brief / reminder-fired events
+// - EOF (final flush)
+function buildMessages(events: WsEvent[]): MessageEntry[] {
+  const result: MessageEntry[] = [];
+  let agentRun: MessageEntry[] = [];
+  let assistantBuf = '';
+  let hasPendingThinking = false;
+  let pendingThinkingContent = '';
+
+  const wrapTurnAndClear = () => {
+    // Flush coalesced thinking into agentRun
+    if (hasPendingThinking && pendingThinkingContent) {
+      agentRun.push({ type: 'thinking', content: pendingThinkingContent, key: `thinking-${Date.now()}`, time: '' } as MessageEntry);
+      hasPendingThinking = false;
+      pendingThinkingContent = '';
+    }
+
+    if (agentRun.length > 0) {
+      let firstTime = (agentRun[0] as any).time || '';
+      result.push({
+        type: 'agent-actions',
+        blocks: [...agentRun],
+        blockCount: agentRun.length,
+        response: undefined,
+        time: firstTime,
+      } as MessageEntry);
+    }
+    // Emit accumulated assistant response as standalone message
+    if (assistantBuf) {
+      result.push({ type: 'assistant', content: assistantBuf, time: '' } as MessageEntry);
+    }
+    agentRun = [];
+    assistantBuf = '';
+  };
+
+  for (const event of events) {
+    const msg = eventToMessage(event);
+    if (!msg) continue;
+
+    // --- Boundary events flush the current turn and render inline ---
+    if (msg.type === 'user' || msg.type === 'error' || msg.type === 'heartbeat-brief' || msg.type === 'reminder-fired') {
+      wrapTurnAndClear();
+      result.push(msg);
+    }
+
+    // --- Assistant delta: accumulate response text (does NOT trigger wrap) ---
+    else if (msg.type === 'assistant') {
+      assistantBuf += (msg as any).content;
+    }
+
+    // --- Thinking delta: coalesce consecutive thinking ---
+    else if (msg.type === 'thinking') {
+      hasPendingThinking = true;
+      pendingThinkingContent += (msg as any).content || '';
+    }
+
+    // --- Tool-group: accumulate into agentRun ---
+    else if (msg.type === 'tool-group') {
+      // Flush pending thinking before tool call so they become separate blocks
+      if (hasPendingThinking && pendingThinkingContent) {
+        agentRun.push({ type: 'thinking', content: pendingThinkingContent, key: `thinking-${Date.now()}`, time: '' } as MessageEntry);
+        hasPendingThinking = false;
+        pendingThinkingContent = '';
+      }
+      const typed = msg as any;
+      // Coalesce tool-calls into the last tool-group entry if it exists
+      if (agentRun.length > 0 && agentRun[agentRun.length - 1].type === 'tool-group') {
+        (agentRun[agentRun.length - 1] as any).toolCalls.push(...(typed.toolCalls || []));
+      } else {
+        agentRun.push({ type: 'tool-group', content: '', time: msg.time || '', toolCalls: typed.toolCalls || [] } as MessageEntry);
+      }
+    }
+
+    // --- Approval-request: accumulate into agentRun ---
+    else if (msg.type === 'approval-request') {
+      // Flush pending thinking before approval so they become separate blocks
+      if (hasPendingThinking && pendingThinkingContent) {
+        agentRun.push({ type: 'thinking', content: pendingThinkingContent, key: `thinking-${Date.now()}`, time: '' } as MessageEntry);
+        hasPendingThinking = false;
+        pendingThinkingContent = '';
+      }
+      agentRun.push({
+        type: 'approval-request',
+        content: '',
+        time: msg.time || '',
+        toolCallId: (msg as any).toolCallId || '',
+        name: (msg as any).name || 'tool',
+        input: (msg as any).input || {},
+        decision: (msg as any).decision || 'ask',
+        mode: (msg as any).mode,
+      } as MessageEntry);
+    }
+
+    // --- Unknown type: flush and pass through ---
+    else {
+      wrapTurnAndClear();
+      result.push(msg);
+    }
+  }
+
+  // Final flush — wraps all accumulated agent blocks into one wrapper
+  wrapTurnAndClear();
+
+  return result;
+}
+
 export default function ChatView({ cmdResult, rpc, className, activeSessionId, onCreateSession, onClearCmdResult, events, addLiveEvent, totalTokens, contextTokens, costUsd }: Props) {
   const { ws, connected, connectionStatus } = useApi();
   const [typing, setTyping] = useState(false);
@@ -494,41 +722,8 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
   // We no longer listen to global user-prompt events here because it causes
   // unrelated clients to be pulled into sessions started by other devices.
 
-  const messages = events.reduce((msgs: MessageEntry[], event: WsEvent) => {
-    const msg = eventToMessage(event);
-    if (!msg) return msgs;
-
-    if (msg.type === 'thinking' && msgs.length > 0) {
-      const last = msgs[msgs.length - 1];
-      if (last.type === 'thinking') {
-        last.content += msg.content;
-      } else {
-        msgs.push(msg);
-      }
-    }
-    else if (msg.type === 'assistant' && msgs.length > 0) {
-      const last = msgs[msgs.length - 1];
-      if (last.type === 'assistant') {
-        last.content += msg.content;
-      } else {
-        msgs.push(msg);
-      }
-    }
-    else if (msg.type === 'tool-group' && msgs.length > 0) {
-      const tg = msg as MessageEntry & { toolCalls: ToolCallEntry[] };
-      const last = msgs[msgs.length - 1];
-      if (last.type === 'tool-group') {
-        const lastTg = last as MessageEntry & { toolCalls: ToolCallEntry[] };
-        lastTg.toolCalls.push(...tg.toolCalls);
-      } else {
-        msgs.push(msg);
-      }
-    }
-    else {
-      msgs.push(msg);
-    }
-    return msgs;
-  }, []);
+  // Coalesce + wrap in a single pass via buildMessages
+  const groupedMessages = buildMessages(events);
 
   const shouldAutoScrollRef = useRef(true);
 
@@ -552,7 +747,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
 
   useEffect(() => {
     if (shouldAutoScrollRef.current) scrollToBottom();
-  }, [messages, typing, scrollToBottom]);
+  }, [groupedMessages, typing, scrollToBottom]);
 
   useEffect(() => {
     scrollToBottom();
@@ -900,7 +1095,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
   return (
     <div className={`flex flex-col h-full ${className || ''}`}>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin" ref={chatRef}>
-        {messages.length === 0 && (
+        {groupedMessages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-muted">
             <div className="text-lg mb-2 font-display" style={{ color: 'var(--cream)' }}>curie</div>
             <div className="text-sm text-muted">{splashGreeting}</div>
@@ -908,7 +1103,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
         )}
 
         <div className="py-4 pb-6">
-          {messages.map((msg, i) => {
+          {groupedMessages.map((msg, i) => {
             if (msg.type === 'thinking') {
               return <ThinkingBlock key={msg.key} content={msg.content} />;
             }
@@ -937,7 +1132,12 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
                }
              }
 
-              if (msg.type === 'approval-request') {
+            if (msg.type === 'agent-actions') {
+              const aa = msg as AgentActionEntry;
+              return <AgentActionsWrapper key={`agent-${aa.time || i}`} blocks={aa.blocks} blockCount={aa.blockCount} time={aa.time} events={events} rpc={rpc} />;
+            }
+
+             if (msg.type === 'approval-request') {
                 return (
                   <ApprovalBlock
                     key={i}
