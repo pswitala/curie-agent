@@ -110,3 +110,4 @@ describe('JsonRpcHandler', () => {
     expect((result as any).error.code).toBe(-32602);
   });
 });
+

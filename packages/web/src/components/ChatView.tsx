@@ -7,13 +7,13 @@ import type { WsEvent } from '../lib/ws-client.js';
 
 const GREETINGS = [
   'what are we discovering today?',
-  'greetings from the lab',
-  'lab coat is on.',
-  'he system is radioactive',
-  'what is our next experiment',
-  'atomic levels are stable',
+  'greetings from the lab!',
+  'lab coat is on ... ',
+  'the system is radioactive',
+  'what is our next experiment?',
+  'atomic levels are stable!',
   'what is our next reaction?',
-  'geiger counter is ticking',
+  'geiger counter is ticking...',
   "mobile X-ray unit deployed",
   'nobel-tier assist activated',
   'emitting helpful isotopes',
@@ -903,7 +903,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-muted">
             <div className="text-lg mb-2 font-display" style={{ color: 'var(--cream)' }}>curie</div>
-            <div className="text-sm text-muted2">{splashGreeting}</div>
+            <div className="text-sm text-muted">{splashGreeting}</div>
           </div>
         )}
 

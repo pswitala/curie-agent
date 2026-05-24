@@ -29,6 +29,22 @@ describe('parseAllowlist', () => {
     const result = parseAllowlist('/a,,/b,');
     expect(result).toEqual(['/a', '/b']);
   });
+
+  it('parses array input', () => {
+    expect(parseAllowlist(['/a', '/b'])).toEqual(['/a', '/b']);
+  });
+
+  it('returns empty array for empty array', () => {
+    expect(parseAllowlist([])).toEqual([]);
+  });
+
+  it('returns empty array for non-string/non-array values', () => {
+    expect(parseAllowlist(null as unknown as string)).toEqual([]);
+    expect(parseAllowlist(undefined as unknown as string)).toEqual([]);
+    expect(parseAllowlist(0 as unknown as string)).toEqual([]);
+    expect(parseAllowlist({} as unknown as string)).toEqual([]);
+    expect(parseAllowlist(true as unknown as string)).toEqual([]);
+  });
 });
 
 describe('isPathAllowed', () => {

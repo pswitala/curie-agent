@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { isPathAllowed, parseAllowlist } from '@curie-agent/core/safety/path-guard.js';
 import { createTool, expandPath, type ToolContext } from './tool.js';
 
 const GrepSchema = z.object({
@@ -30,6 +31,15 @@ export const grepTool = createTool(
   GrepSchema,
   async (input, ctx: ToolContext) => {
     const searchPath = input.path ? path.resolve(ctx.cwd, expandPath(input.path)) : ctx.cwd;
+
+    // Safety: refuse searches outside allowed directories.
+    if (ctx.settings.safety?.path_guard !== 'off') {
+      const allowlist = parseAllowlist(ctx.settings.safety?.path_allowlist ?? '');
+      if (!isPathAllowed(searchPath, ctx.cwd, allowlist)) {
+        return { output: null, error: 'PathGuard: grep blocked — path is outside allowed directories' };
+      }
+    }
+
     const regexFlags = input['-i'] ? 'gi' : 'g';
     const pattern = input.pattern ?? '';
     const regex = new RegExp(pattern, regexFlags);

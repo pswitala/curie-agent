@@ -2,14 +2,16 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { homedir } from 'node:os';
 
-/** Parse comma-separated allowlist string into absolute path array. */
-export function parseAllowlist(raw: string): string[] {
-  if (!raw) return [];
+/** Parse a comma-separated string or JSON array of paths into an absolute path array. */
+export function parseAllowlist(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.filter((v): v is string => typeof v === 'string').map(expandPath);
+  if (typeof raw !== 'string' || !raw) return [];
   return raw.split(',').map(s => s.trim()).filter(Boolean).map(expandPath);
 }
 
-function expandPath(p: string): string {
-  if (p.startsWith('~/') || p === '~') return homedir() + p.slice(1);
+/** Expand `~` to the user's home directory using path.join for cross-platform safety. */
+export function expandPath(p: string): string {
+  if (p.startsWith('~/') || p === '~') return path.join(homedir(), p.slice(1));
   return p;
 }
 

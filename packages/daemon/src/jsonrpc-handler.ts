@@ -1,11 +1,12 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { readFileSync, existsSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import os, { homedir } from 'node:os';
+import path, { join, isAbsolute, resolve as pathResolve } from 'node:path';
+import { readFileSync, existsSync, readdirSync, statSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { Method } from '@curie-agent/protocol';
-import { TurnLoop, parseReminderTime, listSnapshots, revertTo, createIdentityFiles, SubagentExecutor } from '@curie-agent/core';
+import { TurnLoop, parseReminderTime, listSnapshots, revertTo, createIdentityFiles, SubagentExecutor, isPathAllowed, parseAllowlist, createSnapshot, type SessionInfo } from '@curie-agent/core';
 import { EventBus } from '@curie-agent/core';
 import type { SessionStore, SettingsManager, Event, ProviderStream, Tool, CurieSettings } from '@curie-agent/core';
 import { listSkills, discoverAllSkills } from '@curie-agent/tools';
+import { executeCd } from './slash-cd.js';
 import type { ProviderFactory } from './server.js';
 import type { DaemonApp } from './daemon-app.js';
 
@@ -873,6 +874,18 @@ export class JsonRpcHandler {
     return current;
   }
 
+  /** Get the current working directory from session metadata, falling back to process.cwd(). */
+  private getSessionCwd(sessionId: string): string | undefined {
+    const metaPath = this.sessionStore.metadataPath(sessionId);
+    if (!existsSync(metaPath)) return undefined;
+    try {
+      const info = JSON.parse(readFileSync(metaPath, 'utf-8')) as SessionInfo;
+      return info.cwd;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async executeSlashCommand(sessionId: string, text: string): Promise<void> {
     // 1. Emit user-prompt event so it appears in UI
     const promptEvent: Event = {
@@ -934,6 +947,9 @@ export class JsonRpcHandler {
 
 **Memory & Context**
 * \`/memory [status|add <text>]\` — View active memory files or add new memories to be organized on next turn.
+
+**System Info**
+* \`/system\` — Show OS, platform, Node version, home dir, CWD, and PathGuard status.
 * \`/context [auto [on|off|threshold N|warn N|pricing on/off]]\` — View visual token capacity fill percentage bar or configure auto-compaction.
 
 **Automation & Scheduling**
@@ -944,7 +960,8 @@ export class JsonRpcHandler {
 
 **Workspace Safety**
 * \`/snapshots\` — List Git-backed state snapshots.
-* \`/revert <index>\` — Revert workspace to a specific snapshot index.`;
+* \`/revert <index>\` — Revert workspace to a specific snapshot index.
+* \`/cd <path>\` — Change working directory with safety checks.`;
           emitDelta(helpText);
           break;
         }
@@ -963,7 +980,7 @@ export class JsonRpcHandler {
 * **Active Provider:** \`${provider}\`
 * **Approval Mode:** \`${settings.mode || 'auto'}\`
 * **Reasoning Effort:** \`${settings.effort || 'auto'}\`
-* **Workspace CWD:** \`${process.cwd()}\`
+* **Workspace CWD:** \`${this.getSessionCwd(sessionId) || process.cwd()}\`
 * **Tools per Turn Limit:** \`${settings.tools_per_call || 10}\`
 * **Web Search per Turn Limit:** \`${settings.websearch_per_call || 5}\`
 * **Model Context Window:** \`${(pConfig?.model_context_window || 200000).toLocaleString()} tokens\`
@@ -1741,6 +1758,32 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
           break;
         }
 
+        case 'system': {
+          const settings = this.settingsManager.get();
+          const safety = settings.safety;
+          const osName = os.platform() === 'win32' ? 'Windows' : os.platform() === 'darwin' ? 'macOS' : 'Linux';
+          const curieDir = path.join(os.homedir(), '.curie-agent');
+
+          let lines: string[] = [];
+          lines.push(`**OS:** ${osName} (${os.arch()}, ${os.hostname()})`);
+          lines.push(`**Platform:** \`${os.platform()}\``);
+          lines.push(`**Node:** \`${process.version}\``);
+          lines.push(`**Home:** \`${os.homedir()}\``);
+          lines.push(`**Curie Agent Dir:** \`${curieDir}\``);
+          lines.push(`**CWD:** \`${this.getSessionCwd(sessionId) || process.cwd()}\``);
+          lines.push('');
+          lines.push(`### PathGuard`);
+          lines.push(`* **Status:** \`${safety?.path_guard || 'on'}\``);
+          const raw = safety?.path_allowlist;
+          const hasAllowlist = raw && (Array.isArray(raw) ? raw.length > 0 : typeof raw === 'string' && raw.trim().length > 0);
+          const display = Array.isArray(raw) ? raw.join(', ') : raw;
+          lines.push(`* **Allowlist:** ${hasAllowlist ? `\`${display}\`` : '(empty)'}`);
+          lines.push(`**Blocked:** \`${curieDir}/settings.json\` (API keys)`);
+
+          emitDelta(lines.join('\n'));
+          break;
+        }
+
         case 'revert': {
           if (!args) {
             emitDelta(`Usage: \`/revert <index>\`. Run \`/snapshots\` first to view available indices.`);
@@ -1763,6 +1806,95 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
           } else {
             emitDelta(`Failed to revert: ${res.error}`);
           }
+          break;
+        }
+
+       case 'cd': {
+          if (!args) {
+            emitDelta('Usage: `/cd <path>` — Change working directory.\n* `/cd add <path>` — Add path to PathGuard allowlist.');
+            break;
+          }
+
+          const cdParts = args.trim().split(/\s+/);
+          const subCmd = cdParts[0]?.toLowerCase();
+          const pathArg = cdParts.slice(1).join(' ').trim();
+
+          // /cd add <path> — add a directory to the PathGuard allowlist
+          if (subCmd === 'add') {
+            if (!pathArg) {
+              emitDelta('Usage: `/cd add <path>` — Add a directory to the PathGuard allowlist.');
+              break;
+            }
+
+            const settings = this.settingsManager.get();
+            const safety = settings.safety || {};
+            const rawAllowlist = safety.path_allowlist;
+            const current = Array.isArray(rawAllowlist) ? [...rawAllowlist as string[]] : [];
+            const existingStrings = current.map(s => s.trim()).filter(Boolean);
+
+            // Normalize the requested path
+            let normalized: string;
+            try {
+              const statResult = statSync(pathArg);
+              if (!statResult.isDirectory()) {
+                emitDelta(`"${pathArg}" is not a directory.`);
+                break;
+              }
+              normalized = realpathSync(pathArg);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : 'unknown';
+              emitDelta(`Cannot access "${pathArg}": ${msg}`);
+              break;
+            }
+
+            if (existingStrings.includes(normalized)) {
+              emitDelta(`"${normalized}" is already in the PathGuard allowlist.`);
+              break;
+            }
+
+            const updated = [...current, normalized];
+            safety.path_allowlist = updated;
+            await this.settingsManager.update({ ...settings, safety });
+            emitDelta(`Added "${normalized}" to PathGuard allowlist (${updated.length} path${updated.length === 1 ? '' : 's'} total).`);
+            break;
+          }
+
+          if (!args || cdParts[0]?.startsWith('-')) {
+            emitDelta('Usage: `/cd <path>` — Change working directory.\nExamples:\n* `/cd ../other-project` — relative to current\n* `/cd /home/user/docs` — absolute path\n* `/cd ~` — home directory');
+            break;
+          }
+          const sessionInfo = this.sessionStore.load(sessionId);
+          if (!sessionInfo) {
+            emitDelta('No session found for the given session ID.');
+            break;
+          }
+
+          const settings = this.settingsManager.get();
+          const safety = settings.safety;
+          const safetyPathAllowlist = safety?.path_allowlist;
+          const snapshotsEnabled = safety?.snapshots !== 'off';
+
+          const result = await executeCd(
+            args,
+            sessionInfo.cwd,
+            safetyPathAllowlist,
+            snapshotsEnabled,
+            this.sessionStore.metadataPath(sessionId),
+          );
+
+          // Emit config-changed event on success (notify clients of CWD change)
+          if (result.kind === 'success') {
+            const normalized = result.message.split('\n')[1]?.replace(/\*\*/g, '').trim() || '';
+            this.sharedEventBus?.emit({
+              type: 'config-changed',
+              id: crypto.randomUUID(),
+              timestamp: Date.now(),
+              key: 'cwd',
+              value: normalized,
+            } as any);
+          }
+
+          emitDelta(result.message);
           break;
         }
 

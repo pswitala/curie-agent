@@ -1047,6 +1047,15 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
           break;
         }
 
+        case 'cd': {
+          try {
+            await rpcRef.current.sessionSend(sessionIdRef.current, `/cd ${args.trim()}`, 'tui');
+          } catch {
+            setMessages(prev => [...prev, { role: 'system', content: `Failed to change directory. Check the path is valid and within allowed directories.` }]);
+          }
+          break;
+        }
+
         case 'remind': {
           try {
             await rpcRef.current.sessionSend(sessionIdRef.current, `/remind ${args}`, 'tui');

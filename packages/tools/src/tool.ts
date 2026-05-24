@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import path from 'node:path';
 import { homedir } from 'node:os';
 import type { CurieSettings } from '@curie-agent/core';
 
@@ -30,7 +31,7 @@ export interface ToolContext {
 
 export function expandPath(p: string): string {
   if (p.startsWith('~/') || p === '~') {
-    return homedir() + p.slice(1);
+    return path.join(homedir(), p.slice(1));
   }
   return p;
 }

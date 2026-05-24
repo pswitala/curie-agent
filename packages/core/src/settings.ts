@@ -43,7 +43,7 @@ export interface HeartbeatConfig {
 
 export interface SafetyConfig {
   path_guard: 'on' | 'off';
-  path_allowlist: string;
+  path_allowlist: unknown;
   command_guard: 'on' | 'off';
   snapshots: 'on' | 'off';
 }
@@ -303,7 +303,7 @@ export function migrateFlatToNested(parsed: Record<string, unknown>): CurieSetti
   const mcpServers = parsed.MCP_SERVERS || parsed.mcp_servers || {};
 
   const safetyPathGuard = (pickString(parsed, 'SAFETY_PATH_GUARD', 'safety_path_guard') || 'on') as 'on' | 'off';
-  const safetyPathAllow = pickString(parsed, 'SAFETY_PATH_ALLOWLIST', 'safety_path_allowlist') || '';
+  const safetyPathAllow = parsed.SAFETY_PATH_ALLOWLIST ?? parsed.safety_path_allowlist ?? '';
   const safetyCmdGuard = (pickString(parsed, 'SAFETY_COMMAND_GUARD', 'safety_command_guard') || 'on') as 'on' | 'off';
   const safetySnaps = (pickString(parsed, 'SAFETY_SNAPSHOTS', 'safety_snapshots') || 'on') as 'on' | 'off';
 
@@ -543,10 +543,10 @@ export function parseNestedSettings(parsed: Record<string, unknown>): CurieSetti
     dreaming: getString(['heartbeat.dreaming', 'HEARTBEAT_DREAMING']) || (rawHeartbeat?.dreaming as string) || DEFAULT_SETTINGS.heartbeat.dreaming,
   };
 
-  const rawSafety = parsed.safety as Record<string, string | undefined> | undefined;
+  const rawSafety = parsed.safety as Record<string, unknown | undefined> | undefined;
   const safetyConfig: SafetyConfig = {
     path_guard: (getString(['safety.path_guard', 'SAFETY_PATH_GUARD']) || (rawSafety?.path_guard as string) || 'on') as 'on' | 'off',
-    path_allowlist: getString(['safety.path_allowlist', 'SAFETY_PATH_ALLOWLIST']) || (rawSafety?.path_allowlist as string) || '',
+    path_allowlist: rawSafety?.path_allowlist ?? getString(['safety.path_allowlist', 'SAFETY_PATH_ALLOWLIST']) ?? '',
     command_guard: (getString(['safety.command_guard', 'SAFETY_COMMAND_GUARD']) || (rawSafety?.command_guard as string) || 'on') as 'on' | 'off',
     snapshots: (getString(['safety.snapshots', 'SAFETY_SNAPSHOTS']) || (rawSafety?.snapshots as string) || 'on') as 'on' | 'off',
   };
