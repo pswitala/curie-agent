@@ -1,5 +1,11 @@
 # @curie-agent/protocol
 
+## 0.2.5
+
+### Patch Changes
+
+- Collapsible agent actions wrapper for web dashboard — groups thinking, tool calls, and approvals into a single collapsible block per turn
+
 ## 0.2.1
 
 ### Patch Changes
