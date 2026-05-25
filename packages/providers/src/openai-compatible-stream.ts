@@ -124,6 +124,14 @@ export async function* streamOpenAICompatible(
           }
         }
 
+        // DeepSeek v2 / Qwen 3.6+: reasoning_content streams in a separate delta field
+        // (not wrapped in <thinking> tags inside content). Route directly to thinking-delta.
+        const rc = (choice.delta as any)?.reasoning_content;
+        if (rc) {
+          if (!suppressThinking) yield { type: 'thinking-delta', text: rc };
+          accumulatedThinking += rc;
+        }
+
         if (choice.delta?.tool_calls) {
           for (const tc of choice.delta.tool_calls) {
             const idx = tc.index ?? 0;

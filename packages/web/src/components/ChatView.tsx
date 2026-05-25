@@ -39,7 +39,7 @@ interface Props {
 }
 
 function ThinkingBlock({ content }: { content: string }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
   return (
     <div className="px-3 py-1 animate-fadeIn">
@@ -59,7 +59,7 @@ function ThinkingBlock({ content }: { content: string }) {
             <circle cx="15" cy="9" r="1" fill="currentColor" />
           </svg>
           <span className="text-[11.5px] font-medium text-text font-mono">
-            {expanded ? 'Hide thinking' : 'Thinking...'}
+            {expanded ? 'Hide thinking' : 'Show thinking'}
           </span>
           <div className="flex-1" />
           <svg
@@ -483,7 +483,7 @@ function AgentActionsWrapper({ blocks, blockCount, response, time, events: wsEve
 }
 
 type MessageEntry =
-  | { type: 'thinking'; content: string; key: string }
+  | { type: 'thinking'; content: string; time?: string }
   | { type: 'user'; content: string; time: string }
   | { type: 'assistant'; content: string; time: string }
   | { type: 'tool-group'; content: ''; time: ''; toolCalls: ToolCallEntry[] }
@@ -511,7 +511,7 @@ function eventToMessage(event: WsEvent): MessageEntry | null {
       return {
         type: 'thinking',
         content: (event as any).text || '',
-        key: `${event.timestamp}-${event.id}`,
+        time: formatTime(event.timestamp),
       };
     case 'heartbeat-brief':
       return {
@@ -590,42 +590,57 @@ function buildMessages(events: WsEvent[]): MessageEntry[] {
   let assistantBuf = '';
   let hasPendingThinking = false;
   let pendingThinkingContent = '';
+  // Track the wrapper in result so we can mutate it in-place across calls.
+  let currentWrapper: AgentActionEntry | null = null;
+  let committedCount = 0;  // How many blocks already included in wrapper.
 
-  const wrapTurnAndClear = () => {
+  const flushThinkingToAgentRun = () => {
     if (hasPendingThinking && pendingThinkingContent) {
-      if (agentRun.length > 0) {
-        // Thinking arrived after tool activity — keep it inside the agent-actions wrapper.
-        agentRun.push({ type: 'thinking', content: pendingThinkingContent, key: `thinking-${Date.now()}`, time: '' } as MessageEntry);
-      } else {
-        // Pure thinking with no tool calls — render as a top-level block so it's
-        // always visible (not buried inside a collapsed agent-actions wrapper).
-        result.push({ type: 'thinking', content: pendingThinkingContent, key: `thinking-${Date.now()}`, time: '' } as MessageEntry);
-      }
+      agentRun.push({ type: 'thinking', content: pendingThinkingContent, time: '' } as MessageEntry);
       hasPendingThinking = false;
       pendingThinkingContent = '';
     }
+  };
 
-    if (agentRun.length > 0) {
-      let firstTime = (agentRun[0] as any).time || '';
-      // Count semantic actions: tool-group entries expand to their individual tool call count.
-      const semanticCount = agentRun.reduce((sum, b) => {
-        if (b.type === 'tool-group') return sum + ((b as any).toolCalls?.length || 1);
-        return sum + 1;
-      }, 0);
-      result.push({
+  const commitAgentRun = () => {
+    if (agentRun.length === 0) return;
+
+    // Count semantic actions for NEW blocks only (since last commit).
+    let newSemanticCount = 0;
+    for (let i = committedCount; i < agentRun.length; i++) {
+      const b = agentRun[i];
+      if (b.type === 'tool-group') newSemanticCount += (b as any).toolCalls?.length || 1;
+      else newSemanticCount += 1;
+    }
+
+    if (!currentWrapper) {
+      // First commit: create wrapper and push to result.
+      currentWrapper = {
         type: 'agent-actions',
         blocks: [...agentRun],
-        blockCount: semanticCount,
+        blockCount: newSemanticCount,
         response: undefined,
-        time: firstTime,
-      } as MessageEntry);
+        time: (agentRun[0] as any).time || '',
+      } as AgentActionEntry;
+      result.push(currentWrapper);
+    } else {
+      // Subsequent commit: append only NEW blocks (since last commit).
+      currentWrapper.blocks = [...currentWrapper.blocks, ...agentRun.slice(committedCount)];
+      currentWrapper.blockCount += newSemanticCount;
     }
+    committedCount = agentRun.length;
+  };
+
+  const wrapTurnAndClear = () => {
+    flushThinkingToAgentRun();
+    commitAgentRun();
     // Emit accumulated assistant response as standalone message
     if (assistantBuf) {
       result.push({ type: 'assistant', content: assistantBuf, time: '' } as MessageEntry);
     }
     agentRun = [];
     assistantBuf = '';
+    currentWrapper = null;
   };
 
   for (const event of events) {
@@ -649,14 +664,9 @@ function buildMessages(events: WsEvent[]): MessageEntry[] {
       pendingThinkingContent += (msg as any).content || '';
     }
 
-    // --- Tool-group: accumulate into agentRun ---
+    // --- Tool-group: flush thinking + commit wrapper, then add tool ---
     else if (msg.type === 'tool-group') {
-      // Flush pending thinking before tool call so they become separate blocks
-      if (hasPendingThinking && pendingThinkingContent) {
-        agentRun.push({ type: 'thinking', content: pendingThinkingContent, key: `thinking-${Date.now()}`, time: '' } as MessageEntry);
-        hasPendingThinking = false;
-        pendingThinkingContent = '';
-      }
+      flushThinkingToAgentRun();
       const typed = msg as any;
       // Coalesce tool-calls into the last tool-group entry if it exists
       if (agentRun.length > 0 && agentRun[agentRun.length - 1].type === 'tool-group') {
@@ -664,15 +674,12 @@ function buildMessages(events: WsEvent[]): MessageEntry[] {
       } else {
         agentRun.push({ type: 'tool-group', content: '', time: msg.time || '', toolCalls: typed.toolCalls || [] } as MessageEntry);
       }
+      commitAgentRun();
     }
 
-    // --- Approval-request: accumulate into agentRun ---
+    // --- Approval-request: flush thinking + commit wrapper, then add approval ---
     else if (msg.type === 'approval-request') {
-      if (hasPendingThinking && pendingThinkingContent) {
-        agentRun.push({ type: 'thinking', content: pendingThinkingContent, key: `thinking-${Date.now()}`, time: '' } as MessageEntry);
-        hasPendingThinking = false;
-        pendingThinkingContent = '';
-      }
+      flushThinkingToAgentRun();
       agentRun.push({
         type: 'approval-request',
         content: '',
@@ -683,6 +690,7 @@ function buildMessages(events: WsEvent[]): MessageEntry[] {
         decision: (msg as any).decision || 'ask',
         mode: (msg as any).mode,
       } as MessageEntry);
+      commitAgentRun();
     }
 
     // --- Unknown type: flush and pass through ---
@@ -1117,7 +1125,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
         <div className="py-4 pb-6">
           {groupedMessages.map((msg, i) => {
             if (msg.type === 'thinking') {
-              return <ThinkingBlock key={msg.key} content={msg.content} />;
+              return <ThinkingBlock key={`thinking-${i}`} content={msg.content} />;
             }
 
             if (msg.type === 'user') {
