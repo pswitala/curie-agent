@@ -81,7 +81,7 @@ export class ChannelManager {
 
      loop = new TurnLoop({
         provider,
-        model: settings.model_override || settings.model,
+        model: settings.providers[settings.current_provider]?.model || settings.model,
         tools: this.tools,
         cwd: channelCwd,
         settings,

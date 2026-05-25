@@ -19,7 +19,12 @@ export async function* streamOpenAICompatible(
   client: OpenAI,
   streamParams: OpenAI.ChatCompletionCreateParams,
   signal?: AbortSignal,
-  options?: { suppressThinking?: boolean; timeoutMs?: number },
+  options?: {
+    suppressThinking?: boolean;
+    timeoutMs?: number;
+    /** Called when no usage data arrived from the stream. Receives accumulated output text. */
+    onNoUsage?: (outputText: string) => { inputTokens: number; outputTokens: number };
+  },
 ): AsyncIterable<ProviderEvent> {
   const suppressThinking = options?.suppressThinking ?? false;
   const timeoutMs = options?.timeoutMs ?? 60_000;
@@ -188,6 +193,9 @@ export async function* streamOpenAICompatible(
         inputTokens: lastUsage.prompt_tokens ?? 0,
         outputTokens: lastUsage.completion_tokens ?? 0,
       };
+    } else if (options?.onNoUsage) {
+      const estimated = options.onNoUsage(debugTextAccum.trim());
+      yield { type: 'usage', inputTokens: estimated.inputTokens, outputTokens: estimated.outputTokens };
     }
 
     yield { type: 'stop', reason: abortCtrl.signal.aborted ? 'aborted' : 'stop' };

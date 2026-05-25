@@ -254,7 +254,7 @@ export class DaemonApp {
 
       const loop = new TurnLoop({
         provider,
-        model: settings.model_override || settings.model,
+        model: settings.providers[settings.current_provider]?.model || settings.model,
         tools: this.tools,
         cwd: join(homedir(), '.curie-agent'),
         settings,
@@ -407,7 +407,7 @@ export class DaemonApp {
 
       // Parse optional spawn overrides from task metadata (set via WebUI schedule form)
       const spawnOverrides = task.metadata as Record<string, unknown> | undefined;
-      const effectiveModel = (spawnOverrides?.model as string) || settings.model_override || settings.model;
+      const effectiveModel = (spawnOverrides?.model as string) || settings.providers[settings.current_provider]?.model || settings.model;
       const effectiveEffort = (spawnOverrides?.effort as 'low' | 'medium' | 'high' | 'max' | 'auto') || settings.effort;
 
       const handle: SubagentHandle = await this.subagentExecutor.spawn({
@@ -508,7 +508,7 @@ export class DaemonApp {
 
       const executor = new HeartbeatExecutor({
         provider,
-        model: settings.model_override || settings.model,
+        model: settings.providers[settings.current_provider]?.model || settings.model,
         tools: this.tools,
         cwd: join(homedir(), '.curie-agent'),
         settings,
@@ -556,7 +556,7 @@ export class DaemonApp {
 
    const executor = new HeartbeatExecutor({
       provider,
-      model: settings.model_override || settings.model,
+      model: settings.providers[settings.current_provider]?.model || settings.model,
       tools: this.tools,
       cwd: join(homedir(), '.curie-agent'),
       settings,

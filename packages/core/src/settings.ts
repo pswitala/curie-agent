@@ -411,10 +411,9 @@ export class SettingsManager {
         // ignore parse errors, use defaults
       }
     }
-    // Sync top-level model to the active provider's default.
-    // model_override (set via /model) takes precedence over this.
+    // Sync top-level model to the active provider's value.
     const prov = this.settings.providers[this.settings.current_provider as keyof ProviderMap];
-    if (prov && !this.settings.model_override) {
+    if (prov) {
       this.settings.model = prov.model;
     }
     return this.settings;
@@ -437,10 +436,10 @@ export class SettingsManager {
     return { ...this.settings };
   }
 
-  /** Get the currently active model name (override or provider default). */
+  /** Get the currently active model name from provider config. */
   getActiveModel(): string {
     const p = this.settings.providers[this.settings.current_provider as keyof ProviderMap];
-    return this.settings.model_override || p?.model || DEFAULT_SETTINGS.model;
+    return p?.model || DEFAULT_SETTINGS.model;
   }
 
   /** Get the currently active provider name. */
@@ -473,14 +472,13 @@ export class SettingsManager {
     return this.settings;
   }
 
-  /** Set the current provider and reset model to its default. */
+  /** Set the current provider and sync model to its value. */
   setCurrentProvider(name: string): CurieSettings {
     this.settings.current_provider = name;
     const prov = this.settings.providers[name as keyof ProviderMap];
     if (prov) {
       this.settings.model = prov.model;
     }
-    this.settings.model_override = undefined;
     this.save();
     return this.settings;
   }

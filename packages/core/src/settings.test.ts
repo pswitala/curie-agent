@@ -173,9 +173,9 @@ describe('SettingsManager migration', () => {
     expect(testManager.getActiveModel()).toBe('claude-sonnet-4-6');
   });
 
-  it('getActiveModel returns override when set', () => {
+  it('getActiveModel returns provider model when set via setProviderKey', () => {
     testManager.load();
-    testManager.update({ model_override: 'claude-opus-4-7' });
+    testManager.setProviderKey('anthropic', 'model', 'claude-opus-4-7');
     expect(testManager.getActiveModel()).toBe('claude-opus-4-7');
   });
 
@@ -240,13 +240,19 @@ describe('SettingsManager migration', () => {
     expect(testManager.getCurrentProvider()).toBe('openrouter');
   });
 
-  it('preserves model_override over provider default', () => {
+  it('switching provider loads that providers model', () => {
     testManager.load();
-    testManager.update({ model_override: 'openai/gpt-4o' });
-    expect(testManager.getActiveModel()).toBe('openai/gpt-4o');
-    testManager.setCurrentProvider('openai');
-    // model_override should be cleared by setCurrentProvider
-    expect(testManager.getActiveModel()).toBe('gpt-4o');
+    testManager.setProviderKey('anthropic', 'model', 'claude-opus-4-7');
+    expect(testManager.getActiveModel()).toBe('claude-opus-4-7');
+    testManager.setCurrentProvider('openrouter');
+    // Should load openrouter's default model, not the anthropic one we set
+    expect(testManager.getActiveModel()).toBe('anthropic/claude-sonnet-4-6');
+  });
+
+  it('setProviderKey persists provider model across load', () => {
+    testManager.load();
+    testManager.setProviderKey('local', 'model', 'qwen-123');
+    expect(testManager.getProviderKey('local', 'model')).toBe('qwen-123');
   });
 
   it('detects flat format with MODEL_API_KEY', () => {

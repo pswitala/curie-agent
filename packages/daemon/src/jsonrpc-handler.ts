@@ -235,7 +235,7 @@ export class JsonRpcHandler {
           if (text.startsWith('/')) {
             const targetSessionId = sessionId || this.sessionStore.create(
               process.cwd(),
-              this.settingsManager.get().model_override || this.settingsManager.get().model,
+              this.settingsManager.getActiveModel(),
               this.settingsManager.get().current_provider || 'unknown',
               type || 'webui',
             ).id;
@@ -260,7 +260,7 @@ export class JsonRpcHandler {
             const settings = this.settingsManager.get();
             const session = this.sessionStore.create(
               process.cwd(),
-              settings.model_override || settings.model,
+              settings.providers[settings.current_provider]?.model || settings.model,
               settings.current_provider || 'unknown',
               type || 'webui',
             );
@@ -610,16 +610,11 @@ export class JsonRpcHandler {
 
           // Resolve model for the subagent.
           // - Explicit 'model' param from UI always wins.
-          // - If spawning on a different provider, use that provider's default config (ignore model_override).
-          // - If same provider as parent, inherit model_override if set.
+          // - Otherwise use the target provider's configured model.
           const effectiveModel = (() => {
             if (model) return model;
-            if (providerName && providerName !== settings.current_provider) {
-              // Different provider — use target's default, not parent's model_override
-              return spawnSettings.providers?.[providerName]?.model || settings.model;
-            }
-            // Same provider — allow model_override to apply
-            return spawnSettings.model_override || spawnSettings.model;
+            const targetProvider = spawnSettings.providers?.[providerName || spawnSettings.current_provider];
+            return targetProvider?.model || spawnSettings.model;
           })();
 
           const handle = await this.daemonApp.subagentExecutor.spawn({
@@ -809,7 +804,7 @@ export class JsonRpcHandler {
     // Build the turn loop config
     const loop = new TurnLoop({
       provider,
-      model: settings.model_override || settings.model,
+      model: settings.providers[settings.current_provider]?.model || settings.model,
       tools: this.tools,
       cwd: sessionInfo?.cwd || join(homedir(), '.curie-agent'),
       settings,
@@ -1034,7 +1029,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
               }
             }
           } else {
-            settings.model_override = args;
+            pConfig.model = args;
             settings.model = args;
             this.settingsManager.update(settings);
             this.sharedEventBus?.emit({
@@ -1060,9 +1055,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
             if (!valid.includes(provider)) {
               emitDelta(`Unknown provider: "${args}". Valid options are: ${valid.join(', ')}`);
             } else {
-              settings.current_provider = provider;
-              settings.model_override = undefined;
-              this.settingsManager.update(settings);
+              this.settingsManager.setCurrentProvider(provider);
               this.sharedEventBus?.emit({
                 type: 'config-changed',
                 id: Math.random().toString(36).substring(7),
@@ -1914,7 +1907,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
             const provider = this.createProvider(settings);
             const handle = await this.daemonApp.subagentExecutor.spawn({
               provider,
-              model: settings.model_override || settings.model,
+              model: settings.providers[settings.current_provider]?.model || settings.model,
               tools: this.tools,
               cwd: join(homedir(), '.curie-agent'),
               settings,
@@ -2157,7 +2150,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
 
     const settings = this.settingsManager.get();
     const provider = this.createProvider(settings);
-    const model = settings.model_override || settings.model;
+    const model = settings.providers[settings.current_provider]?.model || settings.model;
 
     const events = this.sessionStore.loadEvents(sessionId) || [];
     if (events.length === 0) {

@@ -18,7 +18,16 @@ function estimateCostClient(
   model: string,
   inputTokens: number,
   outputTokens: number,
+  modelCost?: string,
 ): number {
+  if (modelCost) {
+    const [inStr, outStr] = modelCost.split(';');
+    const inPrice = parseFloat(inStr || '0');
+    const outPrice = parseFloat(outStr || '0');
+    if (!isNaN(inPrice) && !isNaN(outPrice)) {
+      return (inputTokens * inPrice + outputTokens * outPrice) / 1_000_000;
+    }
+  }
   const pricing: Record<string, { in: number; out: number }> = {
     'opus': { in: 15, out: 75 },
     'sonnet': { in: 3, out: 15 },
@@ -33,8 +42,10 @@ function estimateCostClient(
 }
 
 export default function ChatArea({ cmdResult, onClearCmdResult, rpc, className, activeSessionId, onCreateSession, events, addLiveEvent }: Props) {
-  const { get } = useConfig();
+  const { get, providers } = useConfig();
   const model = get('model') as string | undefined;
+  const currentProvider = (get('current_provider') as string) || 'anthropic';
+  const modelCost = providers.find((p) => p.name === currentProvider)?.model_cost;
 
   // Compute session stats from events
   let totalTokens = 0;
@@ -46,7 +57,7 @@ export default function ChatArea({ cmdResult, onClearCmdResult, rpc, className, 
     const latestUsage = usageEvents[usageEvents.length - 1];
     contextTokens = latestUsage ? (latestUsage.inputTokens || 0) : 0;
     costUsd = usageEvents.reduce((acc, curr) =>
-      acc + estimateCostClient(model || 'sonnet', curr.inputTokens || 0, curr.outputTokens || 0), 0);
+      acc + estimateCostClient(model || 'sonnet', curr.inputTokens || 0, curr.outputTokens || 0, modelCost), 0);
   }
 
   return (

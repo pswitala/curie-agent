@@ -12,6 +12,36 @@ import { streamOpenAICompatible } from './openai-compatible-stream.js';
 
 type CancelableIterable<T> = { iterable: AsyncIterable<T>; cancel(): void };
 
+/** Estimate token count from text byte length. ~4 bytes per token for Llama-family models. */
+function estimateTokens(text: string): number {
+  return Math.max(1, Math.round(new TextEncoder().encode(text).length / 4));
+}
+
+/** Estimate input tokens from a full message array sent to the model. */
+function estimateInputTokens(messages: OpenAI.ChatCompletionMessageParam[]): number {
+  let bytes = 0;
+  for (const m of messages) {
+    if (typeof m.content === 'string') {
+      bytes += new TextEncoder().encode(m.content).length;
+    } else if (Array.isArray(m.content)) {
+      for (const part of m.content) {
+        if (part.type === 'text' && typeof part.text === 'string') {
+          bytes += new TextEncoder().encode(part.text).length;
+        }
+      }
+    }
+    const tc = (m as any).tool_calls as Array<{ function?: { arguments?: string } }> | undefined;
+    if (tc) {
+      for (const call of tc) {
+        if (call.function?.arguments) {
+          bytes += new TextEncoder().encode(call.function.arguments).length;
+        }
+      }
+    }
+  }
+  return Math.max(1, Math.round(bytes / 4));
+}
+
 const FALLBACK_MODELS = [
   'llama3.3',
   'mistral',
@@ -102,7 +132,17 @@ export class OllamaProvider implements Provider {
     const abortCtrl = new AbortController();
 
     return {
-      iterable: streamOpenAICompatible(this.client, streamParams, args.signal ?? abortCtrl.signal),
+      iterable: streamOpenAICompatible(
+        this.client,
+        streamParams,
+        args.signal ?? abortCtrl.signal,
+        {
+          onNoUsage: (outputText) => ({
+            inputTokens: estimateInputTokens(allMessages),
+            outputTokens: estimateTokens(outputText),
+          }),
+        },
+      ),
       cancel() {
         abortCtrl.abort();
       },

@@ -30,7 +30,7 @@ const NAV_ITEMS: { view: View; label: string; icon: string }[] = [
 
 function AppContent() {
   const { rpc, connected, token, setToken } = useApi();
-  const { get, set } = useConfig();
+  const { get, set, providers } = useConfig();
   const [activeView, setActiveView] = useState<View>('assistant');
   const activeMode = (get('mode') as string) || 'auto';
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -220,7 +220,7 @@ function AppContent() {
 
             {/* Mode pill — hidden on very small screens */}
             {window.innerWidth >= 640 && (
-              <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--b2)', background: 'var(--s1)' }}>
+              <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--b2)', background: 'var(--bg)' }}>
                 {MODES.map((m) => (
                   <button
                     key={m}
@@ -244,7 +244,7 @@ function AppContent() {
                 onClick={handleInstallClick}
                 className="flex items-center justify-center rounded-lg transition-all duration-150 px-2.5 py-1 gap-1.5 text-xs font-semibold cursor-pointer shrink-0"
                 style={{
-                  background: 'color-mix(in srgb, var(--green) 10%, transparent)',
+                  background: 'var(--bg)',
                   border: '1px solid color-mix(in srgb, var(--green) 30%, transparent)',
                   color: 'var(--green)',
                 }}
@@ -434,6 +434,33 @@ function AppContent() {
                     return `${(n / 1000).toFixed(1)}k`;
                   }
 
+                  const currentProvider = (get('current_provider') as string) || 'anthropic';
+                  const modelCost = providers.find((p) => p.name === currentProvider)?.model_cost;
+                  const m = (get('model') as string) || 'sonnet';
+                  function estimateCost(inputTokens: number, outputTokens: number): number {
+                    if (modelCost) {
+                      const [inStr, outStr] = modelCost.split(';');
+                      const inPrice = parseFloat(inStr || '0');
+                      const outPrice = parseFloat(outStr || '0');
+                      if (!isNaN(inPrice) && !isNaN(outPrice)) {
+                        return (inputTokens * inPrice + outputTokens * outPrice) / 1_000_000;
+                      }
+                    }
+                    const pricing: Record<string, { in: number; out: number }> = {
+                      'opus': { in: 15, out: 75 },
+                      'sonnet': { in: 3, out: 15 },
+                      'haiku': { in: 0.8, out: 4 },
+                      'gpt-4o': { in: 2.5, out: 10 },
+                      'gpt-4': { in: 5, out: 15 },
+                      'qwen': { in: 0.112, out: 0.224 },
+                    };
+                    const key = Object.keys(pricing).find(k => m.toLowerCase().includes(k)) || 'sonnet';
+                    const p = pricing[key]!;
+                    return (inputTokens * p.in + outputTokens * p.out) / 1_000_000;
+                  }
+                  const totalCost = usageEvents.reduce((acc, curr) =>
+                    acc + estimateCost(curr.inputTokens || 0, curr.outputTokens || 0), 0);
+
                   return (
                     <div className="grid grid-cols-3 gap-3 text-center">
                       <div>
@@ -446,20 +473,7 @@ function AppContent() {
                       </div>
                       <div>
                         <div className="text-[9px] text-muted2 uppercase tracking-wider font-mono">Cost</div>
-                        <div className="text-[12px] text-green font-mono font-semibold">${(usageEvents.reduce((acc, curr) => {
-                          const pricing: Record<string, { in: number; out: number }> = {
-                            'opus': { in: 15, out: 75 },
-                            'sonnet': { in: 3, out: 15 },
-                            'haiku': { in: 0.8, out: 4 },
-                            'gpt-4o': { in: 2.5, out: 10 },
-                            'gpt-4': { in: 5, out: 15 },
-                            'qwen': { in: 0.112, out: 0.224 },
-                          };
-                          const m = (get('model') as string) || 'sonnet';
-                          const key = Object.keys(pricing).find(k => m.toLowerCase().includes(k)) || 'sonnet';
-                          const p = pricing[key]!;
-                          return acc + ((curr.inputTokens || 0) * p.in + (curr.outputTokens || 0) * p.out) / 1_000_000;
-                        }, 0)).toFixed(4)}</div>
+                        <div className="text-[12px] text-green font-mono font-semibold">${totalCost.toFixed(4)}</div>
                       </div>
                     </div>
                   );
