@@ -15,7 +15,7 @@ export type ProviderEvent =
   | { type: 'tool-call'; id: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }
   | { type: 'tool-result-request'; callId: string }
   | { type: 'usage'; inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
-  | { type: 'stop'; reason: string };
+  | { type: 'stop'; reason: string; errorDetail?: string };
 
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'max' | 'auto';
 

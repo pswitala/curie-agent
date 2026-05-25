@@ -153,4 +153,68 @@ describe('streamOpenAICompatible', () => {
     const events = await collect(streamOpenAICompatible(client, {} as OpenAI.ChatCompletionCreateParams, ctrl.signal));
     expect(events[events.length - 1]).toEqual({ type: 'stop', reason: 'aborted' });
   });
+
+  it('yields stop event with error reason when SDK throws during iteration', async () => {
+    let yieldCount = 0;
+    const throwingIterable = {
+      async *[Symbol.asyncIterator]() {
+        yield makeChunk('first ');
+        yieldCount++;
+        yield makeChunk('second ');
+        yieldCount++;
+        throw new Error('SSE parse error: malformed chunk');
+      },
+    };
+    const client = {
+      chat: {
+        completions: {
+          create: async () => throwingIterable,
+        },
+      },
+    } as unknown as OpenAI;
+
+    const events = await collect(streamOpenAICompatible(client, {} as OpenAI.ChatCompletionCreateParams));
+    // Should have yielded text deltas before the error, then a stop event
+    const textDeltas = events.filter((e) => e.type === 'text-delta');
+    expect(textDeltas).toHaveLength(2);
+    const stopEvent = events[events.length - 1];
+    expect(stopEvent.type).toBe('stop');
+    expect(stopEvent.reason).toBe('error');
+    expect(stopEvent.errorDetail).toContain('SSE parse error');
+  });
+
+ it('respects timeout and yields aborted stop when server is slow', async () => {
+    // Mock that simulates a hanging SSE stream: waits in the generator,
+    // checks abort signal, throws when aborted (like real SDK does).
+    const hangingClient = {
+      chat: {
+        completions: {
+          create: async () => {
+            let _abortSignal: AbortSignal | null = null;
+            return (async function* () {
+              // We can't access the internal abortCtrl from here, so we simulate
+              // by waiting a long time. The for-await loop in streamOpenAICompatible
+              // checks abortCtrl.signal.aborted at the top of each iteration.
+              // When timeout fires, the next loop check will break.
+              // To make the test actually finish, we yield after a short delay
+              // and let the loop detect the abort.
+              await new Promise((resolve) => setTimeout(resolve, 100));
+              if (_abortSignal?.aborted) return;
+              yield makeChunk('partial');
+            })();
+          },
+        },
+      },
+    } as unknown as OpenAI;
+
+    const events = await collect(
+      streamOpenAICompatible(hangingClient, {} as OpenAI.ChatCompletionCreateParams, undefined, { timeoutMs: 50 }),
+    );
+    // After 50ms timeout, the loop breaks on next iteration check.
+    // The mock yields after 100ms, but by then the abort fired at 50ms.
+    // The generator yields 'partial' then the loop checks aborted and breaks.
+    const stopEvent = events[events.length - 1];
+    expect(stopEvent.type).toBe('stop');
+    expect(stopEvent.reason).toBe('aborted');
+  });
 });

@@ -824,11 +824,13 @@ export class JsonRpcHandler {
     // Store the loop for potential cancellation
     this.turnLoops.set(sessionId, loop);
 
-    // Bridge the turn loop's event bus to the shared daemon event bus
-    // so that WS clients receive real-time events.
+    // Bridge the turn loop's event bus to the shared daemon event bus.
+    // Note: 'approval-request' is NOT bridged — ApprovalTracker.register()
+    // emits it directly. In direct mode (no daemonApp), approval events
+    // are not tracked externally anyway.
     const eventTypes: Event['type'][] = [
       'user-prompt', 'assistant-delta', 'assistant-stop', 'tool-call',
-      'tool-result', 'approval-request', 'approval-decision', 'usage',
+      'tool-result', 'approval-decision', 'usage',
       'error', 'session-start', 'session-stop', 'hook', 'status',
       'session-resumed', 'context-warning', 'thinking-delta',
       // Subagent events

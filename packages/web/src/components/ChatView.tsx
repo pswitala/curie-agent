@@ -42,7 +42,7 @@ function ThinkingBlock({ content }: { content: string }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="px-5 py-1 animate-fadeIn">
+    <div className="px-3 py-1 animate-fadeIn">
       <div
         className="rounded-lg overflow-hidden cursor-pointer select-none transition-all duration-150"
         style={{
@@ -85,7 +85,7 @@ function ToolGroupBlock({ toolCalls }: { toolCalls: ToolCallEntry[] }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="px-5 py-1 animate-fadeIn">
+    <div className="px-3 py-1 animate-fadeIn">
       <div className="rounded-lg overflow-hidden mb-1" style={{
         background: 'linear-gradient(135deg, var(--s2) 0%, var(--s1) 100%)',
         border: '1px solid var(--b1)',
@@ -131,7 +131,7 @@ function HeartbeatBlock({ event }: { event: any }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="px-5 py-1 animate-fadeIn">
+    <div className="px-3 py-1 animate-fadeIn">
       <div className="rounded-lg overflow-hidden mb-1" style={{
         background: 'linear-gradient(135deg, var(--s2) 0%, var(--s1) 100%)',
         border: '1px solid var(--b1)',
@@ -170,7 +170,7 @@ function HeartbeatBlock({ event }: { event: any }) {
 
 function ReminderBlock({ message, time }: { message: string; time: string }) {
   return (
-    <div className="px-5 py-1.5 animate-fadeIn">
+    <div className="px-3 py-1.5 animate-fadeIn">
       <div className="p-3.5 rounded-xl backdrop-blur-md shadow-lg max-w-[480px] flex gap-3 transition-all duration-200 relative overflow-hidden group" style={{
         background: 'linear-gradient(135deg, color-mix(in srgb, var(--gold) 8%, var(--s2)), color-mix(in srgb, var(--gold) 4%, var(--s1)))',
         border: '1px solid color-mix(in srgb, var(--gold) 20%, var(--b1))',
@@ -284,7 +284,7 @@ function ApprovalBlock({ toolCallId, name, input, decision, events, rpc, mode }:
   if (!isPending) {
     const isApproved = resolvedDecision === 'allow';
     return (
-      <div className="px-5 py-1.5 flex items-center gap-2.5 animate-fadeIn select-none">
+      <div className="px-3 py-1.5 flex items-center gap-2.5 animate-fadeIn select-none">
         <div className={`flex items-center justify-center w-5 h-5 rounded-full ${
           isApproved ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
         } shrink-0`}>
@@ -310,6 +310,8 @@ function ApprovalBlock({ toolCallId, name, input, decision, events, rpc, mode }:
     );
   }
 
+  // In auto mode the daemon resolves approvals itself — never show the blocking modal.
+  // (The result badge above still renders once the approval-decision event arrives.)
   if (mode === 'auto') {
     return null;
   }
@@ -361,7 +363,7 @@ function ApprovalBlock({ toolCallId, name, input, decision, events, rpc, mode }:
           <button
             onClick={() => handleDecide('deny')}
             disabled={deciding}
-            className="py-2 px-5 rounded-xl bg-s3 border border-b2 hover:bg-s4 text-fg hover:text-text hover:border-b3 font-semibold text-[13px] transition-all duration-150 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none cursor-pointer flex items-center justify-center gap-1.5"
+            className="py-2 px-3 rounded-xl bg-s3 border border-b2 hover:bg-s4 text-fg hover:text-text hover:border-b3 font-semibold text-[13px] transition-all duration-150 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none cursor-pointer flex items-center justify-center gap-1.5"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -391,7 +393,7 @@ function AgentActionsWrapper({ blocks, blockCount, response, time, events: wsEve
   if (!hasContent) return null;
 
   return (
-    <div className="px-5 py-1 animate-fadeIn">
+    <div className="px-3 py-1 animate-fadeIn">
       <div
         className="rounded-lg overflow-hidden cursor-pointer select-none transition-all duration-150"
         style={{
@@ -402,7 +404,7 @@ function AgentActionsWrapper({ blocks, blockCount, response, time, events: wsEve
         onClick={() => setExpanded(!expanded)}
       >
         {/* Header row — shows count + response preview */}
-        <div className="flex items-center gap-2 px-3 py-2" style={{ background: 'color-mix(in srgb, var(--s2) 80%, transparent)' }}>
+        <div className="flex items-center gap-2 px-3 py-2" style={{ background: 'var(--bg)' }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" className="shrink-0" style={{ opacity: 0.7 }}>
             <circle cx="12" cy="12" r="2" />
             <ellipse cx="12" cy="12" rx="10" ry="4" />
@@ -432,8 +434,8 @@ function AgentActionsWrapper({ blocks, blockCount, response, time, events: wsEve
         {/* Expanded content — nested blocks keep their native interactivity */}
         {expanded && (
           <div
-            className="px-3 py-2.5"
-            style={{ borderTop: '1px solid var(--b1)', background: 'color-mix(in srgb, var(--s1) 60%, transparent)' }}
+            className="px-1 py-1"
+            style={{ borderTop: '1px solid var(--b1)', background: 'var(--bg)' }}
             onClick={(e) => e.stopPropagation()}
           >
             {blocks.map((block, bi) => {
@@ -590,19 +592,30 @@ function buildMessages(events: WsEvent[]): MessageEntry[] {
   let pendingThinkingContent = '';
 
   const wrapTurnAndClear = () => {
-    // Flush coalesced thinking into agentRun
     if (hasPendingThinking && pendingThinkingContent) {
-      agentRun.push({ type: 'thinking', content: pendingThinkingContent, key: `thinking-${Date.now()}`, time: '' } as MessageEntry);
+      if (agentRun.length > 0) {
+        // Thinking arrived after tool activity — keep it inside the agent-actions wrapper.
+        agentRun.push({ type: 'thinking', content: pendingThinkingContent, key: `thinking-${Date.now()}`, time: '' } as MessageEntry);
+      } else {
+        // Pure thinking with no tool calls — render as a top-level block so it's
+        // always visible (not buried inside a collapsed agent-actions wrapper).
+        result.push({ type: 'thinking', content: pendingThinkingContent, key: `thinking-${Date.now()}`, time: '' } as MessageEntry);
+      }
       hasPendingThinking = false;
       pendingThinkingContent = '';
     }
 
     if (agentRun.length > 0) {
       let firstTime = (agentRun[0] as any).time || '';
+      // Count semantic actions: tool-group entries expand to their individual tool call count.
+      const semanticCount = agentRun.reduce((sum, b) => {
+        if (b.type === 'tool-group') return sum + ((b as any).toolCalls?.length || 1);
+        return sum + 1;
+      }, 0);
       result.push({
         type: 'agent-actions',
         blocks: [...agentRun],
-        blockCount: agentRun.length,
+        blockCount: semanticCount,
         response: undefined,
         time: firstTime,
       } as MessageEntry);
@@ -655,7 +668,6 @@ function buildMessages(events: WsEvent[]): MessageEntry[] {
 
     // --- Approval-request: accumulate into agentRun ---
     else if (msg.type === 'approval-request') {
-      // Flush pending thinking before approval so they become separate blocks
       if (hasPendingThinking && pendingThinkingContent) {
         agentRun.push({ type: 'thinking', content: pendingThinkingContent, key: `thinking-${Date.now()}`, time: '' } as MessageEntry);
         hasPendingThinking = false;
@@ -1110,7 +1122,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
 
             if (msg.type === 'user') {
                return (
-                 <div key={i} className="flex flex-row-reverse px-5 py-0.5 animate-fadeIn transition-colors duration-100">
+                 <div key={i} className="flex flex-row-reverse px-3 py-0.5 animate-fadeIn transition-colors duration-100">
                    <div className="flex flex-1 flex-col items-end min-w-0">
                      <div className="flex flex-row-reverse items-baseline gap-2 mb-1">
                        <span className="text-xs font-semibold" style={{ color: 'var(--cream)' }}>you</span>
@@ -1163,7 +1175,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
 
              if (msg.type === 'error') {
                return (
-                 <div key={i} className="px-5 py-0.5 animate-fadeIn transition-colors duration-100">
+                 <div key={i} className="px-3 py-0.5 animate-fadeIn transition-colors duration-100">
                    <div className="flex items-baseline gap-2 mb-1">
                      <span className="text-xs font-semibold" style={{ color: 'var(--red)' }}>error</span>
                      <span className="text-xs text-muted font-mono">{msg.time}</span>
@@ -1178,7 +1190,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
              }
 
              return (
-               <div key={i} className="px-5 py-0.5 animate-fadeIn transition-colors duration-100">
+               <div key={i} className="px-3 py-0.5 animate-fadeIn transition-colors duration-100">
                  <div className="flex items-baseline gap-2 mb-1">
                    <span className="text-xs font-semibold" style={{ color: 'var(--gold)' }}>curie-agent</span>
                    <span className="text-xs text-muted font-mono">{msg.time}</span>
@@ -1193,7 +1205,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
 
           {/* Typing indicator */}
           {typing && (
-            <div className="flex items-center px-5 py-2">
+            <div className="flex items-center px-3 py-2">
               <div className="flex gap-1.5">
                 <span className="w-[5px] h-[5px] bg-muted2 rounded-full animate-dot inline-block" style={{ animation: 'tdot 1.4s infinite' }} />
                 <span className="w-[5px] h-[5px] bg-muted2 rounded-full animate-dot inline-block" style={{ animation: 'tdot 1.4s infinite 0.2s' }} />
@@ -1208,7 +1220,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
       <div className="flex-shrink-0">
         {/* Error banner */}
         {error && (
-          <div className="px-5 py-1.5 bg-red/10 border-t border-red/20">
+          <div className="px-3 py-1.5 bg-red/10 border-t border-red/20">
             <div className="text-[11px] text-red font-mono">{error}</div>
           </div>
         )}

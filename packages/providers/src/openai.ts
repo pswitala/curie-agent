@@ -114,10 +114,12 @@ export class OpenAIProvider implements Provider {
       stream_options: { include_usage: true },
     } as OpenAI.ChatCompletionCreateParams;
 
+    const abortCtrl = new AbortController();
+
     return {
-      iterable: streamOpenAICompatible(this.client, streamParams, args.signal),
+      iterable: streamOpenAICompatible(this.client, streamParams, args.signal ?? abortCtrl.signal),
       cancel() {
-        // Chat Completions SDK doesn't expose a public cancel method.
+        abortCtrl.abort();
       },
     };
   }
@@ -398,7 +400,7 @@ export class OpenAIProvider implements Provider {
 
         return {
           role: 'assistant',
-          content: textParts.join('\n') || null,
+          content: textParts.join('\n') || '',
           ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
         } as OpenAI.ChatCompletionAssistantMessageParam;
       }

@@ -75,21 +75,36 @@ export class OllamaProvider implements Provider {
       ? [{ role: 'system', content: args.system }, ...messages]
       : messages;
 
-    // Thinking blocks and token caching are omitted; include_usage requests final usage chunk
+    // Debug: log exact message payload sent to llama.cpp
+    if (process.env.DEBUG_PROVIDER) {
+      console.log(`[ollama/stream] model=${model}, messages=${allMessages.length}, tools=${tools?.length ?? 0}`);
+      for (const [i, m] of allMessages.entries()) {
+        const role = m.role;
+        const content = typeof m.content === 'string' ? `"${((m.content as string).slice(0, 80))}..."` : JSON.stringify(m.content)?.slice(0, 200);
+        const tcs = (m as any).tool_calls ? `tool_calls=${JSON.stringify((m as any).tool_calls)?.slice(0, 200)}` : '';
+        const tci = (m as any).tool_call_id ? `tool_call_id=${(m as any).tool_call_id}` : '';
+        console.log(`  [${i}] role=${role} content=${content} ${tcs} ${tci}`.trim());
+      }
+    }
+
+    // Thinking blocks and token caching are omitted.
+    // stream_options intentionally omitted — llama.cpp often doesn't support it,
+    // which causes malformed final SSE chunks and silent stream failures.
     const streamParams = {
       model,
       messages: allMessages,
       stream: true,
-      stream_options: { include_usage: true },
       ...(tools ? { tools } : {}),
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
       ...(args.maxTokens ? { max_tokens: args.maxTokens } : {}),
     } as OpenAI.ChatCompletionCreateParams;
 
+    const abortCtrl = new AbortController();
+
     return {
-      iterable: streamOpenAICompatible(this.client, streamParams, args.signal),
+      iterable: streamOpenAICompatible(this.client, streamParams, args.signal ?? abortCtrl.signal),
       cancel() {
-        // The signal.aborted check inside the generator loop will break on next iteration
+        abortCtrl.abort();
       },
     };
   }
@@ -106,13 +121,21 @@ export class OllamaProvider implements Provider {
     if (args?.system) {
       messages.unshift({ role: 'system' as const, content: args.system });
     }
+
+    if (process.env.DEBUG_PROVIDER) {
+      console.log('[ollama/check] starting provider.check() call');
+    }
     const response = await this.client.chat.completions.create({
       model,
       messages,
       max_tokens: 256,
       temperature: 0,
-    });
-    return response.choices[0]?.message?.content?.trim() ?? '';
+    }, { signal: args?.signal });
+    const result = response.choices[0]?.message?.content?.trim() ?? '';
+    if (process.env.DEBUG_PROVIDER) {
+      console.log(`[ollama/check] result="${result.slice(0, 100)}"`);
+    }
+    return result;
   }
 
   async complete(args: ProviderCompleteArgs): Promise<ProviderCompleteResult> {
@@ -207,11 +230,17 @@ export class OllamaProvider implements Provider {
             },
           }));
 
-        return {
-          role: 'assistant',
-          content: textParts.join('\n') || null,
-          ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-        } as OpenAI.ChatCompletionAssistantMessageParam;
+        // Some llama.cpp GGUF templates don't handle empty/null content alongside tool_calls.
+        // Only include the content key when there's actual text.
+        const assistantMsg: Record<string, unknown> = { role: 'assistant' };
+        if (textParts.length > 0) {
+          assistantMsg.content = textParts.join('\n');
+        }
+        // When textParts is empty: omit content entirely (don't set null or "")
+        if (toolCalls.length > 0) {
+          assistantMsg.tool_calls = toolCalls;
+        }
+        return assistantMsg as unknown as OpenAI.ChatCompletionAssistantMessageParam;
       }
 
       return { role: m.role, content: JSON.stringify(m.content) };

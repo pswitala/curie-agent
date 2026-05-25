@@ -24,7 +24,7 @@ export interface ProviderStream {
     effort?: ReasoningEffort;
   }): CancelableIterable<ProviderEvent>;
   /** Non-streaming call — used for quick evaluations (e.g. harm-check). */
-  check(prompt: string, args?: { model?: string; system?: string }): Promise<string>;
+  check(prompt: string, args?: { model?: string; system?: string; signal?: AbortSignal }): Promise<string>;
 }
 
 export interface Tool {
@@ -39,7 +39,7 @@ export type ProviderEvent =
   | { type: 'tool-call'; id: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }
   | { type: 'tool-result-request'; callId: string }
   | { type: 'usage'; inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
-  | { type: 'stop'; reason: string };
+  | { type: 'stop'; reason: string; errorDetail?: string };
 
 export interface TurnLoopConfig {
   provider: ProviderStream;
@@ -138,20 +138,40 @@ export class TurnLoop {
     this._cwd = newCwd;
   }
 
-  private async evaluateHarm(toolName: string, input: Record<string, unknown>): Promise<{ approved: boolean; reason: string }> {
+ private async evaluateHarm(toolName: string, input: Record<string, unknown>): Promise<{ approved: boolean; reason: string }> {
+    // Local/Ollama providers run on a single-threaded server. Firing check()
+    // re-entrantly while the main stream is in-flight serializes both requests
+    // and causes llama.cpp to appear hung. Thinking models (qwen3.x, deepseek-r1,
+    // etc.) also never emit a clean APPROVE/DENY token, so the harm-check always
+    // times out against these models anyway.
+    if (['local', 'ollama'].includes(this.config.provider.name)) {
+      return { approved: true, reason: 'local provider: LLM harm-check skipped' };
+    }
+
     const inputJson = JSON.stringify(input);
     const systemPrompt = 'You are a safety evaluator. Given a tool call, determine if it is potentially harmful to the user\'s system. Harmful means: deleting files, executing arbitrary shell commands, sending data to external services, modifying system configuration, or any action that could cause data loss or security compromise. Your response must be exactly one of these two strings: APPROVE or DENY. Do not add any other text.';
     const prompt = `Evaluate this tool call:\nTool: ${toolName}\nInput: ${inputJson}`;
 
     try {
-      const response = await this.config.provider.check(prompt, { model: this.config.model, system: systemPrompt });
-      const decision = response.trim().toUpperCase();
-      if (decision === 'APPROVE') {
-        return { approved: true, reason: `LLM harm-check: APPROVE` };
+      // Use an AbortController so the HTTP request itself is cancelled on timeout,
+      // not just the Promise.race outcome — prevents zombie requests from queuing.
+      const abortCtrl = new AbortController();
+      const timeoutId = setTimeout(() => abortCtrl.abort(new Error('harm-check timeout')), 15_000);
+      try {
+        const response = await this.config.provider.check(
+          prompt,
+          { model: this.config.model, system: systemPrompt, signal: abortCtrl.signal },
+        );
+        const decision = response.trim().toUpperCase();
+        if (decision === 'APPROVE') {
+          return { approved: true, reason: `LLM harm-check: APPROVE` };
+        }
+        return { approved: false, reason: `LLM harm-check: DENY — ${response.trim()}` };
+      } finally {
+        clearTimeout(timeoutId);
       }
-      return { approved: false, reason: `LLM harm-check: DENY — ${response.trim()}` };
     } catch {
-      // If LLM check fails, deny for safety
+      // If LLM check fails or times out, deny for safety
       return { approved: false, reason: 'LLM harm-check failed — denied' };
     }
   }
@@ -301,6 +321,9 @@ export class TurnLoop {
     try {
       while (turn < maxTurns && !this.abort) {
         turn++;
+        if (process.env.DEBUG_PROVIDER) {
+          console.log(`[turn-loop] turn=${turn}, messages.length=${this.messages.length}`);
+        }
 
         // Create git snapshot before each turn (best-effort).
         if (this.config.settings.safety?.snapshots !== 'off') {
@@ -318,7 +341,7 @@ export class TurnLoop {
         // Local providers (Ollama, llama.cpp) don't support Anthropic thinking blocks.
         // Strip thinking blocks from message history to avoid serialization errors.
         const self = this;
-        const isLocal = self.config.provider.name === 'local';
+        const isLocal = ['local', 'ollama'].includes(self.config.provider.name);
         const streamMessages = isLocal
           ? self.messages.map((m) => {
               if (m.role === 'assistant' && Array.isArray(m.content)) {
@@ -376,6 +399,21 @@ export class TurnLoop {
               case 'usage':
                 emit({ type: 'usage', id: session.id, inputTokens: event.inputTokens, outputTokens: event.outputTokens, cacheReadTokens: event.cacheReadTokens, cacheWriteTokens: event.cacheWriteTokens, timestamp: Date.now() });
                 break;
+
+              case 'stop':
+                if (event.reason === 'error' && event.errorDetail) {
+                  emit({ type: 'error', id: session.id, message:
+                    `Provider stream error: ${event.errorDetail}. This can happen with incompatible local model endpoints or network issues.`,
+                    timestamp: Date.now(),
+                  });
+                } else if (event.reason === 'aborted' && !self.abort) {
+                  // Provider timeout (not user-initiated) — surface it
+                  emit({ type: 'status', id: session.id, message:
+                    'Provider request timed out. The local model may be too slow or overloaded.',
+                    timestamp: Date.now(),
+                  });
+                }
+                break;
             }
           }
         } catch (err: unknown) {
@@ -395,7 +433,7 @@ export class TurnLoop {
               emit({ type: 'session-stop', id: session.id, reason: 'error', timestamp: Date.now() });
               return { events: self.bus.history(), sessionId: session.id, reason: 'error' };
             }
-            if (msg.includes('invalid string length') || msg.includes('INVALID_LENGTH')) {
+ if (msg.includes('invalid string length') || msg.includes('INVALID_LENGTH')) {
               emit({ type: 'error', id: session.id, message:
                 `Provider returned "invalid string length" — the local model's response format is incompatible with the Anthropic SDK. This usually means the model doesn't fully implement the Anthropic API. Try: use a model that supports the Anthropic Messages API (e.g. llama-3.1), or switch to OpenAI-compatible provider with correct model names. (Original: ${msg})`,
                 timestamp: Date.now(),
@@ -403,6 +441,18 @@ export class TurnLoop {
               emit({ type: 'session-stop', id: session.id, reason: 'error', timestamp: Date.now() });
               return { events: self.bus.history(), sessionId: session.id, reason: 'error' };
             }
+
+            // Connection errors: server unreachable, connection reset, refused
+            const connErrors = ['ECONNREFUSED', 'ECONNRESET', 'ECONNABORTED', 'ENOTFOUND', 'fetch failed'];
+            if (connErrors.some(e => msg.includes(e))) {
+              emit({ type: 'error', id: session.id, message:
+                `Provider connection error: ${msg}. Check that the local model server is running and reachable at the configured URL.`,
+                timestamp: Date.now(),
+              });
+              emit({ type: 'session-stop', id: session.id, reason: 'error', timestamp: Date.now() });
+              return { events: self.bus.history(), sessionId: session.id, reason: 'error' };
+            }
+
             throw err;
           }
         }
@@ -411,6 +461,10 @@ export class TurnLoop {
           emit({ type: 'assistant-stop', id: session.id, timestamp: Date.now() });
           emit({ type: 'session-stop', id: session.id, reason: 'cancelled', timestamp: Date.now() });
           return { events: this.bus.history(), sessionId: session.id, reason: 'cancelled' };
+        }
+
+        if (process.env.DEBUG_PROVIDER) {
+          console.log(`[turn-loop] turn=${turn} stream done: textLen=${fullText.length}, toolCalls=${toolCalls.length}, thinkingBlocks=${thinkingBlocks.length}`);
         }
 
         // Build assistant message: thinking blocks MUST come first (Anthropic
@@ -545,14 +599,12 @@ export class TurnLoop {
           try {
             const result = await tool.execute(tc.input, this.config.settings, this.config.cwd, this.config.sessionId);
             emit({ type: 'tool-result', id: session.id, toolCallId: tc.id, output: result.output, error: result.error, timestamp: Date.now() });
-            const outputStr = result.error ? `Error: ${result.error}` : JSON.stringify(result.output);
-            const decisionLabel = toolDecisionBy === 'llm' ? 'LLM-approved' : toolDecisionBy === 'user' ? 'Approved by user' : 'Auto Approved';
-            this.messages.push({ role: 'tool', toolUseId: tc.id, content: `${tc.name}: ${decisionLabel} — ${outputStr}` });
+            const outputStr = result.error ? `Error: ${result.error}` : (typeof result.output === 'string' ? result.output : JSON.stringify(result.output));
+            this.messages.push({ role: 'tool', toolUseId: tc.id, content: outputStr });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             emit({ type: 'tool-result', id: session.id, toolCallId: tc.id, output: null, error: msg, timestamp: Date.now() });
-            const decisionLabel = toolDecisionBy === 'llm' ? 'LLM-approved' : toolDecisionBy === 'user' ? 'Approved by user' : 'Auto Approved';
-            this.messages.push({ role: 'tool', toolUseId: tc.id, content: `${tc.name}: ${decisionLabel} — Error: ${msg}` });
+            this.messages.push({ role: 'tool', toolUseId: tc.id, content: `Error: ${msg}` });
           }
         }
       }

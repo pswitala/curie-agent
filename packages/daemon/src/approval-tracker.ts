@@ -23,7 +23,8 @@ export class ApprovalTracker {
 
   /**
    * Register a pending approval. Returns a promise that resolves
-   * when the user approves/rejects.
+   * when the user approves/rejects, or after 30s timeout (auto-deny).
+   * Emits approval-request to the shared event bus so clients can decide.
    */
   register(params: {
     toolCallId: string;
@@ -41,10 +42,18 @@ export class ApprovalTracker {
         resolve, reject, decided: false, createdAt: Date.now(),
       });
 
-      this.eventBus.emit({
-        type: 'approval-request',
-        id, toolCallId, name, input, timestamp: Date.now(),
-      } as Event);
+      // 30s timeout — auto-deny if no client responds
+      setTimeout(() => {
+        const entry = this.pending.get(toolCallId);
+        if (entry && !entry.decided) {
+          entry.decided = true;
+          entry.resolve(false);
+          this.pending.delete(toolCallId);
+        }
+      }, 30_000);
+      // approval-request is bridged to the shared bus by ChannelManager from
+      // the turn-loop's own event (which carries decision + mode fields).
+      // Do not emit here to avoid duplicates.
     });
   }
 

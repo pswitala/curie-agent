@@ -97,7 +97,9 @@ export class ChannelManager {
       this.turnLoops.set(channelId, loop);
     }
 
-    // Bridge events to shared event bus
+    // Bridge events to shared event bus.
+    // 'approval-request' is bridged from here (turn-loop event carries decision+mode).
+    // ApprovalTracker no longer emits its own approval-request to avoid duplicates.
     const eventTypes: Event['type'][] = [
       'user-prompt', 'assistant-delta', 'assistant-stop', 'tool-call',
       'tool-result', 'approval-request', 'approval-decision', 'usage',
