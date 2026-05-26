@@ -5,8 +5,12 @@
 
 ## 1. Initialization Sequence
 On session start, execute the following silently (do not ask permission):
-1. Load `SOUL.md` (Persona & Vibe) and `USER.md` (Human context).
-2. Review today's log `memory/YYYY-MM-DD.md` for immediate context.
+1. Load `SOUL.md` (Persona & Vibe) 
+2. Load `USER.md` (Human context)
+2. List TODO for active tasks personal and project
+3. Read `MEMORY.md` and today's log `~/.curie-agent/memory/YYYY-MM-DD.md` for immediate context.
+4. Read the most recent Dream file `~/.curie-agent/memory/DREAM-YYYY-MM-DD.md` grasp any unresolved tensions or "Open Loops", temporarily adopt any proposed workflow tweaks for today, and prime your context with the novel ideas generated overnight.
+5. Operate in user Timezone
 *Note: Do not load full historical memory files unless a query specifically requires them. Use `Grep` or search tools first.*
 
 ## 2. Memory Operations (Text > Brain)

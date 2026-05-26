@@ -141,6 +141,15 @@ Slash Commands (in TUI):
 `.trim());
 }
 
+function formatToolArgs(name: string, input: Record<string, unknown>): string {
+  if (name === 'Bash') return String(input.command || '').slice(0, 80);
+  const path = input.file_path || input.path || '';
+  if (path) return String(path);
+  return Object.entries(input)
+    .map(([k, v]) => `${k}: ${String(v).slice(0, 60)}`)
+    .join(', ');
+}
+
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
   const h = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
@@ -661,7 +670,7 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
     ws.on('tool-call', (event: WsEvent) => {
       const name = String(event.name || 'tool');
       const input = (event.input || {}) as Record<string, unknown>;
-      const args = Object.keys(input).join(', ');
+      const args = formatToolArgs(name, input);
       setMessages(prev => [...prev, {
         role: 'tool-group',
         content: `${name}: ${args}`,

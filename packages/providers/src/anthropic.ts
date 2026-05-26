@@ -189,6 +189,7 @@ export class AnthropicProvider implements Provider {
       }
       toolBlocks.clear();
 
+      let stopReason: string = 'stop';
       try {
         const final = await sdkStream.finalMessage();
         if (final.usage) {
@@ -200,11 +201,20 @@ export class AnthropicProvider implements Provider {
             cacheWriteTokens: final.usage.cache_creation_input_tokens ?? undefined,
           };
         }
+        if (final.stop_reason === 'max_tokens') {
+          stopReason = 'length';
+        }
       } catch {
         // sdkStream.finalMessage() throws if the stream was aborted — that's expected.
       }
 
-      yield { type: 'stop', reason: abortCtrl.signal.aborted ? 'aborted' : 'stop' };
+      if (abortCtrl.signal.aborted) {
+        yield { type: 'stop', reason: 'aborted' };
+      } else if (stopReason === 'length') {
+        yield { type: 'stop', reason: 'length' };
+      } else {
+        yield { type: 'stop', reason: 'stop' };
+      }
     }
 
     return {
@@ -289,6 +299,8 @@ export class AnthropicProvider implements Provider {
       text: text.trim(),
       stopReason: (response.stop_reason === 'tool_use')
         ? 'tool_use'
+        : (response.stop_reason === 'max_tokens')
+        ? 'length'
         : (response.stop_reason === 'end_turn')
         ? 'end_turn'
         : 'stop',

@@ -1349,36 +1349,45 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
             } catch (err) {
               emitDelta(`\n\n❌ **Compaction Failed**: ${err instanceof Error ? err.message : String(err)}`);
             }
-          } else {
+ } else {
             const activeLoop = this.turnLoops.get(sessionId);
             const history = activeLoop
               ? activeLoop.eventBus.history()
               : (this.sessionStore.loadEvents(sessionId) || []);
             const usageEvents = history.filter((e: any) => e.type === 'usage');
-            let input = 0;
-            let output = 0;
-            for (const e of usageEvents) {
-              input += (e as any).inputTokens || 0;
-              output += (e as any).outputTokens || 0;
-            }
+            const latestUsage = usageEvents[usageEvents.length - 1];
+            const input = latestUsage ? ((latestUsage as any).inputTokens || 0) : 0;
+            const output = latestUsage ? ((latestUsage as any).outputTokens || 0) : 0;
             const model = settings.model || 'unknown';
             const windowSize = settings.providers?.[settings.current_provider as any]?.model_context_window ?? 200000;
             const pct = input > 0 ? Math.min(100, Math.round((input / windowSize) * 100)) : 0;
-            
-            const filled = Math.round((pct / 100) * 24);
-            const bar = '█'.repeat(filled) + '░'.repeat(24 - filled);
-            const fmt = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+
+            const fmt = (n: number) => {
+              if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
+              if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+              return String(n);
+            };
 
             if (input === 0 && output === 0) {
               emitDelta(`No token data yet. Start a conversation to see context window usage.\n\nActive model: \`${model}\` (Max Context: \`${fmt(windowSize)}\` tokens).`);
             } else {
-              const lines = [
-                `### Context Window Usage (\`${model}\`):`,
-                `\`${bar}\` **${pct}%** (${fmt(input)}/${fmt(windowSize)})`,
-                `* **Tokens in**: \`${input.toLocaleString()}\``,
-                `* **Tokens out**: \`${output.toLocaleString()}\``,
-              ];
-              emitDelta(lines.join('\n'));
+              const barColor = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--yellow)' : 'var(--green)';
+              const barGradient = pct > 80
+                ? 'linear-gradient(90deg, var(--red), #e08070)'
+                : pct > 50
+                  ? 'linear-gradient(90deg, var(--yellow), #f0d090)'
+                  : 'linear-gradient(90deg, var(--green), #c0d8a8)';
+              emitDelta(`<div style="background:var(--s3);border-radius:8px;padding:12px;margin:8px 0">` +
+                `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">` +
+                `<span style="font-family:monospace;font-size:12px;color:var(--text)">Context Window (${model})</span>` +
+                `<span style="font-family:monospace;font-size:13px;font-weight:bold;color:${barColor}">${pct}%</span>` +
+                `</div>` +
+                `<div style="background:var(--s2);border-radius:4px;height:8px;overflow:hidden">` +
+                `<div style="width:${pct}%;height:100%;background:${barGradient};border-radius:4px"></div>` +
+                `</div>` +
+                `<div style="display:flex;justify-content:space-between;margin-top:8px;font-family:monospace;font-size:11px;color:var(--muted)">` +
+                `<span>In: ${fmt(input)}</span><span>Out: ${fmt(output)}</span><span>Max: ${fmt(windowSize)}</span>` +
+                `</div></div>`);
             }
           }
           break;

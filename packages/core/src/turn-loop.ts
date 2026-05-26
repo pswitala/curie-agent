@@ -333,6 +333,7 @@ export class TurnLoop {
         }
 
         let fullText = '';
+        let hitLengthLimit = false;
         const toolCalls: Array<{ id: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }> = [];
         let totalToolCalls = 0;
         let websearchToolCalls = 0;
@@ -412,6 +413,12 @@ export class TurnLoop {
                     'Provider request timed out. The local model may be too slow or overloaded.',
                     timestamp: Date.now(),
                   });
+                } else if (event.reason === 'length') {
+                  hitLengthLimit = true;
+                  emit({ type: 'status', id: session.id, message:
+                    'Model hit output token limit. Continuing...',
+                    timestamp: Date.now(),
+                  });
                 }
                 break;
             }
@@ -480,6 +487,12 @@ export class TurnLoop {
         }
         if (assistantContent.length > 0) {
           this.messages.push({ role: 'assistant', content: assistantContent });
+        }
+
+        // Hit output token limit without tool calls — tell model to continue
+        if (hitLengthLimit && toolCalls.length === 0) {
+          this.messages.push({ role: 'user', content: '[continue]' });
+          continue;
         }
 
         if (toolCalls.length === 0) {

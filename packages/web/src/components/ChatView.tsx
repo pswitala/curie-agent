@@ -223,6 +223,15 @@ function stringifyInput(input: Record<string, unknown>): string {
   }).join('\n');
 }
 
+function formatToolArgs(name: string, input: Record<string, unknown>): string {
+  if (name === 'Bash') return String(input.command || '').slice(0, 80);
+  const path = input.file_path || input.path || '';
+  if (path) return String(path);
+  return Object.entries(input)
+    .map(([k, v]) => `${k}: ${String(v).slice(0, 60)}`)
+    .join(', ');
+}
+
 function escapeHtml(text: string): string {
   return text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
 }
@@ -523,7 +532,7 @@ function eventToMessage(event: WsEvent): MessageEntry | null {
     case 'tool-call': {
       const name = (event as any).name || 'tool';
       const input = (event as any).input || {};
-      const args = Object.keys(input).join(', ');
+      const args = formatToolArgs(name, input);
       return {
         type: 'tool-group',
         content: '',
