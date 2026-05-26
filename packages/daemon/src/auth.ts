@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 const DAEMON_TOKEN_FILE = join(homedir(), '.curie-agent', 'daemon.token');
-const SETTINGS_FILE = join(homedir(), '.curie-agent', 'settings.json');
+const SETTINGS_FILE = join(homedir(), '.curie-settings.json');
 
 export function generateToken(): string {
   const buf = new Uint8Array(16);

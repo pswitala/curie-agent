@@ -193,7 +193,7 @@ export default function SetupWizard({ rpc, onComplete, className }: Props) {
               className="w-full px-3 py-2.5 bg-[#0d1117] border border-b2 rounded-xl text-xs text-text font-mono placeholder-slate-600 focus:outline-none focus:border-blue-500/70 transition-colors"
               autoFocus
             />
-            <p className="text-[10px] text-muted">Saved to ~/.curie-agent/settings.json</p>
+            <p className="text-[10px] text-muted">Saved to ~/.curie-settings.json</p>
           </div>
         );
       }

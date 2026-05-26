@@ -10,10 +10,10 @@ import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 
-import { ChatSurface, COLD_START_BANNER, getInitialWizardState, advanceStep, createIdentityFiles, getConfirmationMessage, isAlreadyInitialized, PROVIDER_INFO } from '@curie-agent/tui';
+import { ChatSurface, COLD_START_BANNER, getInitialWizardState, advanceStep, getConfirmationMessage, isAlreadyInitialized, PROVIDER_INFO } from '@curie-agent/tui';
 import type { InitWizardState } from '@curie-agent/tui';
 import { getTheme } from '@curie-agent/render';
-import { SettingsManager, DEFAULT_SETTINGS } from '@curie-agent/core';
+import { SettingsManager, DEFAULT_SETTINGS, createIdentityFilesFromTemplates, copyInitSkills } from '@curie-agent/core';
 import type { CurieSettings } from '@curie-agent/core';
 import { ensureToken, loadToken } from '@curie-agent/daemon';
 import type { DaemonServer } from '@curie-agent/daemon';
@@ -33,6 +33,7 @@ import type { WsEvent } from './daemon-client.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf-8'));
 const VERSION = pkg.version;
+const templatesDir = join(__dirname, '..', '..', 'templates');
 
 // Module-level user input history — survives App remounts by Ink.
 const userInputHistory: string[] = [];
@@ -566,7 +567,7 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
 
   const [messages, setMessages] = useState<
     Array<{ role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'task' | 'debug' | 'thinking'; content: string; title?: string }>
-  >([{ role: 'assistant', content: COLD_START_BANNER }]);
+  >([]);
 
   const [currentModel, setCurrentModel] = useState(initialModel || '');
   const [currentProvider, setCurrentProvider] = useState('connecting...');
@@ -786,6 +787,15 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
       } catch (err) {
         console.error('[tui] Failed to load initial settings from daemon:', err);
       }
+
+      // Auto-trigger init wizard on first launch
+      if (!isAlreadyInitialized()) {
+        const initialState = getInitialWizardState(settingsMgrRef.current.get());
+        setWizardState(initialState);
+        setMessages([{ role: 'system', content: initialState.question }]);
+      } else {
+        setMessages([{ role: 'assistant', content: COLD_START_BANNER }]);
+      }
     });
 
     ws.connect();
@@ -838,7 +848,8 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
         setWizardState(next);
         setMessages(prev => [...prev, { role: 'system', content: next.question }]);
         if (next.question === '__COMPLETE__') {
-          createIdentityFiles(wizardState.data);
+          createIdentityFilesFromTemplates(wizardState.data, templatesDir);
+          copyInitSkills(templatesDir);
           const info = PROVIDER_INFO[wizardState.data.provider!];
           if (wizardState.data.apiKey) {
             settingsMgrRef.current.setProviderKey(wizardState.data.provider!, 'api_key', wizardState.data.apiKey);

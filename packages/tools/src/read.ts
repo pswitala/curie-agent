@@ -27,7 +27,7 @@ export const readTool = createTool(
     }
 
     // Safety: always block reading curie-agent settings (contains API keys).
-    const settingsPath = path.join(expandPath('~/.curie-agent'), 'settings.json');
+    const settingsPath = path.join(expandPath('~'), '.curie-settings.json');
     if (filePath === settingsPath || filePath.toLowerCase() === settingsPath.toLowerCase()) {
       return { output: null, error: 'PathGuard: reading settings.json is blocked — file contains API keys and secrets' };
     }

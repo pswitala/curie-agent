@@ -382,7 +382,7 @@ export function stripLegacyKeys(s: CurieSettings): Record<string, unknown> {
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const CONFIG_DIR = join(homedir(), '.curie-agent');
-const SETTINGS_FILE = join(CONFIG_DIR, 'settings.json');
+const SETTINGS_FILE = join(homedir(), '.curie-settings.json');
 
 // ── SettingsManager ─────────────────────────────────────────────────────────
 

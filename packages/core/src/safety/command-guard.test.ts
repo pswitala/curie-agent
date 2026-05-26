@@ -26,9 +26,9 @@ describe('classifyCommand — hard-deny patterns', () => {
     ['sudo rm -rf /', 'sudo escalation + destructive'],
     ['sudo dd if=/dev/zero of=/dev/sda', 'sudo escalation + destructive'],
     ['sudo mkfs /dev/sda', 'sudo escalation + destructive'],
-    ['cat ~/.curie-agent/settings.json', 'reading curie-agent settings file'],
-    ['grep API_KEY ~/.curie-agent/settings.json', 'reading curie-agent settings file'],
-    ['cat ~/.curie-agent/SETTINGS.json', 'reading curie-agent settings file (case-insensitive)'],
+    ['cat ~/.curie-settings.json', 'reading curie-agent settings file'],
+    ['grep API_KEY ~/.curie-settings.json', 'reading curie-agent settings file'],
+    ['cat ~/.CURIE-SETTINGS.JSON', 'reading curie-agent settings file (case-insensitive)'],
   ])('should deny: %s', (cmd, _expectedReason) => {
     const result = classifyCommand(cmd);
     expect(result.decision).toBe('deny');

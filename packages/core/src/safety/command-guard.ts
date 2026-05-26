@@ -53,7 +53,7 @@ const HARD_DENY_PATTERNS: CommandPattern[] = [
     reason: 'sudo escalation combined with destructive command',
   },
   {
-    regex: /(?:cat|grep|less|more|head|tail)\s+.*\/\.curie-agent\/settings\.json/i,
+    regex: /(?:cat|grep|less|more|head|tail)\s+.*\.curie-settings\.json/i,
     reason: 'reading curie-agent settings file (contains API keys and secrets)',
   },
 ];

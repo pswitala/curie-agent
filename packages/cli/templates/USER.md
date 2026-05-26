@@ -8,15 +8,15 @@
 ---
 
 ## 1. Core Profile
-- **Name / Moniker:** *(Pending)*
-- **Pronouns:** *(Pending)*
-- **Location & Timezone:** *(Pending)*
-- **Primary Language:** *(Pending)*
+- **Name / Moniker:** {{USER_NAME}}
+- **Pronouns:** he/him
+- **Location & Timezone:** {{USER_TIMEZONE}}
+- **Primary Language:** English
 
 ## 2. Operating Context
 *AI Note: Use this to calibrate the complexity and focus of your answers.*
 - **Current Role/Day Job:** *(Pending)*
-- **Core Expertise:** *(Pending)*
+- **Core Expertise:** {{USER_LANGUAGES}}
 - **Current Ambitions/Goals:** *(Pending)*
 
 ## 3. Personal Ecosystem

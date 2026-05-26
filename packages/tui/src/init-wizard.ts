@@ -111,7 +111,7 @@ function getApiKeyQuestion(provider: ProviderName): string {
   if (!info.requiresKey) {
     return `No API key needed for ${info.label}. Click Enter to continue.`;
   }
-  return `Enter your ${info.label} API key:\n  (saved to ~/.curie-agent/settings.json)`;
+  return `Enter your ${info.label} API key:\n  (saved to ~/.curie-settings.json)`;
 }
 
 function getModelQuestion(provider: ProviderName, existingModel?: string): string {
@@ -322,6 +322,10 @@ export function getConfirmationMessage(data: InitData): string {
     '  - ~/.curie-agent/TOOLS.md',
     '  - ~/.curie-agent/HEARTBEAT.md',
     '',
+    'Skills installed:',
+    '  - deep-research (multi-source research methodology)',
+    '  - planning (project, event, life planning)',
+    '',
     'You can now use the TUI normally. Type /help for available commands.',
   ].join('\n');
 }
@@ -330,7 +334,7 @@ export function getConfirmationMessage(data: InitData): string {
 
 export function isAlreadyInitialized(): boolean {
   const curieDir = path.join(os.homedir(), '.curie-agent');
-  return fs.existsSync(path.join(curieDir, 'SOUL.md')) && fs.existsSync(path.join(curieDir, 'settings.json'));
+  return fs.existsSync(path.join(curieDir, 'SOUL.md')) && fs.existsSync(path.join(os.homedir(), '.curie-settings.json'));
 }
 
 export function getExistingProvider(settings: CurieSettings): ProviderName | undefined {

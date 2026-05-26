@@ -2,7 +2,7 @@ import os, { homedir } from 'node:os';
 import path, { join, isAbsolute, resolve as pathResolve } from 'node:path';
 import { readFileSync, existsSync, readdirSync, statSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { Method } from '@curie-agent/protocol';
-import { TurnLoop, parseReminderTime, listSnapshots, revertTo, createIdentityFiles, SubagentExecutor, isPathAllowed, parseAllowlist, createSnapshot, type SessionInfo } from '@curie-agent/core';
+import { TurnLoop, parseReminderTime, listSnapshots, revertTo, createIdentityFilesAuto, SubagentExecutor, isPathAllowed, parseAllowlist, createSnapshot, type SessionInfo } from '@curie-agent/core';
 import { EventBus } from '@curie-agent/core';
 import type { SessionStore, SettingsManager, Event, ProviderStream, Tool, CurieSettings } from '@curie-agent/core';
 import { listSkills, discoverAllSkills } from '@curie-agent/tools';
@@ -542,7 +542,7 @@ export class JsonRpcHandler {
           const userTimezone = this.getStringParam(p, 'userTimezone') || 'UTC';
           const userLanguages = this.getStringParam(p, 'userLanguages') || 'TypeScript, Python';
 
-          createIdentityFiles({
+          createIdentityFilesAuto({
             provider: provider as any,
             apiKey,
             model,
@@ -572,7 +572,7 @@ export class JsonRpcHandler {
             value: true,
           } as any);
 
-          result = { status: 'complete', files: ['SOUL.md', 'USER.md', 'AGENTS.md', 'MEMORY.md', 'TOOLS.md', 'HEARTBEAT.md'] };
+          result = { status: 'complete', files: ['SOUL.md', 'USER.md', 'AGENTS.md', 'MEMORY.md', 'TOOLS.md', 'HEARTBEAT.md'], skills: ['deep-research', 'planning'] };
           break;
         }
 
@@ -1782,7 +1782,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
           const hasAllowlist = raw && (Array.isArray(raw) ? raw.length > 0 : typeof raw === 'string' && raw.trim().length > 0);
           const display = Array.isArray(raw) ? raw.join(', ') : raw;
           lines.push(`* **Allowlist:** ${hasAllowlist ? `\`${display}\`` : '(empty)'}`);
-          lines.push(`**Blocked:** \`${curieDir}/settings.json\` (API keys)`);
+          lines.push(`**Blocked:** \`~/.curie-settings.json\` (API keys)`);
 
           emitDelta(lines.join('\n'));
           break;
