@@ -39,6 +39,7 @@ export const bashTool = createTool(
         timeout,
         shell: false,
         env: { ...process.env },
+        windowsHide: true,
       });
 
       let stdout = '';

@@ -13,7 +13,7 @@ import { homedir, platform } from 'node:os';
 import { ChatSurface, COLD_START_BANNER, getInitialWizardState, advanceStep, getConfirmationMessage, isAlreadyInitialized, PROVIDER_INFO } from '@curie-agent/tui';
 import type { InitWizardState } from '@curie-agent/tui';
 import { getTheme } from '@curie-agent/render';
-import { SettingsManager, DEFAULT_SETTINGS, createIdentityFilesFromTemplates, copyInitSkills } from '@curie-agent/core';
+import { SettingsManager, DEFAULT_SETTINGS, createIdentityFilesAuto } from '@curie-agent/core';
 import type { CurieSettings } from '@curie-agent/core';
 import { ensureToken, loadToken } from '@curie-agent/daemon';
 import type { DaemonServer } from '@curie-agent/daemon';
@@ -33,7 +33,6 @@ import type { WsEvent } from './daemon-client.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf-8'));
 const VERSION = pkg.version;
-const templatesDir = join(__dirname, '..', '..', 'templates');
 
 // Module-level user input history — survives App remounts by Ink.
 const userInputHistory: string[] = [];
@@ -57,6 +56,7 @@ interface Args {
   daemon?: string;
   web?: string;
   sessions?: string;
+  tui?: boolean;
   prompt?: string;
 }
 
@@ -94,6 +94,8 @@ function parseArgs(argv: string[]): Args {
     } else if (arg === 'web') {
       args.web = argv[i + 1]?.startsWith('-') ? 'open' : (argv[i + 1] || 'open');
       if (!argv[i + 1]?.startsWith('-')) i++;
+    } else if (arg === 'tui') {
+      args.tui = true;
     } else if (arg === 'sessions') {
       args.sessions = argv[i + 1]?.startsWith('-') ? 'list' : (argv[i + 1] || 'list');
       if (!argv[i + 1]?.startsWith('-')) i++;
@@ -110,7 +112,8 @@ function printHelp() {
 curie-agent - Local-first, self learner - AI Agent.
 
 Usage:
-  curie-agent                              Interactive TUI
+  curie-agent                              Start daemon + open web UI
+  curie-agent tui                          Interactive TUI
   curie-agent "<prompt>"                   One-shot prompt
   curie-agent -p "<prompt>"                Headless mode, stdout answer
   curie-agent resume                       Resume last session
@@ -212,8 +215,11 @@ function createProvider(settings: CurieSettings): any | null {
       || process.env.OPENROUTER_API_KEY || '';
     const url = (typeof settings.providers?.openrouter?.url === 'string' ? settings.providers.openrouter.url.trim() : '')
       || process.env.OPENROUTER_URL || 'https://openrouter.ai/api/v1';
+    const providerOrder = Array.isArray(settings.providers?.openrouter?.provider_order)
+      ? settings.providers.openrouter.provider_order
+      : undefined;
     if (!key) return null;
-    const p = new OpenRouterProvider(key, url);
+    const p = new OpenRouterProvider(key, url, providerOrder);
     return { name: 'openrouter', stream: p.stream.bind(p), check: p.check.bind(p), complete: p.complete.bind(p) };
   }
 
@@ -349,7 +355,10 @@ async function handleDaemonCommand(subcommand: string): Promise<{ keepRunning: b
         if (!provider) {
           const orKey = (typeof s.providers?.openrouter?.api_key === 'string' ? s.providers.openrouter.api_key.trim() : '') || '';
           const orUrl = (typeof s.providers?.openrouter?.url === 'string' ? s.providers.openrouter.url.trim() : '') || 'https://openrouter.ai/api/v1';
-          const p = new OpenRouterProvider(orKey || 'none', orUrl);
+          const orProviderOrder = Array.isArray(s.providers?.openrouter?.provider_order)
+            ? s.providers.openrouter.provider_order
+            : undefined;
+          const p = new OpenRouterProvider(orKey || 'none', orUrl, orProviderOrder);
           return { name: 'openrouter', stream: p.stream.bind(p), check: p.check.bind(p) };
         }
         return provider;
@@ -443,7 +452,7 @@ async function handleDaemonCommand(subcommand: string): Promise<{ keepRunning: b
       for (const pid of pids) {
         try {
           if (isWin) {
-            execSync(`taskkill //PID ${pid} //F`, { stdio: 'inherit' });
+            execSync(`taskkill /PID ${pid} /F`, { stdio: 'inherit' });
           } else {
             execSync(`kill -9 ${pid}`, { stdio: 'inherit' });
           }
@@ -479,8 +488,12 @@ async function handleWebCommand(subcommand: string): Promise<void> {
         console.log('Starting daemon...');
         await startDaemon();
       }
-      const openCmd = platform() === 'win32' ? 'start' : platform() === 'darwin' ? 'open' : 'xdg-open';
-      spawn(openCmd, [url], { detached: true, stdio: 'ignore' });
+ if (platform() === 'win32') {
+        spawn('cmd.exe', ['/c', 'start', url], { detached: true, stdio: 'ignore' });
+      } else {
+        const openCmd = platform() === 'darwin' ? 'open' : 'xdg-open';
+        spawn(openCmd, [url], { detached: true, stdio: 'ignore' });
+      }
       console.log(`Opened ${url}`);
       break;
     }
@@ -848,8 +861,7 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
         setWizardState(next);
         setMessages(prev => [...prev, { role: 'system', content: next.question }]);
         if (next.question === '__COMPLETE__') {
-          createIdentityFilesFromTemplates(wizardState.data, templatesDir);
-          copyInitSkills(templatesDir);
+          createIdentityFilesAuto(wizardState.data);
           const info = PROVIDER_INFO[wizardState.data.provider!];
           if (wizardState.data.apiKey) {
             settingsMgrRef.current.setProviderKey(wizardState.data.provider!, 'api_key', wizardState.data.apiKey);
@@ -1212,43 +1224,61 @@ async function main() {
     process.exit(0);
   }
 
-  // Ensure daemon is running and get connection info
-  const { url: daemonUrl, token } = await ensureDaemon();
+ // Handle TUI subcommand
+  if (args.tui) {
+    const { url: daemonUrl, token } = await ensureDaemon();
 
-  // Load local settings for theme
-  const settingsManager = new SettingsManager();
-  const settings = settingsManager.load();
-  const themeName = settings.theme || DEFAULT_SETTINGS.theme;
+    // Load local settings for theme
+    const settingsManager = new SettingsManager();
+    const settings = settingsManager.load();
+    const themeName = settings.theme || DEFAULT_SETTINGS.theme;
 
-  // Set terminal background color
-  const theme = getTheme(themeName);
-  const RESET_BG = '\x1b]111\x07';
-  process.stdout.write(`\x1b]11;${theme.background}\x07`);
+    // Set terminal background color
+    const theme = getTheme(themeName);
+    const RESET_BG = '\x1b]111\x07';
+    process.stdout.write(`\x1b]11;${theme.background}\x07`);
 
-  const restore = () => {
-    process.stdout.write(RESET_BG);
-  };
-  process.on('exit', restore);
-  process.on('SIGINT', () => { restore(); process.exit(0); });
-  process.on('SIGTERM', () => { restore(); process.exit(0); });
+    const restore = () => {
+      process.stdout.write(RESET_BG);
+    };
+    process.on('exit', restore);
+    process.on('SIGINT', () => { restore(); process.exit(0); });
+    process.on('SIGTERM', () => { restore(); process.exit(0); });
 
-  // Render the thin-client TUI
-  render(
-    <App
-      daemonUrl={daemonUrl}
-      token={token}
-      model={args.model}
-      approvalMode={args.approvalMode}
-      themeName={themeName}
-      cwd={cwd}
-      resumeSession={args.resume}
-      resumeSessionId={args.resume ? args.prompt : undefined}
-    />,
-    {
-      exitOnCtrlC: false,
-      kittyKeyboard: { mode: 'auto' },
-    },
-  );
+    // Render the thin-client TUI
+    render(
+      <App
+        daemonUrl={daemonUrl}
+        token={token}
+        model={args.model}
+        approvalMode={args.approvalMode}
+        themeName={themeName}
+        cwd={cwd}
+        resumeSession={args.resume}
+        resumeSessionId={args.resume ? args.prompt : undefined}
+      />,
+      {
+        exitOnCtrlC: false,
+        kittyKeyboard: { mode: 'auto' },
+      },
+    );
+    return;
+  }
+
+  // Default: start daemon + open web UI
+  const token = loadToken() || ensureToken();
+  const url = getDaemonUrl();
+  if (!await checkDaemon(url, token)) {
+    await startDaemon();
+  }
+ const openUrl = `${url}?token=${token}`;
+  if (platform() === 'win32') {
+    spawn('cmd.exe', ['/c', 'start', openUrl], { detached: true, stdio: 'ignore' });
+  } else {
+    const openCmd = platform() === 'darwin' ? 'open' : 'xdg-open';
+    spawn(openCmd, [openUrl], { detached: true, stdio: 'ignore' });
+  }
+  console.log(`Opened ${openUrl}`);
 }
 
 main().catch((err) => {

@@ -10,7 +10,7 @@ function execFileAsync(
   options: { cwd: string },
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { cwd: options.cwd }, (err, stdout, stderr) => {
+    execFile(command, args, { cwd: options.cwd, windowsHide: true }, (err, stdout, stderr) => {
       if (err) return reject(err);
       resolve({ stdout: stdout.toString(), stderr: stderr.toString() });
     });

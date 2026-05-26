@@ -4,8 +4,7 @@
   "publish": true,
   "type": "module",
   "files": [
-    "dist",
-    "templates"
+    "dist"
   ],
   "main": "./dist/src/cli.js",
   "types": "./dist/src/cli.d.ts",

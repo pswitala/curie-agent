@@ -47,9 +47,10 @@ export class OpenRouterProvider implements Provider {
 
   private client: OpenAI;
   private _baseUrl: string;
+  private _providerOrder: string[] | undefined;
   private _allModels: string[] | null = null;
 
-  constructor(apiKey?: string, baseUrl?: string) {
+  constructor(apiKey?: string, baseUrl?: string, providerOrder?: string[]) {
     const resolvedKey = (apiKey && apiKey.length > 0)
       ? apiKey
       : process.env.OPENROUTER_API_KEY;
@@ -59,6 +60,7 @@ export class OpenRouterProvider implements Provider {
       );
     }
     this._baseUrl = baseUrl || 'https://openrouter.ai/api/v1';
+    this._providerOrder = providerOrder;
     this.client = new OpenAI({
       apiKey: resolvedKey,
       baseURL: this._baseUrl,
@@ -113,6 +115,7 @@ export class OpenRouterProvider implements Provider {
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
       ...(args.maxTokens ? { max_tokens: args.maxTokens } : {}),
       ...(reasoning ? { reasoning } : {}),
+      ...(this._providerOrder && this._providerOrder.length > 0 ? { provider: { order: this._providerOrder } } : {}),
       stream_options: { include_usage: true },
     };
 
@@ -257,6 +260,7 @@ export class OpenRouterProvider implements Provider {
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
       ...(args.maxTokens ? { max_tokens: args.maxTokens } : {}),
       ...(reasoning ? { reasoning } : {}),
+      ...(this._providerOrder && this._providerOrder.length > 0 ? { provider: { order: this._providerOrder } } : {}),
     } as any);
 
     const choice = response.choices[0];

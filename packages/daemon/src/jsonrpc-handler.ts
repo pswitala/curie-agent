@@ -562,7 +562,6 @@ export class JsonRpcHandler {
           settings.current_provider = provider;
           settings.model = model;
           this.settingsManager.update(settings);
-          this.settingsManager.save();
 
           this.sharedEventBus?.emit({
             type: 'config-changed',

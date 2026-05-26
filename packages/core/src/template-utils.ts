@@ -1,7 +1,6 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createRequire } from 'node:module';
 
 const PLACEHOLDER_RE = /\{\{(\w+)\}\}/g;
 
@@ -82,25 +81,10 @@ export function getCurieDir(): string {
   return dir;
 }
 
-/**
- * Try to resolve the bundled templates directory.
- * Looks for @curie-agent/cli/templates/ via require.resolve,
- * falling back to a relative path from the calling module.
- */
+/** Resolve the bundled templates directory relative to this module. */
 export function resolveTemplatesDir(): string | null {
-  const req = createRequire(import.meta.url);
-
-  // Try resolving the CLI package's templates via require.resolve
-  try {
-    const cliPkg = req.resolve('@curie-agent/cli/package.json');
-    const cliRoot = path.dirname(cliPkg);
-    const candidate = path.join(cliRoot, 'templates');
-    if (fs.existsSync(candidate)) return candidate;
-  } catch { /* package not resolvable */ }
-
-  // Try common relative paths from this module
   const myDir = path.dirname(new URL(import.meta.url).pathname);
-  for (const offset of ['../../cli/templates', '../../../cli/templates']) {
+  for (const offset of ['../templates', '../../templates']) {
     const candidate = path.resolve(myDir, offset);
     if (fs.existsSync(candidate)) return candidate;
   }
