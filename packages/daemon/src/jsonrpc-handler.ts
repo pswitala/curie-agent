@@ -445,7 +445,7 @@ export class JsonRpcHandler {
           const mode = this.getStringParam(params, 'mode');
           if (this.daemonApp) {
             this.daemonApp.taskManager.load();
-            const tasks = mode ? this.daemonApp.taskManager.list({ mode: mode as 'notify' | 'auto' }) : this.daemonApp.taskManager.list({ mode: 'notify' });
+            const tasks = mode ? this.daemonApp.taskManager.list({ mode: mode as 'notify' | 'agent' }) : this.daemonApp.taskManager.list({ mode: 'notify' });
             result = tasks;
           } else {
             result = [];
@@ -459,7 +459,7 @@ export class JsonRpcHandler {
           const scheduledAt = params?.scheduledAt as number | undefined;
           if (!message || !scheduledAt) return this.paramError('message, scheduledAt');
           if (this.daemonApp) {
-            const mode = type === 'task' ? 'auto' : 'notify';
+            const mode = type === 'task' ? 'agent' : 'notify';
             const task = this.daemonApp.taskManager.create({ title: message, mode, scope: 'personal', scheduled_at: scheduledAt });
             result = task;
           }
@@ -759,7 +759,7 @@ export class JsonRpcHandler {
           this.daemonApp.taskManager.load();
           const task = this.daemonApp.taskManager.create({
             title: instruction,
-            mode: 'auto',
+            mode: 'agent',
             scope: 'personal',
             scheduled_at: scheduledAtMs,
             description: Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : '',
@@ -1692,7 +1692,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                 if (!parsed) {
                   emitDelta(`Could not parse scheduled time from: "${rest}". Try: \`at 7:55 do something\` or \`tomorrow at 9am do something\`.`);
                 } else {
-                  const task = this.daemonApp.taskManager.create({ title: parsed.message, mode: 'auto', scope: 'personal', scheduled_at: parsed.scheduledAt });
+                  const task = this.daemonApp.taskManager.create({ title: parsed.message, mode: 'agent', scope: 'personal', scheduled_at: parsed.scheduledAt });
                   const timeStr = new Date(task.scheduled_at!).toLocaleString();
                   emitDelta(`### Task Scheduled Successfully!
 * **Task ID**: \`${task.id}\`
@@ -1707,7 +1707,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
               const filter = ['pending', 'executing', 'completed', 'failed', 'cancelled'].includes(rest.toLowerCase())
                 ? rest.toLowerCase() as any
                 : undefined;
-              const tasks = this.daemonApp.taskManager.list({ mode: 'auto' });
+              const tasks = this.daemonApp.taskManager.list({ mode: 'agent' });
               if (tasks.length === 0) {
                 emitDelta(filter ? `No tasks found with status **${filter}**.` : `No tasks scheduled yet. Use \`/task create\` to schedule a task.`);
               } else {
@@ -1943,11 +1943,11 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
           const sub = parts[0]?.toLowerCase() || '';
           const rest = parts.slice(1).join(' ').trim();
 
-          // Detect mode keyword (auto/notify) from full args
+          // Detect mode keyword (agent/notify) from full args
           const fullArgsLower = args.toLowerCase();
-          let mode: 'manual' | 'auto' | 'notify' = 'manual';
-          if (/^auto\s/.test(fullArgsLower) || /^\bat\b/.test(fullArgsLower)) {
-            mode = 'auto';
+          let mode: 'human' | 'agent' | 'notify' = 'human';
+          if (/^agent\s/.test(fullArgsLower) || /^\bat\b/.test(fullArgsLower)) {
+            mode = 'agent';
           } else if (/^notify\s/.test(fullArgsLower) || /remind\s/.test(fullArgsLower)) {
             mode = 'notify';
           }
@@ -1994,10 +1994,10 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                 const parsed = parseReminderTime(instruction);
                 if (parsed) {
                   instruction = parsed.message;
-                  if (mode === 'auto') {
+                  if (mode === 'agent') {
                     const task = this.daemonApp.taskManager.create({
                       title: instruction,
-                      mode: 'auto', scope, scheduled_at: parsed.scheduledAt,
+                      mode: 'agent', scope, scheduled_at: parsed.scheduledAt,
                     });
                     emitDelta(`**Task scheduled**: "${instruction}" at ${new Date(parsed.scheduledAt).toLocaleString()} (ID: \`${task.id.slice(0, 8)}...\`)`);
                   } else if (mode === 'notify') {

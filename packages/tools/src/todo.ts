@@ -1,7 +1,7 @@
 /**
  * Todo tool — manages structured task lists.
  * Refactored to use the UnifiedTask schema (supports manual/auto/notify modes).
- * Backward compatible with legacy todo.json format (missing `mode` treated as 'manual').
+ * Backward compatible with legacy todo.json format (missing `mode` treated as 'human').
  */
 
 import fs from 'node:fs';
@@ -46,9 +46,9 @@ function normalizeTask(t: unknown): UnifiedTask {
   const rawStatus = String(obj.status ?? '');
   const status = (validStatuses.includes(rawStatus as unknown as UnifiedTask['status']) ? rawStatus : 'todo') as UnifiedTask['status'];
 
-  const validModes: TaskMode[] = ['manual', 'auto', 'notify'];
+  const validModes: TaskMode[] = ['human', 'agent', 'notify'];
   const rawMode = String(obj.mode ?? '');
-  const mode = (validModes.includes(rawMode as unknown as TaskMode) ? rawMode : 'manual') as TaskMode;
+  const mode = (validModes.includes(rawMode as unknown as TaskMode) ? rawMode : 'human') as TaskMode;
 
   const validPriority: TaskPriority[] = ['low', 'medium', 'high', 'critical'];
   const rawPriority = String(obj.priority ?? 'medium');
@@ -152,7 +152,7 @@ function formatDate(): string {
 
 export const todoTool = createTool(
   'Todo',
-  'Manages a structured JSON-based task list with add, edit, remove, complete, cancel, start, reorder, and list actions. Tasks can be manual (todo list), auto (LLM executes at scheduled time), or notify (reminder notification only). Defaults to manual mode unless a time is specified.',
+  'Manages a structured JSON-based task list with add, edit, remove, complete, cancel, start, reorder, and list actions. Tasks can be manual (todo list), agent (LLM executes at scheduled time), or notify (reminder notification only). Defaults to manual mode unless a time is specified.',
   TodoSchema,
   async (input: TodoInput, ctx: ToolContext) => {
     const filePath = resolveScopePath(input.scope, ctx.cwd);
@@ -193,7 +193,7 @@ export const todoTool = createTool(
         status: 'todo',
         priority: (input.priority as TaskPriority) ?? 'medium',
         tags: input.tags ?? [],
-        mode: 'manual', // default — new fields are always manual unless specified via tool context
+        mode: 'human', // default — new fields are always human unless specified via tool context
         scheduled_at: undefined,
         frequency: null,
         result: undefined,

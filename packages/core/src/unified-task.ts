@@ -18,8 +18,8 @@ export function scheduleLabel(type: ScheduleType): string {
 // UnifiedTask fields (the single task model)
 // ---------------------------------------------------------------------------
 
-export type TaskMode = 'manual' | 'auto' | 'notify';
-export const TASK_MODES: readonly TaskMode[] = ['manual', 'auto', 'notify'];
+export type TaskMode = 'human' | 'agent' | 'notify';
+export const TASK_MODES: readonly TaskMode[] = ['human', 'agent', 'notify'];
 
 /** Statuses used by different modes. Includes execution states from daemon integration. */
 export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'done' | 'canceled' | 'pending' | 'executing' | 'completed' | 'failed';
@@ -56,11 +56,11 @@ export interface UnifiedTask {
 
   /** Execution mode — the key unifier. */
   mode: TaskMode;
-  //   manual = todo list item (human does it)          — replaces current Todo
-  //   auto   = LLM executes at scheduled_at             — replaces CronTask type='task' + heartbeat
+  //   human  = todo list item (human does it)          — replaces current Todo
+  //   agent  = LLM executes at scheduled_at             — replaces CronTask type='task' + heartbeat
   //   notify = reminder notification only               — replaces CronTask type='reminder'
 
-  /** Execution result summary (auto mode only, after LLM completes). */
+  /** Execution result summary (agent mode only, after LLM completes). */
   result?: string;
 
   /** Spawn overrides stored when scheduling from WebUI (provider, model, effort, etc.). */
@@ -70,13 +70,13 @@ export interface UnifiedTask {
   /** When the task should fire (epoch ms). Required for auto/notify. Optional for manual. */
   scheduled_at?: number;
 
-  /** Recurring schedule — only meaningful for mode='auto'. Defines heartbeat-like tasks. */
+  /** Recurring schedule — only meaningful for mode='agent'. Defines heartbeat-like tasks. */
   frequency?: { type: ScheduleType; value: string } | null;
 
   // Scope tracking
   scope: TaskScope;
 
-  // Metadata (used by manual tasks, not relevant for auto/notify)
+  // Metadata (used by human tasks, not relevant for auto/notify)
   order: number;
   created_at: string;
   completed_at?: string;
@@ -95,7 +95,7 @@ export interface TasksFile {
 
 /** Default task creation shape for new tasks (mode-dependent defaults). */
 export function createTaskDefaults(mode: TaskMode, scope: TaskScope): Omit<UnifiedTask, 'id' | 'title' | 'description'> {
-  if (mode === 'manual') {
+  if (mode === 'human') {
     return { status: 'todo', priority: 'medium' as const, tags: [], mode, frequency: null, scope, order: 0, created_at: new Date().toISOString(), completed_at: undefined };
   }
   // auto / notify

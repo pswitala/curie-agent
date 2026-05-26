@@ -65,9 +65,9 @@ function mapTodoStatus(status: string): UnifiedTask['status'] {
 function mapCronType(type: string): TaskMode {
   switch (type) {
     case 'reminder': return 'notify';
-    case 'task': return 'auto';
-    case 'heartbeat': return 'auto';
-    default: return 'auto';
+    case 'task': return 'agent';
+    case 'heartbeat': return 'agent';
+    default: return 'agent';
   }
 }
 
@@ -124,7 +124,7 @@ export function migrateTasks(oldTodoPath?: string, oldCronPath?: string, newTask
   const newFile: TasksFile = { $schema: 'tasks.schema.json', version: 1, tasks: [] };
   let order = 0;
 
-  // Migrate todo.json → manual tasks
+  // Migrate todo.json → human tasks
   const todoPaths = [oldTodoPath, join(homedir(), '.curie-agent', 'todo.json')].filter(Boolean) as string[];
   for (const filePath of todoPaths) {
     const legacy = readLegacyTodo(filePath);
@@ -139,7 +139,7 @@ export function migrateTasks(oldTodoPath?: string, oldCronPath?: string, newTask
         status: mapTodoStatus(t.status ?? ''),
         priority: (t.priority as TaskPriority) ?? 'medium',
         tags: t.tags ?? [],
-        mode: 'manual',
+        mode: 'human',
         scheduled_at: undefined,
         frequency: null,
         result: undefined,

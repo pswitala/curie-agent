@@ -27,7 +27,7 @@ function readTaskJson(path: string): { $schema?: string; version?: number; tasks
 
 /** Normalize a legacy task record (missing mode/scope) to UnifiedTask fields. */
 function normalizeTaskRecord(t: Record<string, unknown>): Record<string, unknown> {
-  if (!t.mode) t.mode = 'manual';
+  if (!t.mode) t.mode = 'human';
   if (!t.scope) t.scope = 'personal';
   return t;
 }
@@ -1167,12 +1167,12 @@ function handleTodo(args: string, ctx: SlashCommandContext): SlashCommandResult 
       if (!titleOrId) {
         return {
           type: 'message',
-          message: `Usage: /todo add <title>\nExample: /todo add "Finish the report"\n  /todo auto add "build at 3pm"     — agent executes it\n  /todo notify add "remind about X" — notification only`,
+          message: `Usage: /todo add <title>\nExample: /todo add "Finish the report"\n  /todo agent add "build at 3pm"     — agent executes it\n  /todo notify add "remind about X" — notification only`,
         };
       }
 
       // Detect mode from keyword or natural language time parsing
-      let mode: 'manual' | 'auto' | 'notify' = 'manual';
+      let mode: 'human' | 'agent' | 'notify' = 'human';
       const lower = titleOrId.toLowerCase();
 
       if (lower.startsWith('at ') || /\bat\b/.test(lower)) {
@@ -1180,18 +1180,18 @@ function handleTodo(args: string, ctx: SlashCommandContext): SlashCommandResult 
         const taskMgr = ctx.taskManager;
         let instruction: string;
 
-        // Check if "auto" was explicitly requested
-        if (/^auto\s+add\s*/i.test(args) || /^auto\b/.test(args)) {
-          mode = 'auto';
+        // Check if "agent" was explicitly requested
+        if (/^agent\s+add\s*/i.test(args) || /^agent\b/.test(args)) {
+          mode = 'agent';
         } else if (/^notify\s+add\s*/i.test(args) || /notify\s+/i.test(args)) {
           mode = 'notify';
         }
 
-        const timeKeywordPattern = /^(auto|notify)\s*add\s*/i;
+        const timeKeywordPattern = /^(agent|notify)\s*add\s*/i;
         instruction = titleOrId.replace(timeKeywordPattern, '');
 
         if (!instruction) {
-          return { type: 'message', message: 'Usage: /todo add <title>\n  /todo auto add "build at 3pm"\n  /todo notify add "remind about X"' };
+          return { type: 'message', message: 'Usage: /todo add <title>\n  /todo agent add "build at 3pm"\n  /todo notify add "remind about X"' };
         }
 
         // Try natural language time parsing
@@ -1200,13 +1200,13 @@ function handleTodo(args: string, ctx: SlashCommandContext): SlashCommandResult 
           parseReminderTime = require('../../core/src/reminder-parser.js').parseReminderTime;
         } catch { /* module not available */ }
 
-        if (mode === 'manual' && parseReminderTime) {
+        if (mode === 'human' && parseReminderTime) {
           const parsed = parseReminderTime(instruction);
           if (parsed) {
             instruction = parsed.message;
             if (taskMgr) {
               taskMgr.load();
-              taskMgr.create({ title: instruction, mode: 'auto', scope: 'personal', scheduled_at: parsed.scheduledAt });
+              taskMgr.create({ title: instruction, mode: 'agent', scope: 'personal', scheduled_at: parsed.scheduledAt });
               const timeStr = new Date(parsed.scheduledAt).toLocaleString();
               return { type: 'message', message: `Task scheduled:\nTime: ${timeStr}\nInstruction: ${instruction}` };
             }
@@ -1223,24 +1223,24 @@ function handleTodo(args: string, ctx: SlashCommandContext): SlashCommandResult 
           }
         }
 
-        if (mode === 'auto' && parseReminderTime) {
+        if (mode === 'agent' && parseReminderTime) {
           const parsed = parseReminderTime(instruction);
           if (parsed && taskMgr) {
             taskMgr.load();
-            const task = taskMgr.create({ title: parsed.message, mode: 'auto', scope: 'personal', scheduled_at: parsed.scheduledAt });
+            const task = taskMgr.create({ title: parsed.message, mode: 'agent', scope: 'personal', scheduled_at: parsed.scheduledAt });
             const timeStr = new Date(task.scheduled_at!).toLocaleString();
             return { type: 'message', message: `Scheduled task:\nTime: ${timeStr}\nInstruction: ${parsed.message}` };
           }
         }
 
         // No time could be parsed — fall through to manual mode
-      } else if (/^auto\s+add\s*/i.test(args) || /^auto\b/.test(args)) {
-        mode = 'auto';
+      } else if (/^agent\s+add\s*/i.test(args) || /^agent\b/.test(args)) {
+        mode = 'agent';
       } else if (/^notify\s+add\s*/i.test(args) || /notify\s+/i.test(args)) {
         mode = 'notify';
       }
 
-      const title = (mode === 'manual' ? titleOrId : titleOrId.replace(/^(auto|notify)\s+add\s*/i, '').trim()) || titleOrId;
+      const title = (mode === 'human' ? titleOrId : titleOrId.replace(/^(agent|notify)\s+add\s*/i, '').trim()) || titleOrId;
       if (!title) return { type: 'message', message: `Usage: /todo add <title>\nExample: /todo add "Finish the report"` };
 
       let data = readTasksAtPath(fullPath);
@@ -1268,7 +1268,7 @@ function handleTodo(args: string, ctx: SlashCommandContext): SlashCommandResult 
       data.tasks.push(task);
       writeFileSync(fullPath, JSON.stringify(data, null, 2), 'utf-8');
 
-      const modePrefix = mode === 'manual' ? '' : `[${mode}] `;
+      const modePrefix = mode === 'human' ? '' : `[${mode}] `;
       return { type: 'message', message: `${modePrefix}Added task: "${title}" (ID: ${id.slice(0, 8)})` };
     }
 
@@ -1824,7 +1824,7 @@ function handleTask(args: string, ctx: SlashCommandContext): SlashCommandResult 
       if (!rest) {
         return {
           type: 'message',
-          message: 'Usage: /task create <instruction at time>\nExample:\n  /task create "at 7:55 make a report about AI models"\nOr use /todo auto add "..." for the new unified format.',
+          message: 'Usage: /task create <instruction at time>\nExample:\n  /task create "at 7:55 make a report about AI models"\nOr use /todo agent add "..." for the new unified format.',
         };
       }
 
@@ -1832,23 +1832,23 @@ function handleTask(args: string, ctx: SlashCommandContext): SlashCommandResult 
       try { Object.assign(require('../../core/src/reminder-parser.js'), { parseReminderTime }); } catch { /* not available */ }
 
       if (!parseReminderTime) {
-        return { type: 'message', message: `Could not parse time from: "${rest}".\nTry: /todo auto add "at 7:55 do something"` };
+        return { type: 'message', message: `Could not parse time from: "${rest}".\nTry: /todo agent add "at 7:55 do something"` };
       }
 
       const parsed = parseReminderTime(rest);
       if (!parsed) {
-        return { type: 'message', message: `Could not parse time from: "${rest}".\nUse /todo auto add "instruction at time"` };
+        return { type: 'message', message: `Could not parse time from: "${rest}".\nUse /todo agent add "instruction at time"` };
       }
 
       ctx.taskManager.load();
-      const task = ctx.taskManager.create({ title: parsed.message, mode: 'auto', scope: 'personal', scheduled_at: parsed.scheduledAt });
+      const task = ctx.taskManager.create({ title: parsed.message, mode: 'agent', scope: 'personal', scheduled_at: parsed.scheduledAt });
       return { type: 'message', message: `Task scheduled:\nTime: ${new Date(task.scheduled_at!).toLocaleString()}\nInstruction: ${task.title}\nID: ${task.id}` };
     }
 
     case 'list': {
       ctx.taskManager.load();
-      const tasks = ctx.taskManager.list({ mode: 'auto' });
-      if (!tasks.length) return { type: 'message', message: 'No scheduled tasks.\nUse /todo auto add "..." to create one.' };
+      const tasks = ctx.taskManager.list({ mode: 'agent' });
+      if (!tasks.length) return { type: 'message', message: 'No scheduled tasks.\nUse /todo agent add "..." to create one.' };
       const lines = [`Tasks (${tasks.length}):`];
       for (const t of tasks) {
         const timeStr = t.scheduled_at ? new Date(t.scheduled_at).toLocaleString() : '—';

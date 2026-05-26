@@ -342,7 +342,7 @@ export class DaemonApp {
           await this.executeHeartbeatUnified(task, oldScheduledAt).catch(err => {
             console.error('[DaemonApp] heartbeat run error:', err);
           });
-        } else if (task.mode === 'auto') {
+        } else if (task.mode === 'agent') {
           // One-shot scheduled task (LLM executes)
           await this.executeTaskUnified(task);
         } else if (task.mode === 'notify') {
@@ -403,7 +403,7 @@ export class DaemonApp {
 
       this.taskManager.updateTaskStatus(task.id, 'executing');
 
-      const metadata = { taskId: task.id, taskType: 'auto' };
+      const metadata = { taskId: task.id, taskType: 'agent' };
 
       // Parse optional spawn overrides from task metadata (set via WebUI schedule form)
       const spawnOverrides = task.metadata as Record<string, unknown> | undefined;

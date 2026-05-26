@@ -106,7 +106,7 @@ export class TaskManager {
       id: generateTaskId(),
       title: options.title,
       description: options.description ?? '',
-      status: 'scheduled_at' in options && options.scheduled_at ? (options.mode === 'manual' ? 'todo' : 'pending') : defaults.status,
+      status: 'scheduled_at' in options && options.scheduled_at ? (options.mode === 'human' ? 'todo' : 'pending') : defaults.status,
       priority: options.priority ?? 'medium',
       tags: options.tags ?? [],
       mode: options.mode,
@@ -307,12 +307,12 @@ export class TaskManager {
 
   /** Check if a task is a recurring heartbeat (auto mode with frequency). */
   isHeartbeat(task: UnifiedTask): boolean {
-    return task.mode === 'auto' && task.frequency !== null;
+    return task.mode === 'agent' && task.frequency !== null;
   }
 
   /** Get all pending heartbeat tasks. */
   getHeartbeats(): UnifiedTask[] {
-    return this.data.tasks.filter((t) => t.mode === 'auto' && t.frequency !== null && t.status === 'pending');
+    return this.data.tasks.filter((t) => t.mode === 'agent' && t.frequency !== null && t.status === 'pending');
   }
 
   // -----------------------------------------------------------------------
@@ -343,7 +343,7 @@ export class TaskManager {
     } else {
       this.create({
         title: `Heartbeat: ${scheduleLabel(picked.type)}`,
-        mode: 'auto',
+        mode: 'agent',
         scope: 'personal',
         scheduled_at: computeNextFire(picked, ref),
         frequency: picked,

@@ -1,6 +1,6 @@
 /**
  * CreateScheduledTask tool — schedules the LLM agent to execute an instruction at a specific time.
- * Migrated from CronManager to TaskManager (mode='auto').
+ * Migrated from CronManager to TaskManager (mode='agent').
  */
 
 import { z } from 'zod';
@@ -42,7 +42,7 @@ export const scheduledTaskTool = createTool(
     taskManager.load();
     const task = taskManager.create({
       title: input.instruction,
-      mode: 'auto',
+      mode: 'agent',
       scope: 'personal',
       scheduled_at: scheduledAt,
     });
