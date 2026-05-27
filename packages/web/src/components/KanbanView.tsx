@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useApi } from '../lib/api-context.js';
 import type { JsonRpcClient } from '../lib/jsonrpc-client.js';
 import {
@@ -248,6 +249,7 @@ function KanbanColumn({
   onEdit,
   onRemove,
   onAdd,
+  className = '',
 }: {
   column: ColumnConfig;
   tasks: TaskData[];
@@ -255,6 +257,7 @@ function KanbanColumn({
   onEdit: (task: TaskData) => void;
   onRemove: (id: string) => void;
   onAdd: (status: string) => void;
+  className?: string;
 }) {
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({ id: column.id });
 
@@ -270,7 +273,7 @@ function KanbanColumn({
   };
 
   return (
-    <div className="flex flex-col h-full min-w-[260px] w-[280px] shrink-0">
+    <div className={`flex flex-col h-full min-w-[260px] sm:flex-1 ${className}`}>
       {/* Column header */}
       <div className="flex items-center justify-between px-3 py-2.5 shrink-0">
         <div className="flex items-center gap-2">
@@ -341,6 +344,7 @@ function EditModal({
   const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'critical'>(task.priority);
   const [mode, setMode] = useState<'human' | 'agent' | 'notify'>(task.mode);
   const [scope, setScope] = useState(task.scope);
+  const [status, setStatus] = useState(task.status);
   const [scheduledAt, setScheduledAt] = useState(() => {
     if (task.scheduled_at) {
       const d = new Date(task.scheduled_at);
@@ -358,6 +362,7 @@ function EditModal({
       priority,
       mode,
       scope,
+      status,
       tags: tagsStr.split(',').map(t => t.trim()).filter(Boolean),
       scheduled_at: scheduledAt ? new Date(scheduledAt).getTime() : undefined,
     });
@@ -437,23 +442,32 @@ function EditModal({
             </div>
           </div>
 
-          <div>
-            <label className="text-[10px] text-muted uppercase tracking-wider font-mono mb-1 block">Scope</label>
-            <div className="flex gap-2">
-              {(['personal', 'project'] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setScope(s)}
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer transition-all duration-150"
-                  style={{
-                    background: scope === s ? 'var(--s3)' : 'transparent',
-                    border: `1px solid ${scope === s ? 'var(--b2)' : 'var(--b1)'}`,
-                    color: scope === s ? 'var(--gold)' : 'var(--muted)',
-                  }}
-                >
-                  {s.charAt(0).toUpperCase() + s.slice(1)}
-                </button>
-              ))}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] text-muted uppercase tracking-wider font-mono mb-1 block">Scope</label>
+              <select
+                value={scope}
+                onChange={(e) => setScope(e.target.value as 'personal' | 'project')}
+                className="w-full px-3 py-2 rounded-lg text-[12.5px] text-fg outline-none cursor-pointer"
+                style={{ background: 'var(--s2)', border: '1px solid var(--b1)' }}
+              >
+                <option value="personal">Personal</option>
+                <option value="project">Project</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-muted uppercase tracking-wider font-mono mb-1 block">Status</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-[12.5px] text-fg outline-none cursor-pointer"
+                style={{ background: 'var(--s2)', border: '1px solid var(--b1)' }}
+              >
+                <option value="backlog">Backlog</option>
+                <option value="todo">To Do</option>
+                <option value="in_progress">In Progress</option>
+                <option value="done">Done</option>
+              </select>
             </div>
           </div>
 
@@ -522,6 +536,9 @@ export default function KanbanView({ rpc, className }: Props) {
   const [filterMode, setFilterMode] = useState<string>('all');
   const [filterPriority, setFilterPriority] = useState<string>('all');
   const [filterScope, setFilterScope] = useState<string>('all');
+  const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
+  const filterBtnRef = useRef<HTMLButtonElement>(null);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
 
   const fetchTasks = useCallback(async () => {
@@ -554,6 +571,19 @@ export default function KanbanView({ rpc, className }: Props) {
       unsub2();
     };
   }, [ws, fetchTasks]);
+
+  // Close filter dropdown on click outside
+  useEffect(() => {
+    if (!filterDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-filter-dropdown]')) {
+        setFilterDropdownOpen(false);
+      }
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [filterDropdownOpen]);
 
   const columnTasks = useMemo(() => {
     const grouped: Record<KanbanColumnId, TaskData[]> = {
@@ -726,53 +756,92 @@ export default function KanbanView({ rpc, className }: Props) {
           Tasks
         </h2>
 
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--b2)' }}>
-            {['all', 'human', 'agent', 'notify'].map((m) => (
-              <button
-                key={m}
-                onClick={() => setFilterMode(m)}
-                className="px-2 py-0.5 text-[10px] font-mono cursor-pointer transition-all duration-150 select-none"
-                style={{
-                  color: filterMode === m ? 'var(--gold)' : 'var(--muted)',
-                  background: filterMode === m ? 'var(--s3)' : 'transparent',
-                  borderRight: m !== 'notify' ? '1px solid var(--b1)' : 'none',
-                }}
-              >
-                {m === 'all' ? 'All' : m.charAt(0).toUpperCase() + m.slice(1)}
-              </button>
-            ))}
-          </div>
-
-          <select
-            value={filterPriority}
-            onChange={(e) => setFilterPriority(e.target.value)}
-            className="px-2 py-0.5 rounded-lg text-[10px] font-mono outline-none cursor-pointer"
-            style={{ background: 'var(--s2)', border: '1px solid var(--b2)', color: 'var(--muted)' }}
+        {/* Filter icon + dropdown */}
+        <div className="relative" data-filter-dropdown>
+          <button
+            ref={filterBtnRef}
+            onClick={() => {
+              if (!filterDropdownOpen && filterBtnRef.current) {
+                const rect = filterBtnRef.current.getBoundingClientRect();
+                const width = 200;
+                let left = rect.left;
+                if (left + width > window.innerWidth - 8) {
+                  left = window.innerWidth - width - 8;
+                }
+                setDropdownPos({ top: rect.bottom + 4, left: Math.max(left, 8) });
+              }
+              setFilterDropdownOpen(!filterDropdownOpen);
+            }}
+            className="p-1.5 rounded-lg cursor-pointer transition-colors"
+            style={{
+              background: (filterMode !== 'all' || filterPriority !== 'all' || filterScope !== 'all') ? 'var(--s3)' : 'transparent',
+              border: '1px solid var(--b2)',
+              color: 'var(--muted)',
+            }}
           >
-            <option value="all">All Priority</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-            <option value="critical">Critical</option>
-          </select>
-
-          <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--b2)' }}>
-            {['all', 'personal', 'project'].map((s) => (
-              <button
-                key={s}
-                onClick={() => setFilterScope(s)}
-                className="px-2 py-0.5 text-[10px] font-mono cursor-pointer transition-all duration-150 select-none"
-                style={{
-                  color: filterScope === s ? 'var(--gold)' : 'var(--muted)',
-                  background: filterScope === s ? 'var(--s3)' : 'transparent',
-                  borderRight: s !== 'project' ? '1px solid var(--b1)' : 'none',
-                }}
-              >
-                {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
-              </button>
-            ))}
-          </div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+            </svg>
+          </button>
+          {filterDropdownOpen && createPortal(
+            <div
+              data-filter-dropdown
+              className="fixed rounded-xl shadow-2xl p-3 space-y-2.5 w-[200px]"
+              style={{ top: dropdownPos.top, left: dropdownPos.left, background: 'var(--s1)', border: '1px solid var(--b1)', zIndex: 9999 }}
+            >
+              <div>
+                <label className="text-[9px] text-muted uppercase tracking-wider font-mono mb-1 block">Mode</label>
+                <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--b2)' }}>
+                  {['all', 'human', 'agent', 'notify'].map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => { setFilterMode(m); setFilterDropdownOpen(false); }}
+                      className="flex-1 px-1.5 py-1 text-[10px] font-mono cursor-pointer transition-all"
+                      style={{
+                        color: filterMode === m ? 'var(--gold)' : 'var(--muted)',
+                        background: filterMode === m ? 'var(--s3)' : 'transparent',
+                      }}
+                    >
+                      {m === 'all' ? 'All' : m.charAt(0).toUpperCase() + m.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-[9px] text-muted uppercase tracking-wider font-mono mb-1 block">Priority</label>
+                <select
+                  value={filterPriority}
+                  onChange={(e) => { setFilterPriority(e.target.value); setFilterDropdownOpen(false); }}
+                  className="w-full px-2 py-1 rounded-lg text-[11px] font-mono outline-none cursor-pointer"
+                  style={{ background: 'var(--s2)', border: '1px solid var(--b2)', color: 'var(--muted)' }}
+                >
+                  <option value="all">All</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[9px] text-muted uppercase tracking-wider font-mono mb-1 block">Scope</label>
+                <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--b2)' }}>
+                  {['all', 'personal', 'project'].map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => { setFilterScope(s); setFilterDropdownOpen(false); }}
+                      className="flex-1 px-1.5 py-1 text-[10px] font-mono cursor-pointer transition-all"
+                      style={{
+                        color: filterScope === s ? 'var(--gold)' : 'var(--muted)',
+                        background: filterScope === s ? 'var(--s3)' : 'transparent',
+                      }}
+                    >
+                      {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+           , document.body)}
         </div>
 
         <div className="flex-1" />
@@ -817,8 +886,9 @@ export default function KanbanView({ rpc, className }: Props) {
         onDragCancel={handleDragCancel}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex-1 overflow-x-auto overflow-y-hidden p-4 min-h-0">
-          <div className="flex gap-4 h-full">
+        {/* Desktop: flex row, Mobile: snap scroll one column at a time */}
+        <div className="flex-1 overflow-x-auto overflow-y-hidden min-h-0 snap-x snap-mandatory sm:overflow-x-visible sm:snap-none">
+          <div className="flex h-full sm:gap-4 sm:flex-row flex-nowrap sm:min-w-0">
             {COLUMNS.map((col) => (
               <SortableContext key={col.id} items={columnTaskIds[col.id]} strategy={verticalListSortingStrategy}>
                 <KanbanColumn
@@ -828,6 +898,7 @@ export default function KanbanView({ rpc, className }: Props) {
                   onEdit={setEditTask}
                   onRemove={handleRemove}
                   onAdd={handleColumnAdd}
+                  className="snap-center flex-shrink-0 w-screen sm:w-auto sm:flex-1 px-4 sm:px-0"
                 />
               </SortableContext>
             ))}

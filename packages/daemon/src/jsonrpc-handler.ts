@@ -781,7 +781,7 @@ export class JsonRpcHandler {
             return { jsonrpc: '2.0', id, error: { code: -32603, message: 'Daemon not initialized' } };
           }
           this.daemonApp.taskManager.load();
-          const p = params as Record<string, unknown>;
+          const p = (params || {}) as Record<string, unknown>;
           const filters: Record<string, string> = {};
           if (typeof p.status === 'string') filters.status = p.status;
           if (typeof p.mode === 'string') filters.mode = p.mode;
@@ -830,16 +830,15 @@ export class JsonRpcHandler {
 
           if (typeof p.status === 'string') {
             this.daemonApp.taskManager.updateTaskStatus(taskId, p.status as any);
-          } else {
-            // Field mutations
-            if (typeof p.priority === 'string') task.priority = p.priority as any;
-            if (typeof p.title === 'string') task.title = p.title;
-            if (typeof p.description === 'string') task.description = p.description;
-            if (Array.isArray(p.tags)) task.tags = p.tags;
-            if (typeof p.mode === 'string') task.mode = p.mode as any;
-            if (typeof p.scheduled_at === 'number') task.scheduled_at = p.scheduled_at;
-            this.daemonApp.taskManager.save();
           }
+          if (typeof p.priority === 'string') task.priority = p.priority as any;
+          if (typeof p.title === 'string') task.title = p.title;
+          if (typeof p.description === 'string') task.description = p.description;
+          if (Array.isArray(p.tags)) task.tags = p.tags;
+          if (typeof p.mode === 'string') task.mode = p.mode as any;
+          if (typeof p.scope === 'string') task.scope = p.scope as any;
+          if (typeof p.scheduled_at === 'number') task.scheduled_at = p.scheduled_at;
+          this.daemonApp.taskManager.save();
           this.sharedEventBus?.emit({ type: 'todo-changed', id: crypto.randomUUID(), timestamp: Date.now(), action: 'updated', taskId } as any);
           result = { ok: true, task: this.daemonApp.taskManager.findTask(taskId) };
           break;

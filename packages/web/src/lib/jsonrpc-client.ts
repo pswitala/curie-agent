@@ -213,6 +213,7 @@ export class JsonRpcClient {
     description?: string;
     tags?: string[];
     mode?: 'human' | 'agent' | 'notify';
+    scope?: 'personal' | 'project';
     scheduled_at?: number;
   }): Promise<unknown> {
     return this.request('todo.update', params);

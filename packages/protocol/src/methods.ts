@@ -128,6 +128,7 @@ export const TodoUpdateSchema = z.object({
   description: z.string().optional(),
   tags: z.array(z.string()).optional(),
   mode: z.enum(['human', 'agent', 'notify']).optional(),
+  scope: z.enum(['personal', 'project']).optional(),
   scheduled_at: z.number().optional(),
 });
 
