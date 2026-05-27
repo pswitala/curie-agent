@@ -93,7 +93,7 @@ export class OpenAIProvider implements Provider {
     const reasoningEffort = effortToReasoning(args.effort);
 
     const maxTokens = modelIsReasoning
-      ? args.maxTokens ?? 16_384
+      ? args.maxTokens ?? 65_536
       : args.maxTokens;
 
     const messages = this.mapMessages(args.messages);
@@ -273,7 +273,7 @@ export class OpenAIProvider implements Provider {
     const reasoningEffort = effortToReasoning(args.effort);
 
     const maxTokens = modelIsReasoning
-      ? args.maxTokens ?? 16_384
+      ? args.maxTokens ?? 65_536
       : args.maxTokens;
 
     const messages = this.mapMessages(args.messages);

@@ -5,6 +5,7 @@ import ChannelsView from './components/ChannelsView.js';
 import StatsView from './components/StatsView.js';
 import ProjectsView from './components/ProjectsView.js';
 import SubagentsView from './components/SubagentsView.js';
+import KanbanView from './components/KanbanView.js';
 import CommandPalette from './components/CommandPalette.js';
 import SetupWizard from './components/SetupWizard.js';
 import UpdateNotification from './UpdateNotification.js';
@@ -14,7 +15,7 @@ import { useSession } from './hooks/useSession.js';
 import { useConfig } from './hooks/useConfig.js';
 import AuthorizationScreen from './components/AuthorizationScreen.js';
 
-type View = 'assistant' | 'channels' | 'stats' | 'projects' | 'agents' | 'settings';
+type View = 'assistant' | 'channels' | 'stats' | 'projects' | 'agents' | 'kanban' | 'settings';
 
 
 const MODES = ['plan', 'edit', 'auto', 'yolo'] as const;
@@ -25,6 +26,7 @@ const NAV_ITEMS: { view: View; label: string; icon: string }[] = [
   { view: 'stats', label: 'Stats', icon: 'M18 20V10M12 20V4M6 20v-6' },
   { view: 'projects', label: 'Projects', icon: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z' },
   { view: 'agents', label: 'Agents', icon: 'M12 8c0 2.21-1.79 4-4 4s-4-1.79-4-4 1.79-4 4-4 4 1.79 4 4zm-6 12v-2a6 6 0 0 1 12 0v2' },
+  { view: 'kanban', label: 'Tasks', icon: 'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01' },
   { view: 'settings', label: 'Settings', icon: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z' },
 ];
 
@@ -305,6 +307,7 @@ function AppContent() {
             {activeView === 'stats' && <StatsView rpc={rpc} className="absolute inset-0" />}
             {activeView === 'projects' && <ProjectsView rpc={rpc} className="absolute inset-0" />}
             {activeView === 'agents' && <SubagentsView rpc={rpc} className="absolute inset-0" />}
+            {activeView === 'kanban' && <KanbanView rpc={rpc} className="absolute inset-0" />}
             {activeView === 'settings' && <div className="absolute inset-0 flex items-center justify-center text-muted text-xs">Settings view — coming soon</div>}
           </div>
         </main>

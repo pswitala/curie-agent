@@ -101,6 +101,38 @@ export const TaskScheduleRequestSchema = z.object({
   effort: z.enum(['low', 'medium', 'high', 'max', 'auto']).optional(),
 });
 
+// Unified task (todo) management for Kanban board
+export const TodoListSchema = z.object({
+  status: z.enum(['backlog', 'todo', 'in_progress', 'done', 'canceled', 'pending', 'executing', 'completed', 'failed']).optional(),
+  mode: z.enum(['human', 'agent', 'notify']).optional(),
+  scope: z.enum(['personal', 'project']).optional(),
+  priority: z.enum(['low', 'medium', 'high', 'critical']).optional(),
+});
+
+export const TodoCreateSchema = z.object({
+  title: z.string(),
+  description: z.string().default(''),
+  mode: z.enum(['human', 'agent', 'notify']).default('human'),
+  scope: z.enum(['personal', 'project']).default('personal'),
+  priority: z.enum(['low', 'medium', 'high', 'critical']).default('medium'),
+  tags: z.array(z.string()).default([]),
+  status: z.enum(['backlog', 'todo', 'in_progress', 'done', 'canceled', 'pending', 'executing', 'completed', 'failed']).optional(),
+  scheduled_at: z.number().optional(),
+});
+
+export const TodoUpdateSchema = z.object({
+  id: z.string(),
+  status: z.enum(['backlog', 'todo', 'in_progress', 'done', 'canceled', 'pending', 'executing', 'completed', 'failed']).optional(),
+  priority: z.enum(['low', 'medium', 'high', 'critical']).optional(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  mode: z.enum(['human', 'agent', 'notify']).optional(),
+  scheduled_at: z.number().optional(),
+});
+
+export const TodoRemoveSchema = z.object({ id: z.string() });
+
 export const Method = {
   SESSION_LIST: 'session.list',
   SESSION_GET: 'session.get',
@@ -136,6 +168,11 @@ export const Method = {
   MCP_LIST: 'mcp.list',
   // Task scheduling (from WebUI)
   TASK_SCHEDULE: 'task.schedule',
+  // Unified task (todo) management for Kanban board
+  TODO_LIST: 'todo.list',
+  TODO_CREATE: 'todo.create',
+  TODO_UPDATE: 'todo.update',
+  TODO_REMOVE: 'todo.remove',
   // Identity setup
   IDENTITY_SETUP: 'identity.setup',
   // Subagent management

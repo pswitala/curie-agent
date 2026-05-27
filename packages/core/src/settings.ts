@@ -10,6 +10,7 @@ export interface ProviderConfig {
   model: string;
   model_cost: string;
   model_context_window: number;
+  max_output_tokens?: number;
   provider_order?: string[];
   [key: string]: string | number | string[] | undefined;
 }
@@ -517,6 +518,7 @@ export function parseNestedSettings(parsed: Record<string, unknown>): CurieSetti
           model: getString([`providers.${name}.model`]) || (raw.model as string) || (DEFAULT_SETTINGS.providers[name as string]!.model),
           model_cost: (raw.model_cost as string) || '',
           model_context_window: typeof raw.model_context_window === 'number' ? raw.model_context_window : (DEFAULT_SETTINGS.providers[name as string]!.model_context_window),
+          max_output_tokens: typeof raw.max_output_tokens === 'number' ? raw.max_output_tokens : undefined,
           provider_order: Array.isArray(raw.provider_order) ? raw.provider_order : undefined,
         };
       }

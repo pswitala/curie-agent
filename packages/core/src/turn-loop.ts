@@ -22,6 +22,7 @@ export interface ProviderStream {
     system?: string;
     signal?: AbortSignal;
     effort?: ReasoningEffort;
+    maxTokens?: number;
   }): CancelableIterable<ProviderEvent>;
   /** Non-streaming call — used for quick evaluations (e.g. harm-check). */
   check(prompt: string, args?: { model?: string; system?: string; signal?: AbortSignal }): Promise<string>;
@@ -317,6 +318,8 @@ export class TurnLoop {
     this.messages.push({ role: 'user', content: prompt });
     let turn = 0;
     const maxTurns = this.config.maxTurns ?? 50;
+    let continuationCount = 0;
+    const maxContinuations = 5;
 
     try {
       while (turn < maxTurns && !this.abort) {
@@ -358,6 +361,7 @@ export class TurnLoop {
         // Start the provider stream and capture its cancel function.
         // The cancel() method synchronously aborts the underlying HTTP connection
         // (e.g., Anthropic's stream.abort()), making Esc feel instantaneous.
+        const maxTokens = self.config.settings.providers[self.config.settings.current_provider]?.max_output_tokens;
         const cancelable = self.config.provider.stream({
           messages: streamMessages as any,
           tools: self.config.tools.map((t) => t.definition),
@@ -365,6 +369,7 @@ export class TurnLoop {
           system: withDateContext(self.config.system),
           signal: abortCtrl.signal,
           effort: self.config.effort,
+          maxTokens,
         });
 
         // Wire the AbortSignal's abort event to cancel the stream immediately.
@@ -491,8 +496,15 @@ export class TurnLoop {
 
         // Hit output token limit without tool calls — tell model to continue
         if (hitLengthLimit && toolCalls.length === 0) {
-          this.messages.push({ role: 'user', content: '[continue]' });
-          continue;
+          if (continuationCount >= maxContinuations) {
+            emit({ type: 'status', id: session.id, message:
+              `Output length limit reached. Model could not complete response after ${maxContinuations} continuation attempts.`,
+              timestamp: Date.now() });
+          } else {
+            continuationCount++;
+            this.messages.push({ role: 'user', content: '[continue]' });
+            continue;
+          }
         }
 
         if (toolCalls.length === 0) {

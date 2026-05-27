@@ -774,6 +774,91 @@ export class JsonRpcHandler {
           break;
         }
 
+        // ---- Unified task (todo) management for Kanban board ----
+
+        case Method.TODO_LIST: {
+          if (!this.daemonApp) {
+            return { jsonrpc: '2.0', id, error: { code: -32603, message: 'Daemon not initialized' } };
+          }
+          this.daemonApp.taskManager.load();
+          const p = params as Record<string, unknown>;
+          const filters: Record<string, string> = {};
+          if (typeof p.status === 'string') filters.status = p.status;
+          if (typeof p.mode === 'string') filters.mode = p.mode;
+          if (typeof p.scope === 'string') filters.scope = p.scope;
+          if (typeof p.priority === 'string') filters.priority = p.priority;
+          result = this.daemonApp.taskManager.list(Object.keys(filters).length ? filters : undefined);
+          break;
+        }
+
+        case Method.TODO_CREATE: {
+          if (!this.daemonApp) {
+            return { jsonrpc: '2.0', id, error: { code: -32603, message: 'Daemon not initialized' } };
+          }
+          this.daemonApp.taskManager.load();
+          const p = params as Record<string, unknown>;
+          const title = this.getStringParam(p, 'title') || '';
+          if (!title) return this.paramError('title');
+          const task = this.daemonApp.taskManager.create({
+            title,
+            description: this.getStringParam(p, 'description'),
+            mode: typeof p.mode === 'string' ? (p.mode as 'human' | 'agent' | 'notify') : 'human',
+            scope: typeof p.scope === 'string' ? (p.scope as 'personal' | 'project') : 'personal',
+            priority: typeof p.priority === 'string' ? (p.priority as 'low' | 'medium' | 'high' | 'critical') : 'medium',
+            tags: Array.isArray(p.tags) ? p.tags : [],
+            scheduled_at: typeof p.scheduled_at === 'number' ? p.scheduled_at : undefined,
+          });
+          // Override status if specified (create() sets default based on mode)
+          if (typeof p.status === 'string') {
+            this.daemonApp.taskManager.updateTaskStatus(task.id, p.status as any);
+          }
+          this.sharedEventBus?.emit({ type: 'todo-changed', id: crypto.randomUUID(), timestamp: Date.now(), action: 'created', taskId: task.id } as any);
+          result = this.daemonApp.taskManager.findTask(task.id);
+          break;
+        }
+
+        case Method.TODO_UPDATE: {
+          if (!this.daemonApp) {
+            return { jsonrpc: '2.0', id, error: { code: -32603, message: 'Daemon not initialized' } };
+          }
+          this.daemonApp.taskManager.load();
+          const p = params as Record<string, unknown>;
+          const taskId = this.getStringParam(p, 'id');
+          if (!taskId) return this.paramError('id');
+          const task = this.daemonApp.taskManager.findTask(taskId);
+          if (!task) return { jsonrpc: '2.0', id, error: { code: -32602, message: `Task ${taskId} not found` } };
+
+          if (typeof p.status === 'string') {
+            this.daemonApp.taskManager.updateTaskStatus(taskId, p.status as any);
+          } else {
+            // Field mutations
+            if (typeof p.priority === 'string') task.priority = p.priority as any;
+            if (typeof p.title === 'string') task.title = p.title;
+            if (typeof p.description === 'string') task.description = p.description;
+            if (Array.isArray(p.tags)) task.tags = p.tags;
+            if (typeof p.mode === 'string') task.mode = p.mode as any;
+            if (typeof p.scheduled_at === 'number') task.scheduled_at = p.scheduled_at;
+            this.daemonApp.taskManager.save();
+          }
+          this.sharedEventBus?.emit({ type: 'todo-changed', id: crypto.randomUUID(), timestamp: Date.now(), action: 'updated', taskId } as any);
+          result = { ok: true, task: this.daemonApp.taskManager.findTask(taskId) };
+          break;
+        }
+
+        case Method.TODO_REMOVE: {
+          if (!this.daemonApp) {
+            return { jsonrpc: '2.0', id, error: { code: -32603, message: 'Daemon not initialized' } };
+          }
+          this.daemonApp.taskManager.load();
+          const p = params as Record<string, unknown>;
+          const taskId = this.getStringParam(p, 'id');
+          if (!taskId) return this.paramError('id');
+          const removed = this.daemonApp.taskManager.removeTask(taskId);
+          this.sharedEventBus?.emit({ type: 'todo-changed', id: crypto.randomUUID(), timestamp: Date.now(), action: 'removed', taskId } as any);
+          result = { removed };
+          break;
+        }
+
         default:
           return { jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } };
       }

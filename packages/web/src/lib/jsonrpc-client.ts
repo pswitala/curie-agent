@@ -181,4 +181,44 @@ export class JsonRpcClient {
   }): Promise<{ taskId: string; scheduledAt: string; instruction: string }> {
     return this.request('task.schedule', params) as Promise<{ taskId: string; scheduledAt: string; instruction: string }>;
   }
+
+  // Unified task (todo) management for Kanban board
+  async todoList(params?: {
+    status?: string;
+    mode?: string;
+    scope?: string;
+    priority?: string;
+  }): Promise<unknown> {
+    return this.request('todo.list', params);
+  }
+
+  async todoCreate(params: {
+    title: string;
+    description?: string;
+    mode?: 'human' | 'agent' | 'notify';
+    scope?: 'personal' | 'project';
+    priority?: 'low' | 'medium' | 'high' | 'critical';
+    status?: string;
+    tags?: string[];
+    scheduled_at?: number;
+  }): Promise<unknown> {
+    return this.request('todo.create', params);
+  }
+
+  async todoUpdate(params: {
+    id: string;
+    status?: string;
+    priority?: string;
+    title?: string;
+    description?: string;
+    tags?: string[];
+    mode?: 'human' | 'agent' | 'notify';
+    scheduled_at?: number;
+  }): Promise<unknown> {
+    return this.request('todo.update', params);
+  }
+
+  async todoRemove(id: string): Promise<unknown> {
+    return this.request('todo.remove', { id });
+  }
 }

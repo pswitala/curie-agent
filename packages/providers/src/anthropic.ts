@@ -81,7 +81,7 @@ export class AnthropicProvider implements Provider {
 
     const streamArgs: Anthropic.MessageStreamParams = {
       model,
-      max_tokens: args.maxTokens || 16384,
+      max_tokens: args.maxTokens || 65536,
       system: args.system,
       messages,
       tools,

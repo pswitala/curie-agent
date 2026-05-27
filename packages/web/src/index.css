@@ -272,6 +272,22 @@
     background: var(--b2);
     border-radius: 2px;
   }
+
+  /* Kanban column scroll — barely visible, fades into the design */
+  .kanban-column-scroll::-webkit-scrollbar {
+    width: 4px;
+  }
+  .kanban-column-scroll::-webkit-scrollbar-track {
+    background: transparent;
+    margin-block: 4px;
+  }
+  .kanban-column-scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--b2) 40%, transparent);
+    border-radius: 4px;
+  }
+  .kanban-column-scroll:hover::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--b2) 65%, transparent);
+  }
   .border-b-b1-10 {
     border-bottom: 1px solid color-mix(in srgb, var(--b1) 10%, transparent);
   }

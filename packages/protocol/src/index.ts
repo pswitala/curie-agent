@@ -75,6 +75,10 @@ export {
   SubagentStatsSchema,
   SubagentSendSchema,
   TaskScheduleRequestSchema,
+  TodoListSchema,
+  TodoCreateSchema,
+  TodoUpdateSchema,
+  TodoRemoveSchema,
 } from './methods.js';
 
 export {
