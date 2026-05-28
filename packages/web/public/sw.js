@@ -42,6 +42,7 @@ self.addEventListener('fetch', (e) => {
   if (
     url.pathname.startsWith('/api') ||
     url.pathname.startsWith('/rpc') ||
+    url.pathname === '/health' ||
     e.request.headers.get('Upgrade') === 'websocket'
   ) {
     return;

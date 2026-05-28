@@ -1,11 +1,8 @@
-import { execFile, spawn } from 'node:child_process';
-import { promisify } from 'node:util';
-import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { createTool, type ToolContext } from './tool.js';
 import { isPathAllowed, parseAllowlist } from '@curie-agent/core/safety/path-guard.js';
-
-const execFileAsync = promisify(execFile);
+import { detectWindowsShell } from '@curie-agent/core/shell-detect.js';
 
 const BashSchema = z.object({
   command: z.string().describe('The command to execute'),
@@ -13,15 +10,22 @@ const BashSchema = z.object({
   description: z.string().optional().describe('Clear, concise description of what this command does'),
 });
 
-const SHELLS: Record<string, string> = {
-  win32: 'cmd.exe',
-  linux: '/bin/bash',
-  darwin: '/bin/bash',
-};
+const MAX_OUTPUT = 200_000;
+
+function resolveShell(): { exe: string; flag: string } {
+  if (process.platform === 'win32') {
+    const shell = detectWindowsShell();
+    const exe = shell === 'pwsh' ? 'pwsh.exe' : shell === 'powershell' ? 'powershell.exe' : 'cmd.exe';
+    const flag = shell === 'cmd' ? '/c' : '-Command';
+    return { exe, flag };
+  }
+  const exe = process.platform === 'linux' || process.platform === 'darwin' ? '/bin/bash' : '/bin/sh';
+  return { exe, flag: '-c' };
+}
 
 export const bashTool = createTool(
   'Bash',
-  'Executes a bash command and returns its output. For shell-only operations.',
+  'Executes a shell command and returns its output (bash on Linux/macOS, PowerShell on Windows).',
   BashSchema,
   async (input, ctx: ToolContext) => {
     if (ctx.settings.safety?.path_guard !== 'off') {
@@ -30,11 +34,11 @@ export const bashTool = createTool(
       }
     }
 
-    const shell = SHELLS[process.platform] || '/bin/sh';
+    const { exe, flag } = resolveShell();
     const timeout = Math.min(input.timeout || 120000, 600000);
 
     return new Promise((resolve) => {
-      const child = spawn(shell, ['/c', input.command], {
+      const child = spawn(exe, [flag, input.command], {
         cwd: ctx.cwd,
         timeout,
         shell: false,
@@ -44,31 +48,49 @@ export const bashTool = createTool(
 
       let stdout = '';
       let stderr = '';
+      let stdoutTruncated = false;
+      let stderrTruncated = false;
 
-      child.stdout.on('data', (data) => {
-        stdout += data.toString();
+      child.stdout.on('data', (chunk: Buffer) => {
+        if (stdout.length < MAX_OUTPUT) {
+          stdout += chunk.toString();
+        } else if (!stdoutTruncated) {
+          stdoutTruncated = true;
+        }
       });
 
-      child.stderr.on('data', (data) => {
-        stderr += data.toString();
+      child.stderr.on('data', (chunk: Buffer) => {
+        if (stderr.length < MAX_OUTPUT) {
+          stderr += chunk.toString();
+        } else if (!stderrTruncated) {
+          stderrTruncated = true;
+        }
       });
+
+      // On Unix, Node's spawn({ timeout }) sends SIGTERM which is catchable.
+      // Escalate to SIGKILL after a grace period so the process actually dies.
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      if (process.platform !== 'win32') {
+        killTimer = setTimeout(() => child.kill('SIGKILL'), timeout + 3000);
+      }
 
       child.on('close', (code) => {
+        if (killTimer !== undefined) clearTimeout(killTimer);
+        const outText = stdout.trim() + (stdoutTruncated ? '\n...[output truncated at 200 KB]' : '');
+        const errText = stderr.trim() + (stderrTruncated ? '\n...[output truncated at 200 KB]' : '');
         resolve({
-          output: {
-            exitCode: code,
-            stdout: stdout.trim(),
-            stderr: stderr.trim(),
-          },
-          error: code !== 0 ? stderr.trim() : undefined,
+          output: { exitCode: code, stdout: outText, stderr: errText },
+          error: child.killed
+            ? `Command timed out after ${timeout}ms`
+            : code !== 0
+              ? errText || undefined
+              : undefined,
         });
       });
 
       child.on('error', (err) => {
-        resolve({
-          output: null,
-          error: `Command failed: ${err.message}`,
-        });
+        if (killTimer !== undefined) clearTimeout(killTimer);
+        resolve({ output: null, error: `Command failed: ${err.message}` });
       });
     });
   },

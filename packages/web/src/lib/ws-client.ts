@@ -42,10 +42,15 @@ export class WsClient {
       }
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event: CloseEvent) => {
       this.connected = false;
-      this._reconnecting = true;
       this.ws = null;
+      if (event.code === 4001 || event.code === 4003) {
+        this._reconnecting = false;
+        this.dispatch({ type: 'auth-error', id: 'auth', timestamp: Date.now(), code: event.code });
+        return;
+      }
+      this._reconnecting = true;
       this.dispatch({ type: 'connection-status', id: 'status', timestamp: Date.now(), connected: false });
       this.scheduleReconnect();
     };

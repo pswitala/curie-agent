@@ -18,7 +18,9 @@ export default function AuthorizationScreen({ onAuthorize }: Props) {
 
     try {
       // Validate by querying the authenticated health endpoint
-      const res = await fetch(`/health?token=${encodeURIComponent(inputToken.trim())}`);
+      const res = await fetch('/health', {
+        headers: { 'Authorization': `Bearer ${inputToken.trim()}` },
+      });
       if (res.ok) {
         onAuthorize(inputToken.trim());
       } else {

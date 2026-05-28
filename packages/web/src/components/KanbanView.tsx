@@ -248,7 +248,6 @@ function KanbanColumn({
   isDragging,
   onEdit,
   onRemove,
-  onAdd,
   className = '',
 }: {
   column: ColumnConfig;
@@ -256,7 +255,6 @@ function KanbanColumn({
   isDragging: boolean;
   onEdit: (task: TaskData) => void;
   onRemove: (id: string) => void;
-  onAdd: (status: string) => void;
   className?: string;
 }) {
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({ id: column.id });
@@ -304,24 +302,6 @@ function KanbanColumn({
         )}
       </div>
 
-      {/* Add button */}
-      <div className="px-2 pt-1.5 pb-2 shrink-0">
-        <button
-          onClick={() => onAdd(column.defaultStatus)}
-          className="w-full flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-medium cursor-pointer transition-all duration-150 active:scale-[0.98]"
-          style={{
-            background: 'color-mix(in srgb, var(--s3) 60%, transparent)',
-            border: '1px dashed var(--b2)',
-            color: 'var(--muted)',
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          Add
-        </button>
-      </div>
     </div>
   );
 }
@@ -335,24 +315,24 @@ function EditModal({
   onSave,
   onClose,
 }: {
-  task: TaskData;
+  task: TaskData | null;
   onSave: (updates: Partial<TaskData>) => void;
   onClose: () => void;
 }) {
-  const [title, setTitle] = useState(task.title);
-  const [description, setDescription] = useState(task.description || '');
-  const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'critical'>(task.priority);
-  const [mode, setMode] = useState<'human' | 'agent' | 'notify'>(task.mode);
-  const [scope, setScope] = useState(task.scope);
-  const [status, setStatus] = useState(task.status);
+  const [title, setTitle] = useState(task?.title ?? '');
+  const [description, setDescription] = useState(task?.description ?? '');
+  const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'critical'>(task?.priority ?? 'medium');
+  const [mode, setMode] = useState<'human' | 'agent' | 'notify'>(task?.mode ?? 'human');
+  const [scope, setScope] = useState<'personal' | 'project'>(task?.scope ?? 'personal');
+  const [status, setStatus] = useState(task?.status ?? 'backlog');
   const [scheduledAt, setScheduledAt] = useState(() => {
-    if (task.scheduled_at) {
+    if (task?.scheduled_at) {
       const d = new Date(task.scheduled_at);
       return d.toISOString().slice(0, 16);
     }
     return '';
   });
-  const [tagsStr, setTagsStr] = useState(task.tags.join(', '));
+  const [tagsStr, setTagsStr] = useState(task?.tags.join(', ') ?? '');
 
   const handleSave = () => {
     if (!title.trim()) return;
@@ -379,7 +359,7 @@ function EditModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between pb-3 mb-4" style={{ borderBottom: '1px solid var(--b1)' }}>
-          <span className="font-bold text-[13.5px] font-display" style={{ color: 'var(--cream)' }}>Edit Task</span>
+          <span className="font-bold text-[13.5px] font-display" style={{ color: 'var(--cream)' }}>{task ? 'Edit Task' : 'New Task'}</span>
           <button onClick={onClose} className="text-muted hover:text-fg transition-colors cursor-pointer">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -508,7 +488,7 @@ function EditModal({
             disabled={!title.trim()}
             className="flex-1 btn-gold py-2.5 px-4 rounded-xl text-[12px] font-semibold cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Save
+            {task ? 'Save' : 'Create'}
           </button>
         </div>
       </div>
@@ -531,7 +511,7 @@ export default function KanbanView({ rpc, className }: Props) {
   const [loading, setLoading] = useState(true);
   const [editTask, setEditTask] = useState<TaskData | null>(null);
   const [showArchive, setShowArchive] = useState(false);
-  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const [filterMode, setFilterMode] = useState<string>('all');
   const [filterPriority, setFilterPriority] = useState<string>('all');
@@ -590,6 +570,7 @@ export default function KanbanView({ rpc, className }: Props) {
       backlog: [], todo: [], in_progress: [], done: [],
     };
     for (const task of tasks) {
+      if (task.mode === 'notify') continue;
       const col = getColumnForStatus(task.status);
       if (col && grouped[col]) {
         grouped[col].push(task);
@@ -612,6 +593,7 @@ export default function KanbanView({ rpc, className }: Props) {
       backlog: [], todo: [], in_progress: [], done: [],
     };
     for (const task of tasks) {
+      if (task.mode === 'notify') continue;
       const col = getColumnForStatus(task.status);
       if (col && !ARCHIVE_STATUSES.includes(task.status)) {
         ids[col].push(task.id);
@@ -708,23 +690,19 @@ export default function KanbanView({ rpc, className }: Props) {
     setIsDragging(false);
   }, [rpc, tasks, taskToColumn]);
 
-  const handleCreateTask = useCallback(async (titleInput?: string) => {
-    if (!rpc) return;
-    const title = (titleInput || newTaskTitle).trim();
-    if (!title) return;
-    setNewTaskTitle('');
-    await rpc.todoCreate({ title, mode: 'human', scope: 'personal', priority: 'medium' });
-  }, [rpc, newTaskTitle]);
-
-  const handleColumnAdd = useCallback(async (status: string) => {
+  const handleCreateFromModal = useCallback(async (params: Partial<TaskData>) => {
     if (!rpc) return;
     await rpc.todoCreate({
-      title: '',
-      mode: 'human',
-      scope: 'personal',
-      priority: 'medium',
-      status,
+      title: (params.title ?? '').trim(),
+      description: params.description,
+      priority: params.priority ?? 'medium',
+      mode: params.mode ?? 'human',
+      scope: params.scope ?? 'personal',
+      status: params.status ?? 'backlog',
+      tags: params.tags,
+      scheduled_at: params.scheduled_at,
     });
+    setShowCreateModal(false);
   }, [rpc]);
 
   const handleEditSave = useCallback(async (updates: Partial<TaskData>) => {
@@ -858,24 +836,12 @@ export default function KanbanView({ rpc, className }: Props) {
           Archive {archiveTasks.length}
         </button>
 
-        <div className="flex items-center gap-1.5">
-          <input
-            type="text"
-            value={newTaskTitle}
-            onChange={(e) => setNewTaskTitle(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleCreateTask(); }}
-            placeholder="New task..."
-            className="px-3 py-1.5 rounded-lg text-[12px] text-fg outline-none w-[160px] transition-colors focus:ring-1 focus:ring-gold/30"
-            style={{ background: 'var(--s2)', border: '1px solid var(--b1)' }}
-          />
-          <button
-            onClick={() => handleCreateTask()}
-            disabled={!newTaskTitle.trim()}
-            className="btn-gold px-3 py-1.5 rounded-lg text-[11px] font-semibold cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Add
-          </button>
-        </div>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="btn-gold px-3 py-1.5 rounded-lg text-[11px] font-semibold cursor-pointer active:scale-[0.98]"
+        >
+          Add
+        </button>
       </div>
 
       {/* Kanban board — single DndContext, per-column SortableContext + useDroppable */}
@@ -897,7 +863,6 @@ export default function KanbanView({ rpc, className }: Props) {
                   isDragging={isDragging}
                   onEdit={setEditTask}
                   onRemove={handleRemove}
-                  onAdd={handleColumnAdd}
                   className="snap-center flex-shrink-0 w-screen sm:w-auto sm:flex-1 px-4 sm:px-0"
                 />
               </SortableContext>
@@ -931,6 +896,14 @@ export default function KanbanView({ rpc, className }: Props) {
             ))}
           </div>
         </div>
+      )}
+
+      {showCreateModal && (
+        <EditModal
+          task={null}
+          onSave={handleCreateFromModal}
+          onClose={() => setShowCreateModal(false)}
+        />
       )}
 
       {editTask && (

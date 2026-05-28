@@ -1,4 +1,5 @@
 import { platform, arch, hostname } from 'node:os';
+import { detectWindowsShell } from './shell-detect.js';
 
 /** Format OS info for system prompt injection. */
 export function getOsInfo(): string {
@@ -6,9 +7,19 @@ export function getOsInfo(): string {
   const osName = p === 'win32' ? 'Windows' : p === 'darwin' ? 'macOS' : 'Linux';
   const base = `${osName} (${arch()}, ${hostname()})`;
   if (p === 'win32') {
+    const shell = detectWindowsShell();
+    const shellGuidance =
+      shell === 'cmd'
+        ? '. Shell: cmd.exe (Command Prompt).' +
+          ' Use Windows commands: dir (not ls), type (not cat), del (not rm), copy (not cp), findstr (not grep).' +
+          ' Chain commands with & not &&. Set env variables with: set VAR=value (not export).'
+        : '. Shell: PowerShell.' +
+          ' Unix aliases work: ls (Get-ChildItem), cat (Get-Content), grep (Select-String), curl (Invoke-WebRequest).' +
+          ' Chain with && in PS 7+. Use $env:VAR for env variables.';
     return (
       base +
-      '. File path separator is backslash but glob patterns must always use forward slashes.' +
+      shellGuidance +
+      ' File path separator is backslash but glob patterns must always use forward slashes.' +
       ' Use `**/*.ts` not `**\\*.ts`. The `path` parameter also accepts forward slashes.'
     );
   }

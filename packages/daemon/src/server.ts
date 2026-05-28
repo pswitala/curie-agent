@@ -132,13 +132,14 @@ export class DaemonServer {
   }
 
   private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
-    console.log(`[http] ${req.method} ${req.url} host=${req.headers.host} origin=${req.headers.origin ?? '(none)'}`);
+    const reqOrigin = req.headers.origin;
+    console.log(`[http] ${req.method} ${req.url} host=${req.headers.host} origin=${reqOrigin ?? '(none)'}`);
     // CORS on every response
-    setCorsHeaders(res);
+    setCorsHeaders(res, reqOrigin);
 
     // Handle preflight
     if (req.method === 'OPTIONS') {
-      handleCorsPreflight(res);
+      handleCorsPreflight(res, reqOrigin);
       return;
     }
 

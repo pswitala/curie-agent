@@ -69,6 +69,11 @@ export function ApiProvider({ children }: ApiProviderProps) {
 
     ws.connect();
 
+  const unsubscribeAuth = ws.on('auth-error', () => {
+    localStorage.removeItem('daemon-token');
+    setTokenState(null);
+  });
+
   const unsubscribe = ws.on('connection-status', (evt) => {
     const connected = !!(evt as any).connected;
     let status: ConnectionStatus;
@@ -92,6 +97,7 @@ export function ApiProvider({ children }: ApiProviderProps) {
     }, 2000);
 
     return () => {
+      unsubscribeAuth();
       unsubscribe();
       clearInterval(checkInterval);
       ws.disconnect();

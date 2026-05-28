@@ -56,6 +56,19 @@ const HARD_DENY_PATTERNS: CommandPattern[] = [
     regex: /(?:cat|grep|less|more|head|tail)\s+.*\.curie-settings\.json/i,
     reason: 'reading curie-agent settings file (contains API keys and secrets)',
   },
+  // PowerShell equivalents
+  {
+    regex: /Remove-Item\s+.*(?:-Recurse|-Force).*(?:-Force|-Recurse)\s+[\/\\C-Z:]/i,
+    reason: 'PowerShell Remove-Item: recursive force delete of root or drive path',
+  },
+  {
+    regex: /Get-Content\s+.*\.curie-settings\.json/i,
+    reason: 'PowerShell: reading curie-agent settings file (contains API keys and secrets)',
+  },
+  {
+    regex: /Set-Content\s+.*\\\\\.\\PhysicalDrive/i,
+    reason: 'PowerShell: raw disk write to physical drive',
+  },
 ];
 
 const ASK_PATTERNS: CommandPattern[] = [
@@ -90,6 +103,27 @@ const ASK_PATTERNS: CommandPattern[] = [
   {
     regex: /(?:grep|cat)\s+.*\/\.env\b/i,
     reason: 'env file read: accessing .env file contents',
+  },
+  // PowerShell equivalents
+  {
+    regex: /Invoke-Expression\s*\(?\s*(?:Invoke-WebRequest|iwr|curl|wget)\b/i,
+    reason: 'PowerShell: remote code execution via Invoke-Expression + web download',
+  },
+  {
+    regex: /\biex\s*\(?\s*(?:iwr|curl|wget)\b/i,
+    reason: 'PowerShell: remote code execution via iex alias',
+  },
+  {
+    regex: /Start-Process\s+.*-Verb\s+RunAs\b/i,
+    reason: 'PowerShell: UAC elevation request (sudo equivalent)',
+  },
+  {
+    regex: /Get-Content\s+.*\.env\b/i,
+    reason: 'PowerShell: env file read via Get-Content',
+  },
+  {
+    regex: /Get-Content\s+.*(?:\.ssh[\/\\]|\.aws[\/\\]|id_rsa|credentials\.json)/i,
+    reason: 'PowerShell: credential file read via Get-Content',
   },
 ];
 

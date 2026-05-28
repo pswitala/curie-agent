@@ -25,6 +25,10 @@
     "./safety/snapshot.js": {
       "import": "./dist/src/safety/snapshot.js",
       "types": "./dist/src/safety/snapshot.d.ts"
+    },
+    "./shell-detect.js": {
+      "import": "./dist/src/shell-detect.js",
+      "types": "./dist/src/shell-detect.d.ts"
     }
   },
   "scripts": {

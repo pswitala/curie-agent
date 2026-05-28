@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { timingSafeEqual } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -12,8 +13,21 @@ export function generateToken(): string {
   return Array.from(buf).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
 export function saveToken(token: string): void {
   writeFileSync(DAEMON_TOKEN_FILE, token, { mode: 0o600 });
+  try {
+    const raw = existsSync(SETTINGS_FILE) ? readFileSync(SETTINGS_FILE, 'utf-8') : '{}';
+    const obj = JSON.parse(raw) as Record<string, unknown>;
+    obj.daemon_token = token;
+    writeFileSync(SETTINGS_FILE, JSON.stringify(obj, null, 2), { mode: 0o600 });
+  } catch { /* ignore — settings write is non-fatal */ }
 }
 
 export function loadToken(): string | undefined {
@@ -46,27 +60,21 @@ export function ensureToken(): string {
   return token;
 }
 
-export function validateToken(req: IncomingMessage): boolean {
-  const auth = req.headers.authorization ?? '';
-  const token = ensureToken();
-  return auth === `Bearer ${token}`;
-}
-
 export function validateTokenWs(url: URL): boolean {
   const token = ensureToken();
-  return url.searchParams.get('token') === token;
+  return safeEqual(url.searchParams.get('token') ?? '', token);
 }
 
 /** Validate token from either Authorization header, query param, or cookies. */
 export function validateTokenHttp(req: IncomingMessage): boolean {
   const auth = req.headers.authorization ?? '';
   const token = ensureToken();
-  if (auth === `Bearer ${token}`) return true;
+  if (safeEqual(auth, `Bearer ${token}`)) return true;
 
   // Also accept token from query param (for browser access: ?token=...)
   const url = req.url ?? '';
   const parsed = new URL(url, `http://${req.headers.host ?? 'localhost'}`);
-  if (parsed.searchParams.get('token') === token) return true;
+  if (safeEqual(parsed.searchParams.get('token') ?? '', token)) return true;
 
   // Check Cookie header (e.g. curie_token=<token>)
   const cookieHeader = req.headers.cookie ?? '';
@@ -76,7 +84,7 @@ export function validateTokenHttp(req: IncomingMessage): boolean {
     if (parts.length >= 2) {
       const name = parts[0];
       const val = parts.slice(1).join('=');
-      if (name === 'curie_token' && val === token) {
+      if (name === 'curie_token' && safeEqual(val, token)) {
         return true;
       }
     }
@@ -91,16 +99,22 @@ export function rejectUnauthorized(res: ServerResponse): void {
   res.end(JSON.stringify({ error: 'Unauthorized', message: 'Invalid or missing token' }));
 }
 
-/** Add CORS headers. */
-export function setCorsHeaders(res: ServerResponse): void {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+function isLocalhostOrigin(origin: string | undefined): boolean {
+  if (!origin) return false;
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(origin);
+}
+
+/** Add CORS headers. Reflects the request origin for localhost origins; falls back to wildcard. */
+export function setCorsHeaders(res: ServerResponse, origin?: string): void {
+  const allowOrigin = isLocalhostOrigin(origin) ? origin! : '*';
+  res.setHeader('Access-Control-Allow-Origin', allowOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
 /** Handle CORS preflight. */
-export function handleCorsPreflight(res: ServerResponse): void {
-  setCorsHeaders(res);
+export function handleCorsPreflight(res: ServerResponse, origin?: string): void {
+  setCorsHeaders(res, origin);
   res.writeHead(204);
   res.end();
 }
