@@ -622,7 +622,7 @@ export default function KanbanView({ rpc, className }: Props) {
 
  
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(PointerSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
     useSensor(KeyboardSensor)
   );
 
