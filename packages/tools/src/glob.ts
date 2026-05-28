@@ -5,8 +5,16 @@ import { isPathAllowed, parseAllowlist } from '@curie-agent/core/safety/path-gua
 import { createTool, expandPath, type ToolContext } from './tool.js';
 
 const GlobSchema = z.object({
-  pattern: z.string().describe('The glob pattern to match files against'),
-  path: z.string().optional().describe('The directory to search in'),
+  pattern: z
+    .string()
+    .describe(
+      'Glob pattern to match against. Use forward slashes on all platforms. ' +
+        '`*` = one level, `**` = any depth. Pattern is relative to `path` (or cwd if omitted).',
+    ),
+  path: z
+    .string()
+    .optional()
+    .describe('Directory to search in. Defaults to cwd. Accepts forward or backward slashes.'),
 });
 
 function minimatch(pattern: string, str: string): boolean {
@@ -49,10 +57,19 @@ function shouldIgnore(relPath: string, patterns: string[]): boolean {
 
 export const globTool = createTool(
   'Glob',
-  'Fast file pattern matching. Gitignore-aware file pattern matching.',
+  [
+    'Fast, gitignore-aware recursive file search by glob pattern.',
+    'Pattern syntax: `*` matches anything within one directory level; `**` matches across any depth.',
+    'Always use forward slashes in patterns, even on Windows (e.g., `src/**/*.ts`).',
+    'When `path` is supplied, the pattern matches relative to that directory.',
+    'Results are returned as absolute paths, sorted alphabetically.',
+    'Examples: `**/*.ts` (all TypeScript files), `src/*/index.ts` (index files one level deep in src/).',
+  ].join(' '),
   GlobSchema,
   async (input, ctx: ToolContext) => {
-    const searchDir = input.path ? path.resolve(ctx.cwd, expandPath(input.path)) : ctx.cwd;
+    // Normalize backslashes in path input so Windows-style paths work correctly.
+    const rawPath = input.path ? input.path.replace(/\\/g, '/') : undefined;
+    const searchDir = rawPath ? path.resolve(ctx.cwd, expandPath(rawPath)) : ctx.cwd;
 
     // Safety: refuse searches outside allowed directories.
     if (ctx.settings.safety?.path_guard !== 'off') {
@@ -62,8 +79,10 @@ export const globTool = createTool(
       }
     }
 
-    // Read .gitignore from both cwd (global filters) and searchDir (local filters).
+    // Read .gitignore from cwd (global filters) and searchDir if different (local filters).
     const cwdGitignorePatterns = readGitignore(ctx.cwd);
+    const searchDirGitignorePatterns = searchDir !== ctx.cwd ? readGitignore(searchDir) : [];
+    const allIgnorePatterns = [...cwdGitignorePatterns, ...searchDirGitignorePatterns];
 
     const results: string[] = [];
 
@@ -89,15 +108,16 @@ export const globTool = createTool(
       }
       for (const entry of entries) {
         const fullPath = path.join(dir, entry.name);
-        // Normalize to forward slashes so globToRegex patterns work on all platforms.
+        // relPath is cwd-relative (for gitignore filtering); patternPath is searchDir-relative (for matching).
         const relPath = path.relative(ctx.cwd, fullPath).replace(/\\/g, '/');
+        const patternPath = path.relative(searchDir, fullPath).replace(/\\/g, '/');
 
         if (entry.isDirectory()) {
-          if (shouldIgnore(relPath, cwdGitignorePatterns)) continue;
+          if (shouldIgnore(relPath, allIgnorePatterns)) continue;
           walk(fullPath, depth + 1);
         } else {
-          if (shouldIgnore(relPath, cwdGitignorePatterns)) continue;
-          if (minimatch(input.pattern, relPath)) {
+          if (shouldIgnore(relPath, allIgnorePatterns)) continue;
+          if (minimatch(input.pattern, patternPath)) {
             results.push(fullPath);
           }
         }

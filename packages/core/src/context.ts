@@ -2,8 +2,17 @@ import { platform, arch, hostname } from 'node:os';
 
 /** Format OS info for system prompt injection. */
 export function getOsInfo(): string {
-  const osName = platform() === 'win32' ? 'Windows' : platform() === 'darwin' ? 'macOS' : 'Linux';
-  return `${osName} (${arch()}, ${hostname()})`;
+  const p = platform();
+  const osName = p === 'win32' ? 'Windows' : p === 'darwin' ? 'macOS' : 'Linux';
+  const base = `${osName} (${arch()}, ${hostname()})`;
+  if (p === 'win32') {
+    return (
+      base +
+      '. File path separator is backslash but glob patterns must always use forward slashes.' +
+      ' Use `**/*.ts` not `**\\*.ts`. The `path` parameter also accepts forward slashes.'
+    );
+  }
+  return base;
 }
 
 export function getTzOffsetString(timeZone: string, date: Date = new Date()): string {

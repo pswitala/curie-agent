@@ -89,10 +89,24 @@ describe('Glob tool', () => {
     expect(output).toHaveLength(0);
   });
 
-  it('honors the path parameter to search in a subdirectory', async () => {
-    // When searching in a subdirectory, relPath is still relative to cwd,
-    // so pattern must account for the full relative path.
-    const result = await runGlob('**/*.tsx', 'src/components');
+  it('honors the path parameter — pattern matches relative to that directory', async () => {
+    // With path:'src/components', pattern matches relative to that dir, not cwd.
+    // '*.tsx' matches Button.tsx and Link.tsx directly inside src/components/.
+    const result = await runGlob('*.tsx', 'src/components');
+    const output = (result.output as any) as string[];
+    expect(output).toHaveLength(2);
+  });
+
+  it('honors the path parameter — **/*.tsx finds tsx in subdirs of the search dir', async () => {
+    // **/*.tsx from 'src' finds Button.tsx and Link.tsx inside src/components/.
+    const result = await runGlob('**/*.tsx', 'src');
+    const output = (result.output as any) as string[];
+    expect(output).toHaveLength(2);
+  });
+
+  it('normalizes backslashes in path parameter on Windows-style input', async () => {
+    // path with backslashes should work the same as forward slashes.
+    const result = await runGlob('*.tsx', 'src\\components');
     const output = (result.output as any) as string[];
     expect(output).toHaveLength(2);
   });
