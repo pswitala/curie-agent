@@ -14,6 +14,9 @@ export const OrchestraBroadcastSchema = z.object({
 
 export const WikiQuerySchema = z.object({ query: z.string() });
 export const WikiPageGetSchema = z.object({ slug: z.string() });
+export const WikiIngestSchema = z.object({ source: z.string() });
+export const WikiLintSchema = z.object({});
+export const WikiGraphSchema = z.object({});
 
 export const ApprovalPendingSchema = z.object({ sessionId: z.string().optional() });
 export const ApprovalDecideSchema = z.object({
@@ -145,6 +148,9 @@ export const Method = {
   ORCHESTRA_BROADCAST: 'orchestra.broadcast',
   WIKI_QUERY: 'wiki.query',
   WIKI_PAGE_GET: 'wiki.page.get',
+  WIKI_INGEST: 'wiki.ingest',
+  WIKI_LINT: 'wiki.lint',
+  WIKI_GRAPH: 'wiki.graph',
   APPROVAL_PENDING: 'approval.pending',
   APPROVAL_DECIDE: 'approval.decide',
   TOOL_REGISTRY: 'tool.registry',

@@ -222,4 +222,25 @@ export class JsonRpcClient {
   async todoRemove(id: string): Promise<unknown> {
     return this.request('todo.remove', { id });
   }
+
+  // Wiki
+  async wikiListPages(): Promise<unknown> {
+    return this.request('wiki.ingest');
+  }
+
+  async wikiPageGet(slug: string): Promise<unknown> {
+    return this.request('wiki.page.get', { slug });
+  }
+
+  async wikiSearch(query: string): Promise<unknown> {
+    return this.request('wiki.query', { query });
+  }
+
+  async wikiLint(): Promise<unknown> {
+    return this.request('wiki.lint');
+  }
+
+  async wikiGraph(): Promise<unknown> {
+    return this.request('wiki.graph');
+  }
 }

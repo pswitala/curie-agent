@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@curie-agent/core": "workspace:*",
+    "@curie-agent/wiki": "workspace:*",
     "zod": "^4.4.3"
   },
   "devDependencies": {

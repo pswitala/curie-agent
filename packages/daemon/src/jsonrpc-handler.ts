@@ -578,10 +578,55 @@ export class JsonRpcHandler {
         // Not yet implemented
         case Method.ORCHESTRA_PANES:
         case Method.ORCHESTRA_BROADCAST:
-        case Method.WIKI_QUERY:
-        case Method.WIKI_PAGE_GET:
           result = { status: 'not-implemented', method };
           break;
+
+        // Wiki operations
+        case Method.WIKI_QUERY: {
+          const { WikiManager } = await import('@curie-agent/wiki');
+          const query = this.getStringParam(params as Record<string, unknown>, 'query');
+          if (!query) return this.paramError('query');
+          const wm = new WikiManager(this.settingsManager.get() as any);
+          wm.ensureStructure();
+          result = wm.search(query);
+          break;
+        }
+
+        case Method.WIKI_PAGE_GET: {
+          const { WikiManager } = await import('@curie-agent/wiki');
+          const slug = this.getStringParam(params as Record<string, unknown>, 'slug');
+          if (!slug) return this.paramError('slug');
+          const wm = new WikiManager(this.settingsManager.get() as any);
+          wm.ensureStructure();
+          const content = wm.readPage(slug);
+          result = content !== null ? { slug, content } : { error: `Page not found: ${slug}` };
+          break;
+        }
+
+        case Method.WIKI_INGEST: {
+          const { WikiManager } = await import('@curie-agent/wiki');
+          const wm = new WikiManager(this.settingsManager.get() as any);
+          wm.ensureStructure();
+          const pages = wm.listPages();
+          result = { pages, index: wm.readIndex() };
+          break;
+        }
+
+        case Method.WIKI_LINT: {
+          const { WikiManager } = await import('@curie-agent/wiki');
+          const wm = new WikiManager(this.settingsManager.get() as any);
+          wm.ensureStructure();
+          result = wm.lintReport();
+          break;
+        }
+
+        case Method.WIKI_GRAPH: {
+          const { WikiManager } = await import('@curie-agent/wiki');
+          const wm = new WikiManager(this.settingsManager.get() as any);
+          wm.ensureStructure();
+          result = wm.graph();
+          break;
+        }
 
         // Subagent management
         case Method.SUBAGENT_SPAWN: {

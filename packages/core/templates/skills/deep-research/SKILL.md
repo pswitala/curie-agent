@@ -212,7 +212,52 @@ Read `references/topic-guides.md` for specific guidance on:
 
 ---
 
-## 10. Quality Self-Check Before Delivering
+## 10. Delivering the Report
+
+> This section is critical for long reports. Skipping it is the most common cause of incomplete output.
+
+### When to write to a file
+
+Write the report to a `.md` file whenever the output is expected to exceed ~300 words. Do **not** print long reports inline — the model output window is limited, and a large inline response will be cut off.
+
+### Filename convention
+
+Use a descriptive, lowercase, hyphenated filename in the current working directory:
+- `research-<topic>-<date>.md` — e.g. `research-transformer-history-2025-05-31.md`
+- Or use the exact filename the user requested
+
+### Section-by-section writing pattern (use for any report longer than ~500 lines)
+
+Writing everything in a single `Write` call requires generating the entire file as one tool parameter — this can exceed the model's output limit mid-call, silently truncating the file. Instead:
+
+**Step 1 — Write a skeleton** using the `Write` tool with placeholder text for each section:
+```
+## Introduction
+[PLACEHOLDER]
+
+## Background
+[PLACEHOLDER]
+
+## Key Findings
+[PLACEHOLDER]
+...
+```
+
+**Step 2 — Fill each section** using the `Edit` tool (one Edit call per section):
+- `old_string`: the placeholder line for that section (e.g. `[PLACEHOLDER]` under `## Introduction`)
+- `new_string`: the full written content for that section
+
+Each Edit call generates only one section at a time (~200–600 tokens), well within any output limit regardless of how long the full report is.
+
+### After writing
+
+Always tell the user:
+- The filename where the report was saved
+- A 2–3 sentence summary of the key findings
+
+---
+
+## 11. Quality Self-Check Before Delivering
 
 Before presenting findings, verify:
 
@@ -224,3 +269,5 @@ Before presenting findings, verify:
 - [ ] Have I been transparent about uncertainty and limitations?
 - [ ] Did I avoid reproducing copyrighted text (paraphrase and cite instead)?
 - [ ] Is the output actually useful — not just long?
+- [ ] For reports longer than ~300 words: saved to a file, not printed inline?
+- [ ] If the report is long: used section-by-section Edit pattern rather than one massive Write call?

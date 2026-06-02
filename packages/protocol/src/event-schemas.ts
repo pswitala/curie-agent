@@ -169,6 +169,14 @@ export const DaemonReadyEvent = z.object({
   timestamp: z.number(),
 });
 
+export const WikiEvent = z.object({
+  type: z.literal('wiki-op'),
+  id: z.string(),
+  op: z.enum(['ingest', 'query', 'lint', 'edit']),
+  pages: z.array(z.string()),
+  timestamp: z.number(),
+});
+
 export const EventSchema = z.discriminatedUnion('type', [
   UserPromptEvent,
   AssistantDeltaEvent,
@@ -190,6 +198,7 @@ export const EventSchema = z.discriminatedUnion('type', [
   ChannelUpdatedEvent,
   McpStatusEvent,
   DaemonReadyEvent,
+  WikiEvent,
 ]);
 
 export type Event = z.infer<typeof EventSchema>;

@@ -127,6 +127,23 @@ export class DaemonRpcClient {
   async providerList(): Promise<unknown> {
     return this.request('provider.list');
   }
+
+  // Wiki
+  async wikiListPages(): Promise<unknown> {
+    return this.request('wiki.ingest');
+  }
+
+  async wikiSearch(query: string): Promise<unknown> {
+    return this.request('wiki.query', { query });
+  }
+
+  async wikiLint(): Promise<unknown> {
+    return this.request('wiki.lint');
+  }
+
+  async wikiGraph(): Promise<unknown> {
+    return this.request('wiki.graph');
+  }
 }
 
 /// WebSocket client for receiving daemon events.

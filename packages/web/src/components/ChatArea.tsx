@@ -12,6 +12,7 @@ interface Props {
   onCreateSession?: (sessionId: string) => void;
   events: WsEvent[];
   addLiveEvent: (event: WsEvent) => void;
+  onSwitchView?: (view: string) => void;
 }
 
 function estimateCostClient(
@@ -41,7 +42,7 @@ function estimateCostClient(
   return (inputTokens * p.in + outputTokens * p.out) / 1_000_000;
 }
 
-export default function ChatArea({ cmdResult, onClearCmdResult, rpc, className, activeSessionId, onCreateSession, events, addLiveEvent }: Props) {
+export default function ChatArea({ cmdResult, onClearCmdResult, rpc, className, activeSessionId, onCreateSession, events, addLiveEvent, onSwitchView }: Props) {
   const { get, providers } = useConfig();
   const model = get('model') as string | undefined;
   const currentProvider = (get('current_provider') as string) || 'anthropic';
@@ -73,6 +74,7 @@ export default function ChatArea({ cmdResult, onClearCmdResult, rpc, className, 
         totalTokens={totalTokens}
         contextTokens={contextTokens}
         costUsd={costUsd}
+        onSwitchView={onSwitchView}
       />
     </div>
   );

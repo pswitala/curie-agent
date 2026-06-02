@@ -57,6 +57,7 @@ interface Args {
   web?: string;
   sessions?: string;
   tui?: boolean;
+  wiki?: string;
   prompt?: string;
 }
 
@@ -96,6 +97,9 @@ function parseArgs(argv: string[]): Args {
       if (!argv[i + 1]?.startsWith('-')) i++;
     } else if (arg === 'tui') {
       args.tui = true;
+    } else if (arg === 'wiki') {
+      args.wiki = argv[i + 1]?.startsWith('-') ? 'init' : (argv[i + 1] || 'init');
+      if (!argv[i + 1]?.startsWith('-')) i++;
     } else if (arg === 'sessions') {
       args.sessions = argv[i + 1]?.startsWith('-') ? 'list' : (argv[i + 1] || 'list');
       if (!argv[i + 1]?.startsWith('-')) i++;
@@ -121,6 +125,11 @@ Usage:
   curie-agent sessions list|show|rm        Session management
   curie-agent daemon [start|stop|token]    HTTP daemon management
   curie-agent web [open|url]               Web dashboard
+  curie-agent wiki init                    Initialize wiki at ~/.curie-agent/wiki
+  curie-agent wiki ingest <path|url>       Add a source to the wiki
+  curie-agent wiki query "<question>"      Search/query the wiki
+  curie-agent wiki lint                    Deterministic health check
+  curie-agent wiki graph                   Emit backlink graph as JSON
   curie-agent --version                    Show version
 
 Options:
@@ -560,6 +569,113 @@ function handleSessionsCommand(subcommand: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// Wiki subcommand handler
+// ---------------------------------------------------------------------------
+
+async function handleWikiCommand(subcommand: string, argv: string[]): Promise<void> {
+  const { WikiManager, initWiki } = await import('@curie-agent/wiki');
+
+  const sm = new SettingsManager();
+  const settings = sm.load();
+  const wikiSettings = { wiki: settings.wiki };
+
+  switch (subcommand) {
+    case 'init': {
+      const root = initWiki(wikiSettings);
+      console.log(`Wiki initialized at: ${root}`);
+      console.log('Created: WIKI.md, index.md, log.md, raw/, pages/');
+      break;
+    }
+
+    case 'graph': {
+      const wm = new WikiManager(wikiSettings);
+      wm.ensureStructure();
+      const graph = wm.graph();
+      console.log(JSON.stringify(graph, null, 2));
+      break;
+    }
+
+    case 'lint': {
+      const wm = new WikiManager(wikiSettings);
+      wm.ensureStructure();
+      const report = wm.lintReport();
+      const total = report.orphanPages.length + report.brokenLinks.length +
+        report.missingFromIndex.length + report.staleFrontmatter.length;
+      if (total === 0) {
+        console.log('Wiki is healthy — no issues found.');
+        break;
+      }
+      if (report.orphanPages.length > 0) {
+        console.log(`\nOrphan pages (${report.orphanPages.length}):`);
+        report.orphanPages.forEach(p => console.log(`  ${p}`));
+      }
+      if (report.brokenLinks.length > 0) {
+        console.log(`\nBroken links (${report.brokenLinks.length}):`);
+        report.brokenLinks.forEach(l => console.log(`  ${l}`));
+      }
+      if (report.missingFromIndex.length > 0) {
+        console.log(`\nMissing from index.md (${report.missingFromIndex.length}):`);
+        report.missingFromIndex.forEach(p => console.log(`  ${p}`));
+      }
+      if (report.staleFrontmatter.length > 0) {
+        console.log(`\nStale frontmatter >30 days (${report.staleFrontmatter.length}):`);
+        report.staleFrontmatter.forEach(p => console.log(`  ${p}`));
+      }
+      console.log(`\nTotal: ${total} issue(s). Use the wiki skill in TUI for semantic lint (contradictions, stale claims).`);
+      break;
+    }
+
+    case 'ingest': {
+      // The remaining argv items after 'ingest' are the source path/URL
+      const source = argv.slice(argv.indexOf('ingest') + 1).join(' ').trim();
+      if (!source) {
+        console.error('Usage: curie-agent wiki ingest <path|url>');
+        process.exit(1);
+      }
+      const wm = new WikiManager(wikiSettings);
+      wm.ensureStructure();
+      console.log(`Wiki ingest: ${source}`);
+      console.log(`Wiki root: ${wm.root}`);
+      console.log('\nTo ingest via the LLM agent, open the TUI and use the wiki skill:');
+      console.log(`  curie-agent tui`);
+      console.log(`  → Send: "Ingest ${source} into the wiki"`);
+      console.log('\nThe wiki skill will read WIKI.md, process the source, and update the knowledge base.');
+      break;
+    }
+
+    case 'query': {
+      const query = argv.slice(argv.indexOf('query') + 1).join(' ').trim().replace(/^["']|["']$/g, '');
+      if (!query) {
+        console.error('Usage: curie-agent wiki query "<question>"');
+        process.exit(1);
+      }
+      const wm = new WikiManager(wikiSettings);
+      wm.ensureStructure();
+      const hits = wm.search(query);
+      if (hits.length > 0) {
+        console.log(`Wiki search results for "${query}" (${hits.length} hits):\n`);
+        for (const hit of hits.slice(0, 20)) {
+          console.log(`  [${hit.slug}:${hit.line}] ${hit.snippet}`);
+        }
+        console.log('\nFor a synthesized LLM answer with citations, open the TUI:');
+        console.log(`  curie-agent tui`);
+        console.log(`  → Send: "Query the wiki: ${query}"`);
+      } else {
+        console.log(`No direct matches for "${query}" in the wiki.`);
+        console.log('\nFor an LLM-driven query, open the TUI:');
+        console.log(`  curie-agent tui`);
+        console.log(`  → Send: "Query the wiki: ${query}"`);
+      }
+      break;
+    }
+
+    default:
+      console.error(`Unknown wiki command: ${subcommand}\nUse: init | ingest <path> | query "<q>" | lint | graph`);
+      process.exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // App component — thin client connecting to daemon
 // ---------------------------------------------------------------------------
 
@@ -601,6 +717,8 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [agents, setAgents] = useState<Map<string, AgentEntry>>(new Map());
   const [channels, setChannels] = useState<ChannelTabEntry[]>([]);
+  const [wikiPages, setWikiPages] = useState<Array<{ slug: string; title: string; category: string }>>([]);
+  const wikiPath = '~/.curie-agent/wiki';
 
   // Pending approval state
   const [pendingApproval, setPendingApproval] = useState<{
@@ -1061,24 +1179,6 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
           break;
         }
 
-        case 'todo': {
-          try {
-            await rpcRef.current.sessionSend(sessionIdRef.current, `/todo ${args}`, 'tui');
-          } catch {
-            setMessages(prev => [...prev, { role: 'system', content: `Todo command failed.` }]);
-          }
-          break;
-        }
-
-        case 'task': {
-          try {
-            await rpcRef.current.sessionSend(sessionIdRef.current, `/task ${args}`, 'tui');
-          } catch {
-            setMessages(prev => [...prev, { role: 'system', content: `Task command failed.` }]);
-          }
-          break;
-        }
-
         case 'cd': {
           try {
             await rpcRef.current.sessionSend(sessionIdRef.current, `/cd ${args.trim()}`, 'tui');
@@ -1096,6 +1196,64 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
           }
           break;
         }
+        case 'wiki': {
+          const sub = args.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+          const rest = args.trim().slice(sub.length).trim();
+
+          if (!sub || sub === 'open') {
+            setCurrentTab('wiki');
+            try {
+              const data = await rpcRef.current.wikiListPages() as { pages?: Array<{ slug: string; title: string; category: string }> } | null;
+              if (data?.pages) setWikiPages(data.pages);
+            } catch { /* best-effort page load */ }
+            setMessages(prev => [...prev, { role: 'system', content: 'Switched to Wiki tab' }]);
+          } else if (sub === 'list') {
+            const data = await rpcRef.current.wikiListPages() as { pages?: Array<{ slug: string; title: string; category: string }> } | null;
+            const pages = data?.pages ?? [];
+            if (pages.length === 0) {
+              setMessages(prev => [...prev, { role: 'system', content: 'Wiki is empty. Initialize with: curie-agent wiki init' }]);
+            } else {
+              const byCategory: Record<string, string[]> = {};
+              for (const p of pages) {
+                const cat = p.category || 'other';
+                (byCategory[cat] ??= []).push(`  ${p.slug} — ${p.title}`);
+              }
+              const lines = Object.entries(byCategory).flatMap(([cat, items]) => [`${cat} (${items.length}):`, ...items]);
+              setMessages(prev => [...prev, { role: 'system', content: `Wiki pages (${pages.length} total):\n\n${lines.join('\n')}` }]);
+            }
+          } else if (sub === 'search') {
+            if (!rest) {
+              setMessages(prev => [...prev, { role: 'system', content: 'Usage: /wiki search <query>' }]);
+              break;
+            }
+            const hits = await rpcRef.current.wikiSearch(rest) as Array<{ slug: string; line: string }> | null;
+            const results = hits ?? [];
+            if (results.length === 0) {
+              setMessages(prev => [...prev, { role: 'system', content: `No wiki results for "${rest}"` }]);
+            } else {
+              const lines = results.slice(0, 20).map(h => `  ${h.slug}: ${h.line}`);
+              setMessages(prev => [...prev, { role: 'system', content: `Wiki search "${rest}" (${results.length} hits):\n\n${lines.join('\n')}` }]);
+            }
+          } else if (sub === 'lint') {
+            const report = await rpcRef.current.wikiLint() as { issues?: Array<{ type: string; slug?: string; message: string }> } | null;
+            const issues = report?.issues ?? [];
+            if (issues.length === 0) {
+              setMessages(prev => [...prev, { role: 'system', content: 'Wiki is healthy — no issues found.' }]);
+            } else {
+              const lines = issues.map(i => `  [${i.type}] ${i.slug ? i.slug + ': ' : ''}${i.message}`);
+              setMessages(prev => [...prev, { role: 'system', content: `Wiki lint (${issues.length} issues):\n\n${lines.join('\n')}` }]);
+            }
+          } else if (sub === 'status') {
+            const data = await rpcRef.current.wikiListPages() as { pages?: Array<{ slug: string; title: string; category: string }> } | null;
+            const pages = data?.pages ?? [];
+            const cats = [...new Set(pages.map(p => p.category || 'other'))];
+            setMessages(prev => [...prev, { role: 'system', content: `Wiki status:\n  Pages: ${pages.length}\n  Categories: ${cats.join(', ') || 'none'}\n  Path: ${wikiPath}` }]);
+          } else {
+            setMessages(prev => [...prev, { role: 'system', content: 'Wiki commands:\n  /wiki        — Open wiki tab\n  /wiki list   — List all pages\n  /wiki search <q>  — Search pages\n  /wiki lint   — Health check\n  /wiki status — Summary stats' }]);
+          }
+          break;
+        }
+
         default: {
           setMessages(prev => [...prev, { role: 'system', content: `Unknown command: /${command}. Type /help for usage.` }]);
         }
@@ -1169,6 +1327,8 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
       agents={agents}
       channels={channels}
       onChannelSelect={() => {}}
+      wikiPages={wikiPages}
+      wikiPath={wikiPath}
       pendingApproval={pendingApproval}
       onApprovalDecision={onApprovalDecision}
       historyArray={userInputHistory}
@@ -1221,6 +1381,12 @@ async function main() {
   // Handle sessions subcommands
   if (args.sessions) {
     handleSessionsCommand(args.sessions);
+    process.exit(0);
+  }
+
+  // Handle wiki subcommands
+  if (args.wiki) {
+    await handleWikiCommand(args.wiki, process.argv.slice(2));
     process.exit(0);
   }
 

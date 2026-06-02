@@ -36,6 +36,7 @@ interface Props {
   totalTokens?: number;
   contextTokens?: number;
   costUsd?: number;
+  onSwitchView?: (view: string) => void;
 }
 
 function ThinkingBlock({ content }: { content: string }) {
@@ -715,7 +716,7 @@ function buildMessages(events: WsEvent[]): MessageEntry[] {
   return result;
 }
 
-export default function ChatView({ cmdResult, rpc, className, activeSessionId, onCreateSession, onClearCmdResult, events, addLiveEvent, totalTokens, contextTokens, costUsd }: Props) {
+export default function ChatView({ cmdResult, rpc, className, activeSessionId, onCreateSession, onClearCmdResult, events, addLiveEvent, totalTokens, contextTokens, costUsd, onSwitchView }: Props) {
   const { ws, connected, connectionStatus } = useApi();
   const [typing, setTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1078,6 +1079,82 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
               timestamp: Date.now(),
               text: `Unknown cron subcommand. Supported: \`/cron list\`, \`/cron delete <id>\`, \`/cron clear\`.`,
             });
+            setTyping(false);
+          }
+          return;
+        }
+
+        if (command === 'wiki') {
+          addLiveEvent({
+            type: 'user-prompt',
+            id: `local-prompt-${Date.now()}`,
+            timestamp: Date.now(),
+            text: text,
+          });
+
+          const subCmd = args.split(/\s+/)[0]?.toLowerCase() ?? '';
+          const searchQuery = args.slice(subCmd.length).trim();
+
+          if (!subCmd || subCmd === 'open') {
+            onSwitchView?.('wiki');
+            setTyping(false);
+          } else if (subCmd === 'list') {
+            try {
+              const data = await rpc.wikiListPages() as { pages?: Array<{ slug: string; title: string; category: string }> } | null;
+              const pages = data?.pages ?? [];
+              if (pages.length === 0) {
+                addLiveEvent({ type: 'assistant-delta', id: `local-wiki-${Date.now()}`, timestamp: Date.now(), text: 'Wiki is empty. Initialize with: `curie-agent wiki init`' });
+              } else {
+                const byCategory: Record<string, string[]> = {};
+                for (const p of pages) {
+                  const cat = p.category || 'other';
+                  (byCategory[cat] ??= []).push(`${p.slug} — ${p.title}`);
+                }
+                const lines = Object.entries(byCategory).flatMap(([cat, items]) => [`**${cat}** (${items.length})`, ...items.map(i => `  ${i}`)]);
+                addLiveEvent({ type: 'assistant-delta', id: `local-wiki-${Date.now()}`, timestamp: Date.now(), text: `### Wiki Pages (${pages.length} total)\n\n${lines.join('\n')}` });
+              }
+              setTyping(false);
+            } catch (err) {
+              addLiveEvent({ type: 'error', id: `local-err-${Date.now()}`, timestamp: Date.now(), message: `Wiki list failed: ${err instanceof Error ? err.message : String(err)}` });
+              setTyping(false);
+            }
+          } else if (subCmd === 'search') {
+            if (!searchQuery) {
+              addLiveEvent({ type: 'assistant-delta', id: `local-wiki-${Date.now()}`, timestamp: Date.now(), text: 'Usage: `/wiki search <query>`' });
+              setTyping(false);
+            } else {
+              try {
+                const hits = await rpc.wikiSearch(searchQuery) as Array<{ slug: string; line: string }> | null;
+                const results = hits ?? [];
+                if (results.length === 0) {
+                  addLiveEvent({ type: 'assistant-delta', id: `local-wiki-${Date.now()}`, timestamp: Date.now(), text: `No wiki results for "${searchQuery}"` });
+                } else {
+                  const lines = results.slice(0, 20).map(h => `  **${h.slug}**: ${h.line}`);
+                  addLiveEvent({ type: 'assistant-delta', id: `local-wiki-${Date.now()}`, timestamp: Date.now(), text: `### Wiki Search: "${searchQuery}" (${results.length} hits)\n\n${lines.join('\n')}` });
+                }
+                setTyping(false);
+              } catch (err) {
+                addLiveEvent({ type: 'error', id: `local-err-${Date.now()}`, timestamp: Date.now(), message: `Wiki search failed: ${err instanceof Error ? err.message : String(err)}` });
+                setTyping(false);
+              }
+            }
+          } else if (subCmd === 'lint') {
+            try {
+              const report = await rpc.wikiLint() as { issues?: Array<{ type: string; slug?: string; message: string }> } | null;
+              const issues = report?.issues ?? [];
+              if (issues.length === 0) {
+                addLiveEvent({ type: 'assistant-delta', id: `local-wiki-${Date.now()}`, timestamp: Date.now(), text: 'Wiki is healthy — no issues found.' });
+              } else {
+                const lines = issues.map(i => `- **[${i.type}]** ${i.slug ? `\`${i.slug}\`: ` : ''}${i.message}`);
+                addLiveEvent({ type: 'assistant-delta', id: `local-wiki-${Date.now()}`, timestamp: Date.now(), text: `### Wiki Lint (${issues.length} issues)\n\n${lines.join('\n')}` });
+              }
+              setTyping(false);
+            } catch (err) {
+              addLiveEvent({ type: 'error', id: `local-err-${Date.now()}`, timestamp: Date.now(), message: `Wiki lint failed: ${err instanceof Error ? err.message : String(err)}` });
+              setTyping(false);
+            }
+          } else {
+            addLiveEvent({ type: 'assistant-delta', id: `local-wiki-${Date.now()}`, timestamp: Date.now(), text: 'Wiki commands:\n- `/wiki` — Open wiki view\n- `/wiki list` — List all pages\n- `/wiki search <q>` — Search pages\n- `/wiki lint` — Health check' });
             setTyping(false);
           }
           return;

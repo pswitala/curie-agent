@@ -1,6 +1,6 @@
 {
-  "name": "@curie-agent/daemon",
-  "version": "0.2.5",
+  "name": "@curie-agent/wiki",
+  "version": "0.1.0",
   "publish": true,
   "type": "module",
   "files": [
@@ -24,15 +24,10 @@
   },
   "dependencies": {
     "@curie-agent/core": "workspace:*",
-    "@curie-agent/protocol": "workspace:*",
-    "@curie-agent/providers": "workspace:*",
-    "@curie-agent/tools": "workspace:*",
-    "@curie-agent/wiki": "workspace:*",
-    "ws": "^8.16.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@types/ws": "^8.5.12",
-    "typescript": "^5.9.0"
+    "typescript": "^6.0.3"
   }
 }

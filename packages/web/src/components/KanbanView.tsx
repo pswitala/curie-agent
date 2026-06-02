@@ -328,7 +328,8 @@ function EditModal({
   const [scheduledAt, setScheduledAt] = useState(() => {
     if (task?.scheduled_at) {
       const d = new Date(task.scheduled_at);
-      return d.toISOString().slice(0, 16);
+      const offset = d.getTimezoneOffset() * 60_000;
+      return new Date(d.getTime() - offset).toISOString().slice(0, 16);
     }
     return '';
   });

@@ -23,6 +23,8 @@ export { AgentsTab } from './agents-tab.js';
 export type { AgentEntry } from './agents-tab.js';
 export { ChannelsTab } from './channels-tab.js';
 export type { ChannelTabEntry } from './channels-tab.js';
+export { WikiTab } from './wiki-tab.js';
+export type { WikiPageEntry } from './wiki-tab.js';
 export {
   getInitialWizardState,
   isAlreadyInitialized,

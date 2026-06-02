@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { JsonRpcClient } from '../lib/jsonrpc-client.js';
+import { useApi } from '../lib/api-context.js';
 
 interface Props {
   rpc: JsonRpcClient | null;
@@ -34,30 +35,44 @@ interface StatsData {
 }
 
 export default function StatsView({ rpc, className }: Props) {
+  const { ws } = useApi();
   const [stats, setStats] = useState<StatsData | null>(null);
   const [recentSessions, setRecentSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [hoveredHour, setHoveredHour] = useState<number | null>(null);
   const [hoveredBarHour, setHoveredBarHour] = useState<number | null>(null);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchData = useCallback(async () => {
+    if (!rpc) return;
+    try {
+      const [statsRes, listRes]: any = await Promise.all([rpc.sessionStats(), rpc.sessionList()]);
+      if (statsRes) setStats(statsRes);
+      if (Array.isArray(listRes)) setRecentSessions(listRes);
+    } catch (err) {
+      console.error('[StatsView] Failed to load statistics:', err);
+    }
+  }, [rpc]);
 
   useEffect(() => {
-    if (!rpc) return;
     setLoading(true);
+    fetchData().finally(() => setLoading(false));
+  }, [fetchData]);
 
-    // Load aggregate statistics and recent sessions list
-    Promise.all([
-      rpc.sessionStats(),
-      rpc.sessionList()
-    ])
-      .then(([statsRes, listRes]: any) => {
-        if (statsRes) setStats(statsRes);
-        if (Array.isArray(listRes)) setRecentSessions(listRes);
-      })
-      .catch((err) => {
-        console.error('[StatsView] Failed to load statistics:', err);
-      })
-      .finally(() => setLoading(false));
-  }, [rpc]);
+  useEffect(() => {
+    if (!ws) return;
+    const debounced = () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      debounceTimer.current = setTimeout(fetchData, 2000);
+    };
+    const unsub1 = ws.on('session-stop', debounced);
+    const unsub2 = ws.on('session-start', debounced);
+    return () => {
+      unsub1();
+      unsub2();
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, [ws, fetchData]);
 
   if (loading) {
     return (

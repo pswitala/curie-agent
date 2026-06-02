@@ -57,6 +57,11 @@ export interface AutoCompactConfig {
   forced_threshold: number;
 }
 
+export interface WikiConfig {
+  path: string;         // '' → ~/.curie-agent/wiki
+  autoLint: 'on' | 'off';
+}
+
 // ── Top-level interface (nested shape) ──────────────────────────────────────
 
 export interface CurieSettings {
@@ -97,6 +102,9 @@ export interface CurieSettings {
 
   // Pricing tier warning
   pricing_tier_warn: 'on' | 'off';
+
+  // Wiki engine
+  wiki: WikiConfig;
 
   // Daemon binding IP (empty = 127.0.0.1)
   web_ip: string;
@@ -177,6 +185,7 @@ export const DEFAULT_SETTINGS: CurieSettings = {
   safety: { path_guard: 'on', path_allowlist: '', command_guard: 'on', snapshots: 'on' },
   auto_compact: { enabled: 'on', threshold: 75, warn_threshold: 60, forced_threshold: 85 },
   pricing_tier_warn: 'on',
+  wiki: { path: '', autoLint: 'off' },
   web_ip: '',
 };
 
@@ -352,6 +361,7 @@ export function migrateFlatToNested(parsed: Record<string, unknown>): CurieSetti
       forced_threshold: acForcedThreshold,
     },
     pricing_tier_warn: (pickString(parsed, 'PRICING_TIER_WARN', 'pricing_tier_warn') || 'on') as 'on' | 'off',
+    wiki: { path: '', autoLint: 'off' },
     web_ip: pickString(parsed, 'web_ip', 'WEB_IP') || '',
   };
 }
@@ -581,6 +591,13 @@ export function parseNestedSettings(parsed: Record<string, unknown>): CurieSetti
     safety: safetyConfig,
     auto_compact: autoCompactConfig,
     pricing_tier_warn: (getString(['pricing_tier_warn', 'PRICING_TIER_WARN']) || 'on') as 'on' | 'off',
+    wiki: (() => {
+      const rawWiki = parsed.wiki as Record<string, unknown> | undefined;
+      return {
+        path: (rawWiki?.path as string) || '',
+        autoLint: ((rawWiki?.autoLint as string) || 'off') as 'on' | 'off',
+      };
+    })(),
     web_ip: getString(['web_ip', 'WEB_IP']) || '',
     daemon_token: getString(['daemon_token']),
   };

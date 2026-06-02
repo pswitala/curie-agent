@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { ThemeColors } from '../../render/src/themes.js';
 
-export type TabId = 'stats' | 'assistant' | 'projects' | 'agents' | 'channels';
+export type TabId = 'stats' | 'assistant' | 'projects' | 'agents' | 'channels' | 'wiki';
 
 interface TabBarProps {
   active: TabId;
@@ -15,6 +15,7 @@ export const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'stats', label: 'Stats' },
   { id: 'projects', label: 'Projects' },
   { id: 'agents', label: 'Agents' },
+  { id: 'wiki', label: 'Wiki' },
 ];
 
 export const TAB_IDS: TabId[] = TABS.map(t => t.id);

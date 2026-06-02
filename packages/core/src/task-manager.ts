@@ -334,11 +334,15 @@ export class TaskManager {
     const picked = pickNextSchedule(settings, ref);
     if (!picked) return;
 
-    // Find existing heartbeat task for this schedule type
-    let existing = this.getHeartbeats().find(t => t.frequency?.type === picked.type);
-    if (existing) {
-      existing.frequency = picked;
-      existing.scheduled_at = computeNextFire(picked, ref);
+    const all = this.getHeartbeats();
+    const [primary, ...extras] = all;
+    for (const extra of extras) {
+      this.updateTaskStatus(extra.id, 'canceled');
+    }
+    if (primary) {
+      primary.frequency = picked;
+      primary.title = `Heartbeat: ${scheduleLabel(picked.type)}`;
+      primary.scheduled_at = computeNextFire(picked, ref);
       this.save();
     } else {
       this.create({

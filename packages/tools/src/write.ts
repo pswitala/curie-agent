@@ -11,7 +11,10 @@ const WriteSchema = z.object({
 
 export const writeTool = createTool(
   'Write',
-  'Writes a file to the local filesystem. Creates new files or overwrites existing ones.',
+  'Writes a file to the local filesystem. Creates new files or overwrites existing ones. ' +
+  'Use this for any content too large to deliver inline — research reports, summaries, essays, generated documents. ' +
+  'For very long content (>500 lines), write a skeleton first with placeholder headings, ' +
+  'then fill each section using the Edit tool so each individual tool call stays small and fits within output limits.',
   WriteSchema,
   async (input, ctx: ToolContext) => {
     let filePath: string;

@@ -12,6 +12,7 @@ export { webFetchTool } from './web-fetch.js';
 export { skillTool, discoverAllSkills, formatSkillsForPrompt, listSkills, parseFrontmatter, type ParsedSkill } from './skill.js';
 export { createSpawnAgentTool } from './spawn-agent.js';
 export { todoTool } from './todo.js';
+export { wikiTool } from './wiki.js';
 
 import { readTool } from './read.js';
 import { editTool } from './edit.js';
@@ -25,5 +26,6 @@ import { webSearchTool } from './web-search.js';
 import { webFetchTool } from './web-fetch.js';
 import { skillTool } from './skill.js';
 import { todoTool } from './todo.js';
+import { wikiTool } from './wiki.js';
 
-export const allTools = [readTool, editTool, writeTool, globTool, grepTool, bashTool, reminderTool, scheduledTaskTool, webSearchTool, webFetchTool, skillTool, todoTool];
+export const allTools = [readTool, editTool, writeTool, globTool, grepTool, bashTool, reminderTool, scheduledTaskTool, webSearchTool, webFetchTool, skillTool, todoTool, wikiTool];

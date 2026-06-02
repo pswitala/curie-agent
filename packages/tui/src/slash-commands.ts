@@ -157,6 +157,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'todo', description: 'Manage tasks in todo.json', usage: '/todo <list|add|complete|remove>', category: 'Knowledge' },
   { name: 'stats', description: 'Daily usage, sessions, streaks', usage: '/stats', category: 'Knowledge' },
   { name: 'context', description: 'Visual grid showing context window usage, compaction, autocompaction', usage: '/context [auto|messages|compact [detailed|brief]]', category: 'Knowledge' },
+  { name: 'wiki', description: 'Open the wiki tab or run a wiki operation', usage: '/wiki [list|search <query>|lint|status]', category: 'Knowledge' },
   // Automation
   { name: 'remind', description: 'Create a reminder', usage: '/remind <message at time>', category: 'Automation' },
   { name: 'cron', description: 'Manage reminders', usage: '/cron <list|delete|clear>', category: 'Automation' },

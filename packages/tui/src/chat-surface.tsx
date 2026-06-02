@@ -11,6 +11,7 @@ import type { ProjectEntry } from './projects-tab.js';
 import { StatsTab } from './stats-tab.js';
 import { AgentsTab, type AgentEntry } from './agents-tab.js';
 import { ChannelsTab, type ChannelTabEntry } from './channels-tab.js';
+import { WikiTab, type WikiPageEntry } from './wiki-tab.js';
 import type { Event } from '../../core/src/event-bus.js';
 import type { ThemeColors } from '../../render/src/themes.js';
 import { Markdown } from '@curie-agent/render';
@@ -69,6 +70,8 @@ interface ChatSurfaceProps {
   onSelectProject?: (project: ProjectEntry) => void;
   channels?: ChannelTabEntry[];
   onChannelSelect?: (channelId: string) => void;
+  wikiPages?: WikiPageEntry[];
+  wikiPath?: string;
   // User input history — stable refs passed separately to prevent Ink remounts.
 // If we pass these as a single object literal, Ink sees a new ref each render
 // and remounts ChatSurface, destroying the useInput handler.
@@ -111,6 +114,8 @@ export function ChatSurface({
   onSelectProject,
   channels,
   onChannelSelect,
+  wikiPages,
+  wikiPath,
   historyArray,
   historyIndexRef,
   setHistoryIndexFn,
@@ -664,6 +669,8 @@ export function ChatSurface({
           <ChannelsTab channels={channels ?? []} theme={theme} isActive={currentTab === 'channels'} onSelectChannel={onChannelSelect} />
         ) : currentTab === 'agents' ? (
           <AgentsTab agents={agents ?? new Map()} isActive={currentTab === 'agents'} theme={theme} />
+        ) : currentTab === 'wiki' ? (
+          <WikiTab pages={wikiPages} wikiPath={wikiPath} theme={theme} isActive={currentTab === 'wiki'} />
         ) : (
         <>
         {pendingApproval && (

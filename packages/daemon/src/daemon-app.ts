@@ -5,7 +5,7 @@ import type {
   EventBus, Event, SessionStore, SettingsManager,
   CurieSettings, ProviderStream, Tool,
 } from '@curie-agent/core';
-import { TaskManager, TelegramGateway, HeartbeatExecutor, HeartbeatDelivery, SubagentExecutor, computeNextFire, migrateTasks } from '@curie-agent/core';
+import { TaskManager, TelegramGateway, HeartbeatExecutor, HeartbeatDelivery, SubagentExecutor, migrateTasks } from '@curie-agent/core';
 import type { ScheduleType, UnifiedTask, SubagentHandle } from '@curie-agent/core';
 import type { ProviderFactory } from './server.js';
 import { ApprovalTracker } from './approval-tracker.js';
@@ -332,14 +332,10 @@ export class DaemonApp {
         if (!task.scheduled_at || task.scheduled_at > now) continue;
 
         if (this.taskManager.isHeartbeat(task)) {
-          // Recurring heartbeat — update scheduled_at before firing
           const oldScheduledAt = task.scheduled_at;
-          if (task.frequency) {
-            task.scheduled_at = computeNextFire({ type: task.frequency.type, value: task.frequency.value }, now);
-            this.taskManager.save();
-          }
+          const firedScheduleType = task.frequency?.type;
 
-          await this.executeHeartbeatUnified(task, oldScheduledAt).catch(err => {
+          await this.executeHeartbeatUnified(task, oldScheduledAt, firedScheduleType as ScheduleType).catch(err => {
             console.error('[DaemonApp] heartbeat run error:', err);
           });
         } else if (task.mode === 'agent') {
@@ -498,13 +494,15 @@ export class DaemonApp {
   }
 
   /** Execute a heartbeat from unified TaskManager (auto mode + frequency). */
-  private async executeHeartbeatUnified(task: UnifiedTask, oldScheduledAt?: number): Promise<void> {
+  private async executeHeartbeatUnified(task: UnifiedTask, oldScheduledAt?: number, firedScheduleType?: ScheduleType): Promise<void> {
     if (!this.createProvider) return;
+
+    this.taskManager.markExecuting(task.id);
 
     try {
       const settings = this.settingsManager.get();
       const provider = this.createProvider(settings);
-      const scheduleType = task.frequency?.type as ScheduleType;
+      const scheduleType = (firedScheduleType ?? task.frequency?.type) as ScheduleType;
 
       const executor = new HeartbeatExecutor({
         provider,
@@ -536,6 +534,22 @@ export class DaemonApp {
       }
     } catch (err) {
       console.error('[unified heartbeat] Execution failed:', err);
+    } finally {
+      // Remove the fired task and schedule the next one.
+      // Runs even on error so the heartbeat cycle is never permanently stuck.
+      this.taskManager.clearExecuting(task.id);
+      this.taskManager.removeTask(task.id);
+      const freshSettings = this.settingsManager.get();
+      const hb = freshSettings.heartbeat;
+      if (freshSettings.heartbeat?.schedule === 'on' && hb) {
+        this.taskManager.rescheduleFromSettings({
+          HEARTBEAT_INTRADAY: hb.intraday ?? '',
+          HEARTBEAT_DAILY: hb.daily ?? '',
+          HEARTBEAT_WEEKLY: hb.weekly ?? '',
+          HEARTBEAT_MONTHLY: hb.monthly ?? '',
+          HEARTBEAT_DREAMING: hb.dreaming ?? '',
+        });
+      }
     }
   }
 

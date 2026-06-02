@@ -45,6 +45,7 @@
       "@curie-agent/render": "workspace:*",
       "@curie-agent/tools": "workspace:*",
       "@curie-agent/mcp": "workspace:*",
+      "@curie-agent/wiki": "workspace:*",
       "@curie-agent/tui": "workspace:*",
       "@curie-agent/cli": "workspace:*"
     },
