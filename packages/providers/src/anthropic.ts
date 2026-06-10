@@ -181,14 +181,7 @@ export class AnthropicProvider implements Provider {
         return;
       }
 
-      // Flush buffered tool calls in stream order (Map preserves insertion order).
-      for (const [, tool] of toolBlocks) {
-        let input: Record<string, unknown> = {};
-        try { input = JSON.parse(tool.inputStr || '{}'); } catch { /* empty input */ }
-        yield { type: 'tool-call', id: tool.id, name: tool.name, input };
-      }
-      toolBlocks.clear();
-
+      // Determine stop reason before flushing tool calls so truncated ones can be skipped.
       let stopReason: string = 'stop';
       try {
         const final = await sdkStream.finalMessage();
@@ -207,6 +200,17 @@ export class AnthropicProvider implements Provider {
       } catch {
         // sdkStream.finalMessage() throws if the stream was aborted — that's expected.
       }
+
+      // Flush buffered tool calls in stream order. Skip calls whose JSON was truncated
+      // by the output token limit — emitting them with empty inputs causes retry loops.
+      for (const [, tool] of toolBlocks) {
+        let input: Record<string, unknown> = {};
+        let parseOk = true;
+        try { input = JSON.parse(tool.inputStr || '{}'); } catch { parseOk = false; }
+        if (!parseOk && stopReason === 'length') continue;
+        yield { type: 'tool-call', id: tool.id, name: tool.name, input };
+      }
+      toolBlocks.clear();
 
       if (abortCtrl.signal.aborted) {
         yield { type: 'stop', reason: 'aborted' };

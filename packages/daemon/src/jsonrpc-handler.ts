@@ -2360,12 +2360,8 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
     const settings = this.settingsManager.get();
     const history = this.sessionStore.loadEvents(sessionId) || [];
     const usageEvents = history.filter((e: any) => e.type === 'usage');
-    let input = 0;
-    let output = 0;
-    for (const e of usageEvents) {
-      input += (e as any).inputTokens || 0;
-      output += (e as any).outputTokens || 0;
-    }
+    const latestUsage = usageEvents[usageEvents.length - 1] as any;
+    const input = latestUsage?.inputTokens ?? 0;
 
     if (input === 0) return; // No token data yet
 

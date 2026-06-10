@@ -358,6 +358,34 @@ export class TurnLoop {
         // Capture abortController before the loop — it's always set by this point.
         const abortCtrl = self.abortController as AbortController;
 
+        // Pre-flight: abort before sending if estimated payload exceeds context window.
+        // Count actual text content chars (not JSON structure) and divide by 4 (~4 chars/token).
+        {
+          const ctxWindow = self.config.settings.providers[self.config.settings.current_provider]?.model_context_window ?? 131072;
+          const reservedForOutput = self.config.settings.providers[self.config.settings.current_provider]?.max_output_tokens ?? 65536;
+          let contentChars = (self.config.system?.length ?? 0) + 200; // system prompt + date context overhead
+          for (const m of streamMessages as Array<{ role: string; content: unknown }>) {
+            if (typeof m.content === 'string') {
+              contentChars += m.content.length;
+            } else if (Array.isArray(m.content)) {
+              for (const b of m.content as Array<{ type?: string; text?: string; thinking?: string; input?: unknown }>) {
+                if (b.text) contentChars += b.text.length;
+                else if (b.thinking) contentChars += b.thinking.length;
+                else if (b.input) contentChars += JSON.stringify(b.input).length;
+              }
+            }
+          }
+          const estimatedInputTokens = Math.ceil(contentChars / 4);
+          if (estimatedInputTokens > ctxWindow - reservedForOutput) {
+            emit({ type: 'error', id: session.id, timestamp: Date.now(), message:
+              `Estimated input (~${Math.round(estimatedInputTokens / 1000)}k tokens) would exceed the context window ` +
+              `(${Math.round(ctxWindow / 1000)}k) for provider "${self.config.settings.current_provider}". ` +
+              `Run /context compact to summarize history, or switch to a model with a larger context window.` });
+            emit({ type: 'session-stop', id: session.id, reason: 'error', timestamp: Date.now() });
+            return { events: self.bus.history(), sessionId: session.id, reason: 'error' };
+          }
+        }
+
         // Start the provider stream and capture its cancel function.
         // The cancel() method synchronously aborts the underlying HTTP connection
         // (e.g., Anthropic's stream.abort()), making Esc feel instantaneous.
@@ -408,9 +436,10 @@ export class TurnLoop {
 
               case 'stop':
                 if (event.reason === 'error' && event.errorDetail) {
-                  emit({ type: 'error', id: session.id, message:
-                    `Provider stream error: ${event.errorDetail}. This can happen with incompatible local model endpoints or network issues.`,
-                    timestamp: Date.now(),
+                  const isCtxExceeded = /exceeds.*context|context.*size|too many tokens/i.test(event.errorDetail);
+                  emit({ type: 'error', id: session.id, timestamp: Date.now(), message: isCtxExceeded
+                    ? `Context window exceeded: ${event.errorDetail}. Run /context compact to summarize history, or switch to a model with a larger context window.`
+                    : `Provider stream error: ${event.errorDetail}. This can happen with incompatible local model endpoints or network issues.`
                   });
                 } else if (event.reason === 'aborted' && !self.abort) {
                   // Provider timeout (not user-initiated) — surface it
@@ -502,7 +531,7 @@ export class TurnLoop {
               timestamp: Date.now() });
           } else {
             continuationCount++;
-            this.messages.push({ role: 'user', content: '[continue]' });
+            this.messages.push({ role: 'user', content: '[continue — your previous response was cut off by the output token limit. If you were about to call Write with a large content parameter, use the skeleton+Edit approach: first Write a skeleton file with section headers and [PLACEHOLDER] markers, then fill each section with a separate Edit call.]' });
             continue;
           }
         }

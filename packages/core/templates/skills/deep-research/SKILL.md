@@ -226,9 +226,9 @@ Use a descriptive, lowercase, hyphenated filename in the current working directo
 - `research-<topic>-<date>.md` — e.g. `research-transformer-history-2025-05-31.md`
 - Or use the exact filename the user requested
 
-### Section-by-section writing pattern (use for any report longer than ~500 lines)
+### Section-by-section writing pattern (use for any report with multiple sections)
 
-Writing everything in a single `Write` call requires generating the entire file as one tool parameter — this can exceed the model's output limit mid-call, silently truncating the file. Instead:
+Writing everything in a single `Write` call requires generating the entire file as one tool parameter. Even reports shorter than 500 lines can exceed the model's output limit if the content is dense prose — the result is a silently truncated file or an empty tool call. Always use the section-by-section approach for any substantial report:
 
 **Step 1 — Write a skeleton** using the `Write` tool with placeholder text for each section:
 ```

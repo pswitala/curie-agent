@@ -50,6 +50,7 @@ export async function* streamOpenAICompatible(
 
     const pendingTools = new Map<number, { id: string; name: string; inputStr: string }>();
     let lastUsage: OpenAI.CompletionUsage | null = null;
+    let finishReason: string | null = null;
     let inThinkBlock = false;
     let accumulatedThinking = '';
     let debugTextAccum = '';
@@ -137,6 +138,8 @@ export async function* streamOpenAICompatible(
           accumulatedThinking += rc;
         }
 
+        if (choice.finish_reason) finishReason = choice.finish_reason;
+
         if (choice.delta?.tool_calls) {
           for (const tc of choice.delta.tool_calls) {
             const idx = tc.index ?? 0;
@@ -170,13 +173,15 @@ export async function* streamOpenAICompatible(
       yield { type: 'thinking-block', thinking: accumulatedThinking, signature: '' };
     }
 
+    // Skip tool calls whose JSON was truncated by the output token limit —
+    // emitting them with empty inputs causes retry loops in the turn loop.
     for (const [, pending] of pendingTools) {
       let input: Record<string, unknown> = {};
+      let parseOk = true;
       try {
         if (pending.inputStr) input = JSON.parse(pending.inputStr);
-      } catch {
-        /* empty input on parse failure */
-      }
+      } catch { parseOk = false; }
+      if (!parseOk && finishReason === 'length') continue;
       debugToolCallCount++;
       yield { type: 'tool-call', id: pending.id, name: pending.name, input };
     }
@@ -198,7 +203,7 @@ export async function* streamOpenAICompatible(
       yield { type: 'usage', inputTokens: estimated.inputTokens, outputTokens: estimated.outputTokens };
     }
 
-    yield { type: 'stop', reason: abortCtrl.signal.aborted ? 'aborted' : 'stop' };
+    yield { type: 'stop', reason: abortCtrl.signal.aborted ? 'aborted' : (finishReason === 'length' ? 'length' : 'stop') };
   } catch (sdkErr) {
     // SDK threw during initial request (abort, connection refused, etc.)
     if (abortCtrl.signal.aborted) {

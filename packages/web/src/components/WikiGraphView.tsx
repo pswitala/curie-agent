@@ -71,7 +71,7 @@ function forceLayout(
   const n = gNodes.length;
   const pos = new Map<string, { x: number; y: number }>();
   const vel = new Map<string, { vx: number; vy: number }>();
-  const r = Math.min(320, Math.max(80, n * 22));
+  const r = Math.min(600, Math.max(150, n * 40));
 
   gNodes.forEach((nd, i) => {
     const a = (i / n) * 2 * Math.PI;
@@ -88,7 +88,7 @@ function forceLayout(
         const a = pos.get(si)!, b = pos.get(sj)!;
         const dx = b.x - a.x, dy = b.y - a.y;
         const d2 = Math.max(1, dx * dx + dy * dy), d = Math.sqrt(d2);
-        const f = 8000 / d2, fx = (dx / d) * f, fy = (dy / d) * f;
+        const f = 18000 / d2, fx = (dx / d) * f, fy = (dy / d) * f;
         const va = vel.get(si)!, vb = vel.get(sj)!;
         va.vx -= fx; va.vy -= fy; vb.vx += fx; vb.vy += fy;
       }
@@ -97,7 +97,7 @@ function forceLayout(
       const a = pos.get(e.source), b = pos.get(e.target);
       if (!a || !b) continue;
       const dx = b.x - a.x, dy = b.y - a.y;
-      const d = Math.max(1, Math.sqrt(dx * dx + dy * dy)), f = d * 0.04;
+      const d = Math.max(1, Math.sqrt(dx * dx + dy * dy)), f = d * 0.02;
       const fx = (dx / d) * f, fy = (dy / d) * f;
       const va = vel.get(e.source), vb = vel.get(e.target);
       if (va) { va.vx += fx; va.vy += fy; }
