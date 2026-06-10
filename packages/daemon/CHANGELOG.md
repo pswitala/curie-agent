@@ -1,5 +1,11 @@
 # @curie-agent/daemon
 
+## 0.3.1
+
+### Patch Changes
+
+- Fix ENOENT crash on first run: create ~/.curie-agent/ directory before writing daemon.token
+
 ## 0.2.5
 
 ### Patch Changes

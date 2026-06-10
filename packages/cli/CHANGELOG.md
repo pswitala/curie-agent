@@ -1,5 +1,12 @@
 # @curie-agent/cli
 
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @curie-agent/daemon@0.3.1
+
 ## 0.2.5
 
 ### Patch Changes
