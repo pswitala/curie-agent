@@ -1,10 +1,11 @@
 {
   "name": "@curie-agent/daemon",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publish": true,
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "web"
   ],
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
@@ -15,7 +16,7 @@
     }
   },
   "scripts": {
-    "build": "tsc --project tsconfig.json",
+    "build": "tsc --project tsconfig.json && node scripts/copy-web.mjs",
     "dev": "tsc --watch --project tsconfig.json",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "lint": "eslint src/",
@@ -31,6 +32,7 @@
     "ws": "^8.16.0"
   },
   "devDependencies": {
+    "@curie-agent/web": "workspace:*",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.12",
     "typescript": "^5.9.0"
