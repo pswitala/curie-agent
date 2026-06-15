@@ -168,7 +168,7 @@ export class OllamaProvider implements Provider {
     const response = await this.client.chat.completions.create({
       model,
       messages,
-      max_tokens: 256,
+      max_tokens: 2048,
       temperature: 0,
     }, { signal: args?.signal });
     const result = response.choices[0]?.message?.content?.trim() ?? '';

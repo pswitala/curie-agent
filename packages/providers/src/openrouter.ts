@@ -113,7 +113,7 @@ export class OpenRouterProvider implements Provider {
       stream: true,
       ...(tools ? { tools } : {}),
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
-      ...(args.maxTokens ? { max_tokens: args.maxTokens } : {}),
+      max_tokens: args.maxTokens ?? 65536,
       ...(reasoning ? { reasoning } : {}),
       ...(this._providerOrder && this._providerOrder.length > 0 ? { provider: { order: this._providerOrder } } : {}),
       stream_options: { include_usage: true },
@@ -235,7 +235,7 @@ export class OpenRouterProvider implements Provider {
     const response = await this.client.chat.completions.create({
       model,
       messages,
-      max_tokens: 256,
+      max_tokens: 2048,
       temperature: 0,
     });
     return response.choices[0]?.message?.content?.trim() ?? '';
@@ -258,7 +258,7 @@ export class OpenRouterProvider implements Provider {
       stream: false,
       ...(tools ? { tools } : {}),
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
-      ...(args.maxTokens ? { max_tokens: args.maxTokens } : {}),
+      max_tokens: args.maxTokens ?? 16384,
       ...(reasoning ? { reasoning } : {}),
       ...(this._providerOrder && this._providerOrder.length > 0 ? { provider: { order: this._providerOrder } } : {}),
     } as any);

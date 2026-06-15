@@ -235,7 +235,7 @@ export class OpenAIProvider implements Provider {
     const response = await this.client.chat.completions.create({
       model,
       messages,
-      max_tokens: 256,
+      max_tokens: 2048,
       temperature: 0,
     });
     return response.choices[0]?.message?.content?.trim() ?? '';

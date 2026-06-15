@@ -237,7 +237,7 @@ export class AnthropicProvider implements Provider {
     const model = args?.model || this.defaultModel;
     const response = await this.client.messages.create({
       model,
-      max_tokens: 256,
+      max_tokens: 2048,
       system: args?.system,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0,

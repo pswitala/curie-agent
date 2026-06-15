@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 const DAEMON_TOKEN_FILE = join(homedir(), '.curie-agent', 'daemon.token');
@@ -21,6 +21,7 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export function saveToken(token: string): void {
+  mkdirSync(dirname(DAEMON_TOKEN_FILE), { recursive: true, mode: 0o700 });
   writeFileSync(DAEMON_TOKEN_FILE, token, { mode: 0o600 });
   try {
     const raw = existsSync(SETTINGS_FILE) ? readFileSync(SETTINGS_FILE, 'utf-8') : '{}';
