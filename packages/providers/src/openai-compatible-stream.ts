@@ -1,5 +1,59 @@
+import { randomUUID } from 'node:crypto';
 import type OpenAI from 'openai';
 import type { ProviderEvent } from './provider.js';
+
+/**
+ * Parse tool calls embedded in plain text for local models (e.g. Bielik, Mistral-family)
+ * that emit JSON instead of structured tool_calls in the API response.
+ *
+ * Recognises two formats:
+ *   1. <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+ *   2. Bare JSON object {"name": "...", "arguments": {...}} (whole text or single line)
+ *
+ * Only matches objects whose "name" is in knownToolNames to avoid false positives.
+ */
+function extractTextToolCalls(
+  text: string,
+  knownToolNames: Set<string>,
+): Array<{ id: string; name: string; input: Record<string, unknown> }> {
+  const results: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
+
+  function tryParse(raw: string): void {
+    let obj: unknown;
+    try { obj = JSON.parse(raw.trim()); } catch { return; }
+    if (typeof obj !== 'object' || obj === null) return;
+    const o = obj as Record<string, unknown>;
+    const name = o['name'];
+    if (typeof name !== 'string' || !knownToolNames.has(name)) return;
+    const rawArgs = o['arguments'] ?? o['parameters'] ?? {};
+    let input: Record<string, unknown>;
+    if (typeof rawArgs === 'string') {
+      try { input = JSON.parse(rawArgs) as Record<string, unknown>; } catch { return; }
+    } else {
+      input = rawArgs as Record<string, unknown>;
+    }
+    results.push({ id: randomUUID(), name, input });
+  }
+
+  // 1. <tool_call> XML blocks
+  const xmlRe = /<tool_call>([\s\S]*?)<\/tool_call>/g;
+  let m: RegExpExecArray | null;
+  while ((m = xmlRe.exec(text)) !== null) {
+    tryParse(m[1] ?? '');
+  }
+  if (results.length > 0) return results;
+
+  // 2. Whole trimmed text as JSON
+  tryParse(text.trim());
+  if (results.length > 0) return results;
+
+  // 3. Line-by-line (model may output other text + JSON on separate lines)
+  for (const line of text.split('\n')) {
+    const t = line.trim();
+    if (t.startsWith('{')) tryParse(t);
+  }
+  return results;
+}
 
 /**
  * Stream consumer for any OpenAI Chat Completions-compatible endpoint
@@ -184,6 +238,17 @@ export async function* streamOpenAICompatible(
       if (!parseOk && finishReason === 'length') continue;
       debugToolCallCount++;
       yield { type: 'tool-call', id: pending.id, name: pending.name, input };
+    }
+
+    // Fallback: parse tool calls embedded in plain text.
+    // Local models (Bielik, Mistral-family on llama.cpp) often output JSON directly
+    // instead of the structured tool_calls API field.
+    if (pendingTools.size === 0 && streamParams.tools && streamParams.tools.length > 0) {
+      const toolNames = new Set(streamParams.tools.map(t => t.function.name));
+      for (const tc of extractTextToolCalls(debugTextAccum, toolNames)) {
+        debugToolCallCount++;
+        yield { type: 'tool-call', id: tc.id, name: tc.name, input: tc.input };
+      }
     }
 
     // Debug summary at end of stream
