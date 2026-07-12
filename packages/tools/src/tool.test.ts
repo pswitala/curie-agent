@@ -151,4 +151,75 @@ describe('createTool', () => {
     expect(result.error).toBeUndefined();
     expect(result.output).toEqual({ cwd: '/override/project', path: 'test.txt' });
   });
+
+  describe('per-tool aliases and schema-aware normalization', () => {
+    const fileSchema = z.object({
+      file_path: z.string(),
+      content: z.string().optional(),
+    });
+    const makeFileTool = () =>
+      createTool(
+        'AliasTool',
+        'A test tool',
+        fileSchema,
+        async (input) => ({ output: { path: input.file_path } }),
+        undefined,
+        { aliases: { path: 'file_path', filename: 'file_path' } },
+      );
+
+    it('maps a per-tool alias (path -> file_path)', async () => {
+      const result = await makeFileTool().execute({ path: '/aliased.txt' }, {} as any);
+      expect(result.error).toBeUndefined();
+      expect(result.output).toEqual({ path: '/aliased.txt' });
+    });
+
+    it('explicit schema key wins over alias regardless of key order', async () => {
+      const tool = makeFileTool();
+      const a = await tool.execute({ path: '/alias.txt', file_path: '/explicit.txt' }, {} as any);
+      expect(a.output).toEqual({ path: '/explicit.txt' });
+      const b = await tool.execute({ file_path: '/explicit.txt', path: '/alias.txt' }, {} as any);
+      expect(b.output).toEqual({ path: '/explicit.txt' });
+    });
+
+    it('generic camelCase fallback applies only when the snake form is in the schema', async () => {
+      const schema = z.object({ head_limit: z.number(), other: z.string().optional() });
+      const tool = createTool('FallbackTool', 'A test tool', schema, async (input) => ({
+        output: { limit: input.head_limit },
+      }));
+      const ok = await tool.execute({ headLimit: 5 }, {} as any);
+      expect(ok.error).toBeUndefined();
+      expect(ok.output).toEqual({ limit: 5 });
+
+      // someKey -> some_key is not in the schema, so it must not satisfy head_limit
+      const bad = await tool.execute({ someKey: 5 }, {} as any);
+      expect(bad.error).toMatch(/Validation error/);
+    });
+
+    it('does not remap a legitimate path param on tools without a file_path alias', async () => {
+      const globLike = z.object({ pattern: z.string(), path: z.string().optional() });
+      const tool = createTool('GlobLike', 'A test tool', globLike, async (input) => ({
+        output: { pattern: input.pattern, path: input.path },
+      }));
+      const result = await tool.execute({ pattern: '*.ts', path: 'src' }, {} as any);
+      expect(result.error).toBeUndefined();
+      expect(result.output).toEqual({ pattern: '*.ts', path: 'src' });
+    });
+
+    it('validation errors include an Expected parameters summary', async () => {
+      const result = await makeFileTool().execute({}, {} as any);
+      expect(result.error).toContain('Expected parameters:');
+      expect(result.error).toContain('file_path (string, required)');
+      expect(result.error).toContain('content (string)');
+    });
+
+    it('suggests the nearest parameter name for unknown keys', async () => {
+      const schema = z.object({ file_path: z.string() });
+      const tool = createTool('SuggestTool', 'A test tool', schema, async (input) => ({
+        output: input.file_path,
+      }));
+      const result = await tool.execute({ file: '/x.txt' }, {} as any);
+      expect(result.error).toContain('Unknown parameter "file"');
+      expect(result.error).toContain('did you mean "file_path"');
+    });
+  });
 });

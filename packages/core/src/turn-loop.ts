@@ -79,7 +79,7 @@ export type AssistantBlock =
 export type Message =
   | { role: 'user'; content: string }
   | { role: 'assistant'; content: AssistantBlock[] }
-  | { role: 'tool'; toolUseId: string; content: string };
+  | { role: 'tool'; toolUseId: string; toolName?: string; content: string };
 
 // The provider's stream() returns a CancelableIterable with a cancel() method
 // that synchronously aborts the underlying HTTP connection (e.g., Anthropic's
@@ -244,7 +244,7 @@ export class TurnLoop {
       const tc = turn.toolCalls.find(c => c.toolCallId === tr.toolCallId);
       if (tc) {
         const content = typeof tr.output === 'string' ? tr.output : JSON.stringify(tr.output);
-        msgs.push({ role: 'tool', toolUseId: tc.toolCallId, content });
+        msgs.push({ role: 'tool', toolUseId: tc.toolCallId, toolName: tc.name, content });
       }
     }
 
@@ -558,7 +558,7 @@ export class TurnLoop {
             const msg = `Tool call limit reached (${totalLimit} per turn). Skipping remaining tool call(s).`;
             emit({ type: 'status', id: session.id, message: msg, timestamp: Date.now() });
             for (const remaining of toolCalls.slice(toolCalls.indexOf(tc))) {
-              this.messages.push({ role: 'tool', toolUseId: remaining.id, content: `Skipped: ${msg}` });
+              this.messages.push({ role: 'tool', toolUseId: remaining.id, toolName: remaining.name, content: `Skipped: ${msg}` });
               emit({ type: 'tool-result', id: session.id, toolCallId: remaining.id, output: null, error: msg, timestamp: Date.now() });
             }
             break;
@@ -568,7 +568,7 @@ export class TurnLoop {
             const msg = `WebSearch/WebFetch limit reached (${websearchLimit} per turn). Skipping remaining tool call(s).`;
             emit({ type: 'status', id: session.id, message: msg, timestamp: Date.now() });
             for (const remaining of toolCalls.slice(toolCalls.indexOf(tc))) {
-              this.messages.push({ role: 'tool', toolUseId: remaining.id, content: `Skipped: ${msg}` });
+              this.messages.push({ role: 'tool', toolUseId: remaining.id, toolName: remaining.name, content: `Skipped: ${msg}` });
               emit({ type: 'tool-result', id: session.id, toolCallId: remaining.id, output: null, error: msg, timestamp: Date.now() });
             }
             break;
@@ -593,7 +593,7 @@ export class TurnLoop {
 
           if (permResult.decision === 'deny') {
             emit({ type: 'approval-decision', id: session.id, toolCallId: tc.id, decision: 'deny', timestamp: Date.now() });
-            this.messages.push({ role: 'tool', toolUseId: tc.id, content: `Tool call denied: ${permResult.reason}` });
+            this.messages.push({ role: 'tool', toolUseId: tc.id, toolName: tc.name, content: `Tool call denied: ${permResult.reason}` });
             continue;
           }
 
@@ -633,7 +633,7 @@ export class TurnLoop {
               timestamp: Date.now(),
             });
             if (!approved) {
-              this.messages.push({ role: 'tool', toolUseId: tc.id, content: decisionBy === 'llm' ? `Tool call denied by LLM harm-check: ${tc.name}` : 'Tool call denied by user.' });
+              this.messages.push({ role: 'tool', toolUseId: tc.id, toolName: tc.name, content: decisionBy === 'llm' ? `Tool call denied by LLM harm-check: ${tc.name}` : 'Tool call denied by user.' });
               continue;
             }
             toolApproved = approved;
@@ -645,8 +645,10 @@ export class TurnLoop {
 
           const tool = this.config.tools.find((t) => t.definition.name === tc.name);
           if (!tool) {
-            emit({ type: 'tool-result', id: session.id, toolCallId: tc.id, output: null, error: `Unknown tool: ${tc.name}`, timestamp: Date.now() });
-            this.messages.push({ role: 'tool', toolUseId: tc.id, content: `Unknown tool: ${tc.name}` });
+            const available = this.config.tools.map((t) => t.definition.name).join(', ');
+            const unknownMsg = `Unknown tool: ${tc.name}. Available tools: ${available}`;
+            emit({ type: 'tool-result', id: session.id, toolCallId: tc.id, output: null, error: unknownMsg, timestamp: Date.now() });
+            this.messages.push({ role: 'tool', toolUseId: tc.id, toolName: tc.name, content: unknownMsg });
             continue;
           }
 
@@ -654,11 +656,11 @@ export class TurnLoop {
             const result = await tool.execute(tc.input, this.config.settings, this.config.cwd, this.config.sessionId);
             emit({ type: 'tool-result', id: session.id, toolCallId: tc.id, output: result.output, error: result.error, timestamp: Date.now() });
             const outputStr = result.error ? `Error: ${result.error}` : (typeof result.output === 'string' ? result.output : JSON.stringify(result.output));
-            this.messages.push({ role: 'tool', toolUseId: tc.id, content: outputStr });
+            this.messages.push({ role: 'tool', toolUseId: tc.id, toolName: tc.name, content: outputStr });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             emit({ type: 'tool-result', id: session.id, toolCallId: tc.id, output: null, error: msg, timestamp: Date.now() });
-            this.messages.push({ role: 'tool', toolUseId: tc.id, content: `Error: ${msg}` });
+            this.messages.push({ role: 'tool', toolUseId: tc.id, toolName: tc.name, content: `Error: ${msg}` });
           }
         }
       }

@@ -320,87 +320,54 @@ export class GoogleGeminiProvider implements Provider {
   async complete(args: ProviderCompleteArgs): Promise<ProviderCompleteResult> {
     const model = args.model || this.defaultModel;
     const thinking = this.isThinkingModel(model);
-    let contents = this.mapMessages(args.messages);
+    const contents = this.mapMessages(args.messages);
+    const tools = args.tools ? this.toFunctionDeclarations(args.tools) : undefined;
+    const requestBody = this.buildRequestBody(model, contents, {
+      system: args.system,
+      tools: tools ? [{ functionDeclarations: tools }] : undefined,
+      thinking,
+      effort: args.effort,
+    });
+
+    const response = await fetch(this.apiEndpoint(model, 'generateContent'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': this.apiKey,
+      },
+      body: JSON.stringify(requestBody),
+      signal: args.signal,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Google API error ${response.status}: ${errText}`);
+    }
+
+    const json = await response.json() as unknown as ApiChunk;
+    const rawParts = (json.candidates?.[0]?.content?.parts ?? []) as Record<string, unknown>[];
+
+    // Collect text (non-thought) parts
     const allText: string[] = [];
-    let stopReason: ProviderCompleteResult['stopReason'] = 'stop';
-    let toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> | undefined;
-
-    for (let turn = 0; turn < 16; turn++) {
-      const tools = args.tools ? this.toFunctionDeclarations(args.tools) : undefined;
-      const requestBody = this.buildRequestBody(model, contents, {
-        system: args.system,
-        tools: tools ? [{ functionDeclarations: tools }] : undefined,
-        thinking,
-        effort: args.effort,
-      });
-
-      const response = await fetch(this.apiEndpoint(model, 'generateContent'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': this.apiKey,
-        },
-        body: JSON.stringify(requestBody),
-        signal: args.signal,
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Google API error ${response.status}: ${errText}`);
-      }
-
-      const json = await response.json() as unknown as ApiChunk;
-      const rawParts = (json.candidates?.[0]?.content?.parts ?? []) as Record<string, unknown>[];
-
-      // Collect text (non-thought) parts
-      for (const part of rawParts) {
-        if (part.thought !== true && typeof part.text === 'string' && part.text) {
-          allText.push(part.text);
-        }
-      }
-
-      const fcParts = rawParts.filter((p) => p.functionCall);
-      if (fcParts.length === 0) {
-        stopReason = 'stop';
-        break;
-      }
-
-      toolCalls = fcParts.map((p) => {
-        const fc = p.functionCall as { name: string; args?: Record<string, unknown> };
-        return { id: nextCallId(), name: fc.name, input: (fc.args ?? {}) as Record<string, unknown> };
-      });
-      stopReason = 'tool_use';
-
-      contents.push({
-        role: 'model',
-        parts: fcParts.map((p) => {
-          const raw = p;
-          const fc = raw.functionCall as Record<string, unknown>;
-          const sig = (typeof raw.thoughtSignature === 'string' ? raw.thoughtSignature : undefined)
-                   ?? (typeof raw.thought_signature === 'string' ? raw.thought_signature : undefined);
-          const part: Record<string, unknown> = { functionCall: { name: fc.name, args: fc.args } };
-          if (sig) part.thoughtSignature = sig;
-          return part;
-        }),
-      } as never);
-
-      for (const p of fcParts) {
-        const fc = (p as Record<string, unknown>).functionCall as { name: string; args?: Record<string, unknown> };
-        contents.push({
-          role: 'user',
-          parts: [{
-            functionResponse: {
-              name: fc.name,
-              response: { output: fc.args },
-            },
-          }],
-        } as never);
+    for (const part of rawParts) {
+      if (part.thought !== true && typeof part.text === 'string' && part.text) {
+        allText.push(part.text);
       }
     }
 
+    // Like the other providers, return tool calls to the caller instead of
+    // looping — the caller is responsible for executing tools.
+    const fcParts = rawParts.filter((p) => p.functionCall);
+    const toolCalls = fcParts.length > 0
+      ? fcParts.map((p) => {
+          const fc = p.functionCall as { name: string; args?: Record<string, unknown> };
+          return { id: nextCallId(), name: fc.name, input: (fc.args ?? {}) as Record<string, unknown> };
+        })
+      : undefined;
+
     return {
       text: allText.join('\n'),
-      stopReason,
+      stopReason: toolCalls ? 'tool_use' : 'stop',
       toolCalls,
     };
   }
@@ -415,9 +382,10 @@ export class GoogleGeminiProvider implements Provider {
 
   /**
    * Convert a JSON Schema object to Google's FunctionDeclarationSchema format.
-   * Google's API is strict: it does NOT support the "required" array in
-   * function declaration parameters. Required fields are communicated via
-   * description text instead.
+   * Gemini accepts an OpenAPI-style Schema subset, so copy only the fields it
+   * documents (type, description, enum, items, properties, required) and drop
+   * everything else ($schema, additionalProperties, $defs, ...) that the API
+   * may reject.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private toFunctionSchema(schema: unknown): any {
@@ -427,6 +395,7 @@ export class GoogleGeminiProvider implements Provider {
 
     const s = schema as Record<string, unknown>;
     const type = typeof s.type === 'string' ? s.type : 'object';
+    const description = typeof s.description === 'string' ? s.description : undefined;
 
     if (type === 'object') {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -436,18 +405,29 @@ export class GoogleGeminiProvider implements Provider {
           properties[key] = this.toFunctionSchema(val);
         }
       }
-      // Google Gemini API does NOT accept "required" in parameters schema.
-      // Omit it; the model will still infer importance from descriptions.
-      return { type: 'object', properties };
+      const required = Array.isArray(s.required)
+        ? s.required.filter((r): r is string => typeof r === 'string')
+        : [];
+      return {
+        type: 'object',
+        properties,
+        ...(description ? { description } : {}),
+        ...(required.length > 0 ? { required } : {}),
+      };
     }
 
-    // For non-object types, return a simple schema
     // Google requires "items" for array types
     if (type === 'array') {
       const itemsSchema = s.items ? this.toFunctionSchema(s.items) : { type: 'string' };
-      return { type: 'array', items: itemsSchema };
+      return { type: 'array', items: itemsSchema, ...(description ? { description } : {}) };
     }
-    return { type, properties: {} };
+
+    const enumValues = Array.isArray(s.enum) ? s.enum : undefined;
+    return {
+      type,
+      ...(description ? { description } : {}),
+      ...(enumValues ? { enum: enumValues } : {}),
+    };
   }
 
   private mapMessages(messages: ProviderMessage[]): Array<{
@@ -460,7 +440,7 @@ export class GoogleGeminiProvider implements Provider {
           role: 'user',
           parts: [{
             functionResponse: {
-              name: m.content,
+              name: m.toolName ?? 'tool',
               response: { output: m.content },
             },
           }],
@@ -497,7 +477,7 @@ export class GoogleGeminiProvider implements Provider {
           } else if (c.type === 'tool-result') {
             parts.push({
               functionResponse: {
-                name: c.tool_use_id,
+                name: c.name ?? c.tool_use_id,
                 response: { output: c.content },
               },
             });

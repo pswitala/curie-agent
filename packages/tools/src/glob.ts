@@ -17,12 +17,12 @@ const GlobSchema = z.object({
     .describe('Directory to search in. Defaults to cwd. Accepts forward or backward slashes.'),
 });
 
-function minimatch(pattern: string, str: string): boolean {
+export function minimatch(pattern: string, str: string): boolean {
   const regex = globToRegex(pattern);
   return regex.test(str);
 }
 
-function globToRegex(pattern: string): RegExp {
+export function globToRegex(pattern: string): RegExp {
   // Use unique Unicode placeholders instead of backslash-escaping to avoid conflicts
   // between the ** protection and single-* replacement steps.
   const placeholder = '';
@@ -35,7 +35,7 @@ function globToRegex(pattern: string): RegExp {
   return new RegExp(`^${regex}$`);
 }
 
-function readGitignore(cwd: string): string[] {
+export function readGitignore(cwd: string): string[] {
   const gitignorePath = path.join(cwd, '.gitignore');
   if (!fs.existsSync(gitignorePath)) return [];
   return fs
@@ -45,12 +45,19 @@ function readGitignore(cwd: string): string[] {
     .filter((l) => l && !l.startsWith('#'));
 }
 
-function shouldIgnore(relPath: string, patterns: string[]): boolean {
+export function shouldIgnore(relPath: string, patterns: string[]): boolean {
   for (const p of patterns) {
-    if (minimatch(p, relPath)) return true;
-    // Also match as directory prefix: "node_modules" should ignore node_modules/foo/bar
-    const dirPrefix = p.replace(/\/$/, '') + '/';
-    if (relPath.startsWith(dirPrefix)) return true;
+    const clean = p.replace(/\/$/, '');
+    if (!clean) continue;
+    if (clean.includes('/')) {
+      // Anchored pattern: match the relative path itself or as a directory prefix.
+      if (minimatch(clean, relPath)) return true;
+      if (relPath.startsWith(clean + '/')) return true;
+    } else {
+      // Bare pattern (gitignore semantics): matches any path segment at any depth,
+      // e.g. "dist" ignores dist/ and packages/foo/dist/.
+      if (relPath.split('/').some((segment) => minimatch(clean, segment))) return true;
+    }
   }
   return false;
 }
@@ -58,7 +65,7 @@ function shouldIgnore(relPath: string, patterns: string[]): boolean {
 export const globTool = createTool(
   'Glob',
   [
-    'Fast, gitignore-aware recursive file search by glob pattern.',
+    'Fast, gitignore-aware recursive file search by glob pattern (finds files by NAME — use Grep to search file contents).',
     'Pattern syntax: `*` matches anything within one directory level; `**` matches across any depth.',
     'Always use forward slashes in patterns, even on Windows (e.g., `src/**/*.ts`).',
     'When `path` is supplied, the pattern matches relative to that directory.',

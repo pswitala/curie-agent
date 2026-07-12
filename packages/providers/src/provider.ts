@@ -53,12 +53,12 @@ export type MessageContent =
   | { type: 'thinking'; thinking: string; signature: string }
   | { type: 'image'; source: { media_type: string; data: string } }
   | { type: 'tool-use'; id: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }
-  | { type: 'tool-result'; tool_use_id: string; content: string };
+  | { type: 'tool-result'; tool_use_id: string; name?: string; content: string };
 
 export type ProviderMessage =
   | { role: 'user'; content: string | MessageContent[] }
   | { role: 'assistant'; content: string | MessageContent[] }
-  | { role: 'tool'; toolUseId: string; content: string };
+  | { role: 'tool'; toolUseId: string; toolName?: string; content: string };
 
 export interface Provider {
   name: string;

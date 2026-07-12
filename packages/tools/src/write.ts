@@ -5,13 +5,18 @@ import { createTool, expandPath, type ToolContext } from './tool.js';
 import { resolveSafePath, parseAllowlist } from '@curie-agent/core/safety/path-guard.js';
 
 const WriteSchema = z.object({
-  file_path: z.string().describe('The absolute path to the file to write'),
-  content: z.string().describe('The content to write to the file'),
+  file_path: z
+    .string()
+    .describe(
+      'REQUIRED. The path of the file to write — absolute, or relative to the working directory. Use forward slashes even on Windows.',
+    ),
+  content: z.string().describe('REQUIRED. The full content to write to the file.'),
 });
 
 export const writeTool = createTool(
   'Write',
-  'Writes a file to the local filesystem. Creates new files or overwrites existing ones. ' +
+  'Writes a file to the local filesystem. Both file_path and content are required. ' +
+  'Creates new files or overwrites existing ones; parent directories are created automatically. ' +
   'Use this for any content too large to deliver inline — research reports, summaries, essays, generated documents. ' +
   'For very long content (>500 lines), write a skeleton first with placeholder headings, ' +
   'then fill each section using the Edit tool so each individual tool call stays small and fits within output limits.',
@@ -44,5 +49,16 @@ export const writeTool = createTool(
         bytes: Buffer.byteLength(input.content, 'utf-8'),
       },
     };
+  },
+  undefined,
+  {
+    aliases: {
+      path: 'file_path',
+      filename: 'file_path',
+      filepath: 'file_path',
+      file: 'file_path',
+      contents: 'content',
+      text: 'content',
+    },
   },
 );

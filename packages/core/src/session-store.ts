@@ -86,7 +86,12 @@ export class SessionStore {
   load(id: string): SessionInfo | undefined {
     const metaPath = this.metadataPath(id);
     if (!fs.existsSync(metaPath)) return undefined;
-    return JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as SessionInfo;
+    try {
+      return JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as SessionInfo;
+    } catch (err) {
+      console.error(`[session-store] Failed to parse metadata for session ${id}:`, err);
+      return undefined;
+    }
   }
 
   loadEvents(id: string): Event[] {
@@ -94,10 +99,21 @@ export class SessionStore {
     if (!fs.existsSync(eventsPath)) return [];
     const content = fs.readFileSync(eventsPath, 'utf-8').trim();
     if (!content) return [];
-    return content
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as Event);
+
+    const events: Event[] = [];
+    let skipped = 0;
+    for (const line of content.split('\n')) {
+      if (!line) continue;
+      try {
+        events.push(JSON.parse(line) as Event);
+      } catch {
+        skipped++;
+      }
+    }
+    if (skipped > 0) {
+      console.error(`[session-store] Skipped ${skipped} malformed event line(s) in session ${id}`);
+    }
+    return events;
   }
 
   appendEvent(id: string, event: Event): void {
@@ -114,17 +130,10 @@ export class SessionStore {
     if (userPromptEvent && 'text' in userPromptEvent && typeof userPromptEvent.text === 'string') {
       const text = userPromptEvent.text.trim();
       if (text && !text.startsWith('/')) {
-        const metaPath = this.metadataPath(id);
-        if (fs.existsSync(metaPath)) {
-          try {
-            const info = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as SessionInfo;
-            if (!info.name) {
-              info.name = text.slice(0, 20);
-              fs.writeFileSync(metaPath, JSON.stringify(info, null, 2) + '\n');
-            }
-          } catch (err) {
-            console.error(`[session-store] Failed to save session name:`, err);
-          }
+        const info = this.load(id);
+        if (info && !info.name) {
+          info.name = text.slice(0, 20);
+          fs.writeFileSync(this.metadataPath(id), JSON.stringify(info, null, 2) + '\n');
         }
       }
     }
@@ -152,11 +161,9 @@ export class SessionStore {
   }
 
   private touch(id: string): void {
-    const metaPath = this.metadataPath(id);
-    if (fs.existsSync(metaPath)) {
-      const info = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as SessionInfo;
-      info.updatedAt = Date.now();
-      fs.writeFileSync(metaPath, JSON.stringify(info, null, 2) + '\n');
-    }
+    const info = this.load(id);
+    if (!info) return;
+    info.updatedAt = Date.now();
+    fs.writeFileSync(this.metadataPath(id), JSON.stringify(info, null, 2) + '\n');
   }
 }

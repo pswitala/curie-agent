@@ -134,6 +134,99 @@ describe('GoogleGeminiProvider', () => {
     });
   });
 
+  describe('mapMessages - tool results', () => {
+    const p = new GoogleGeminiProvider('key');
+    const mapMessages = (p as any).mapMessages.bind(p);
+
+    it('uses toolName for functionResponse.name', () => {
+      const out = mapMessages([
+        { role: 'tool', toolUseId: 'call_1', toolName: 'Write', content: '{"path":"x.txt"}' },
+      ]);
+      expect(out[0].parts[0].functionResponse.name).toBe('Write');
+      expect(out[0].parts[0].functionResponse.response.output).toBe('{"path":"x.txt"}');
+    });
+
+    it('falls back gracefully when toolName is missing', () => {
+      const out = mapMessages([{ role: 'tool', toolUseId: 'call_1', content: 'result text' }]);
+      expect(out[0].parts[0].functionResponse.name).toBe('tool');
+      expect(out[0].parts[0].functionResponse.response.output).toBe('result text');
+    });
+
+    it('uses the tool-result name field in content blocks when present', () => {
+      const out = mapMessages([
+        {
+          role: 'user',
+          content: [{ type: 'tool-result', tool_use_id: 'call_2', name: 'Grep', content: 'matches' }],
+        },
+      ]);
+      expect(out[0].parts[0].functionResponse.name).toBe('Grep');
+    });
+  });
+
+  describe('toFunctionSchema', () => {
+    const p = new GoogleGeminiProvider('key');
+    const toFunctionSchema = (p as any).toFunctionSchema.bind(p);
+
+    const writeLikeSchema = {
+      type: 'object',
+      properties: {
+        file_path: { type: 'string', description: 'The absolute path to the file to write' },
+        content: { type: 'string', description: 'The content to write to the file' },
+      },
+      required: ['file_path', 'content'],
+      additionalProperties: false,
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+    };
+
+    it('preserves the required array', () => {
+      const out = toFunctionSchema(writeLikeSchema);
+      expect(out.required).toEqual(['file_path', 'content']);
+    });
+
+    it('preserves per-property descriptions', () => {
+      const out = toFunctionSchema(writeLikeSchema);
+      expect(out.properties.file_path.description).toBe('The absolute path to the file to write');
+      expect(out.properties.content.description).toBe('The content to write to the file');
+    });
+
+    it('does not attach a properties key to scalar params', () => {
+      const out = toFunctionSchema(writeLikeSchema);
+      expect(out.properties.file_path).not.toHaveProperty('properties');
+    });
+
+    it('preserves enum values on string params', () => {
+      const out = toFunctionSchema({
+        type: 'object',
+        properties: { mode: { type: 'string', enum: ['plan', 'edit', 'auto'], description: 'Approval mode' } },
+        required: ['mode'],
+      });
+      expect(out.properties.mode.enum).toEqual(['plan', 'edit', 'auto']);
+      expect(out.properties.mode.description).toBe('Approval mode');
+    });
+
+    it('keeps items and description on array params', () => {
+      const out = toFunctionSchema({
+        type: 'object',
+        properties: {
+          allowed_domains: { type: 'array', items: { type: 'string' }, description: 'Only these domains' },
+        },
+      });
+      expect(out.properties.allowed_domains.items).toEqual({ type: 'string' });
+      expect(out.properties.allowed_domains.description).toBe('Only these domains');
+    });
+
+    it('strips unsupported keys like $schema and additionalProperties', () => {
+      const out = toFunctionSchema(writeLikeSchema);
+      expect(out).not.toHaveProperty('$schema');
+      expect(out).not.toHaveProperty('additionalProperties');
+    });
+
+    it('omits required when empty or absent', () => {
+      const out = toFunctionSchema({ type: 'object', properties: { q: { type: 'string' } } });
+      expect(out).not.toHaveProperty('required');
+    });
+  });
+
   describe('parseSSEStream', () => {
     const p = new GoogleGeminiProvider('key');
     const parseSSEStream = (p as any).parseSSEStream.bind(p);

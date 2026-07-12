@@ -4,16 +4,27 @@ import { z } from 'zod';
 import { isPathAllowed, parseAllowlist } from '@curie-agent/core/safety/path-guard.js';
 import { createTool, expandPath, type ToolContext } from './tool.js';
 
+const DEFAULT_LINE_LIMIT = 2000;
+const MAX_LINE_LENGTH = 2000;
+
 const ReadSchema = z.object({
-  file_path: z.string().describe('The absolute path to the file to read'),
-  offset: z.number().optional().describe('The line number to start reading from'),
-  limit: z.number().optional().describe('The number of lines to read'),
-  pages: z.string().optional().describe('Page range for PDF files'),
+  file_path: z
+    .string()
+    .describe('The path to the file to read (absolute, or relative to the working directory)'),
+  offset: z.number().optional().describe('The 1-based line number to start reading from'),
+  limit: z
+    .number()
+    .optional()
+    .describe(`The number of lines to read (default ${String(DEFAULT_LINE_LIMIT)})`),
 });
 
 export const readTool = createTool(
   'Read',
-  'Reads a file from the local filesystem. Supports text files, PDF, notebooks, and images.',
+  [
+    'Reads a text or image file from the local filesystem and returns numbered lines (`<line>\\t<text>`).',
+    `Reads up to ${String(DEFAULT_LINE_LIMIT)} lines by default; use offset/limit to page through larger files.`,
+    'Reading a directory returns its entries. PDFs are not supported.',
+  ].join(' '),
   ReadSchema,
   async (input, ctx: ToolContext) => {
     const filePath = path.resolve(ctx.cwd, expandPath(input.file_path));
@@ -58,28 +69,41 @@ export const readTool = createTool(
     }
 
     if (ext === '.pdf') {
-      return { output: null, error: `PDF reading requires a PDF library. Path: ${filePath}` };
+      return {
+        output: null,
+        error: `PDF files are not supported by this tool: ${filePath}. Use Bash with a converter, or ask the user for a text export.`,
+      };
     }
 
     const content = fs.readFileSync(filePath, 'utf-8');
     const lines = content.split('\n');
 
-    let resultLines = lines;
-    if (input.offset !== undefined) {
-      const start = Math.max(0, input.offset - 1);
-      resultLines = lines.slice(start);
-    }
-    if (input.limit !== undefined) {
-      resultLines = resultLines.slice(0, input.limit);
-    }
+    const start = input.offset !== undefined ? Math.max(0, input.offset - 1) : 0;
+    const limit = input.limit ?? DEFAULT_LINE_LIMIT;
+    const resultLines = lines.slice(start, start + limit);
 
     const numbered = resultLines
       .map((line, i) => {
-        const ln = input.offset !== undefined ? input.offset + i : i + 1;
-        return `${ln}\t${line}`;
+        const ln = start + i + 1;
+        const text = line.length > MAX_LINE_LENGTH ? line.slice(0, MAX_LINE_LENGTH) + '… [line truncated]' : line;
+        return `${String(ln)}\t${text}`;
       })
       .join('\n');
 
+    const end = start + resultLines.length;
+    if (end < lines.length) {
+      const footer = `\n[Showing lines ${String(start + 1)}-${String(end)} of ${String(lines.length)}. Use offset/limit to read more.]`;
+      return { output: numbered + footer };
+    }
     return { output: numbered };
+  },
+  undefined,
+  {
+    aliases: {
+      path: 'file_path',
+      filename: 'file_path',
+      filepath: 'file_path',
+      file: 'file_path',
+    },
   },
 );

@@ -25,7 +25,12 @@ function resolveShell(): { exe: string; flag: string } {
 
 export const bashTool = createTool(
   'Bash',
-  'Executes a shell command and returns its output (bash on Linux/macOS, PowerShell on Windows).',
+  [
+    'Executes a shell command and returns exit code, stdout, and stderr.',
+    'The shell is bash on Linux/macOS but PowerShell (or cmd) on Windows — use the syntax of the actual platform shell, not POSIX-only commands on Windows.',
+    'Output is capped at 200 KB per stream; the timeout defaults to 120000 ms (max 600000).',
+    'Prefer the dedicated Read/Write/Edit/Glob/Grep tools over shell equivalents like cat, echo-redirects, find, or grep.',
+  ].join(' '),
   BashSchema,
   async (input, ctx: ToolContext) => {
     if (ctx.settings.safety?.path_guard !== 'off') {

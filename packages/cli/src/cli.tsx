@@ -443,14 +443,16 @@ async function handleDaemonCommand(subcommand: string): Promise<{ keepRunning: b
 
       try {
         if (isWin) {
-          const output = execSync(`netstat -ano | findstr :${PORT}`, { encoding: 'utf-8' });
-          pids = [...new Set(
-            output.trim().split('\n')
-              .map(line => line.trim().split(/\s+/).pop()!)
-              .filter(Boolean)
-          )];
+          // Use Get-NetTCPConnection so we only match processes that own a
+          // LISTEN socket on this port — not clients (e.g. Docker Desktop)
+          // whose ESTABLISHED connections also contain ":3457" in netstat output.
+          const output = execSync(
+            `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${PORT} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess"`,
+            { encoding: 'utf-8' }
+          );
+          pids = [...new Set(output.trim().split('\n').filter(Boolean))];
         } else {
-          const output = execSync(`lsof -ti:${PORT}`, { encoding: 'utf-8' });
+          const output = execSync(`lsof -ti:${PORT} -sTCP:LISTEN`, { encoding: 'utf-8' });
           pids = output.trim().split('\n').filter(Boolean);
         }
       } catch {

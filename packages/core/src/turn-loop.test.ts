@@ -118,7 +118,7 @@ describe('reconstructMessages', () => {
         { type: 'tool-use', id: 'call_1', name: 'Read', input: { path: '/app/main.ts' } },
       ],
     });
-    expect(messages[2]).toEqual({ role: 'tool', toolUseId: 'call_1', content: 'file contents here' });
+    expect(messages[2]).toEqual({ role: 'tool', toolUseId: 'call_1', toolName: 'Read', content: 'file contents here' });
   });
 
   it('handles object output by JSON.stringifying it', () => {
@@ -150,6 +150,7 @@ describe('reconstructMessages', () => {
     expect(messages[2]).toEqual({
       role: 'tool',
       toolUseId: 'call_1',
+      toolName: 'Bash',
       content: JSON.stringify({ files: ['a.txt', 'b.txt'], size: 1024 }),
     });
   });
@@ -249,14 +250,57 @@ describe('reconstructMessages', () => {
     });
 
     // Turn 1: tool results
-    expect(messages[2]).toEqual({ role: 'tool', toolUseId: 'call_1', content: 'a.txt content' });
-    expect(messages[3]).toEqual({ role: 'tool', toolUseId: 'call_2', content: 'b.txt\nc.txt' });
+    expect(messages[2]).toEqual({ role: 'tool', toolUseId: 'call_1', toolName: 'Read', content: 'a.txt content' });
+    expect(messages[3]).toEqual({ role: 'tool', toolUseId: 'call_2', toolName: 'Glob', content: 'b.txt\nc.txt' });
 
     // Turn 2: user message
     expect(messages[4]).toEqual({ role: 'user', content: 'got it' });
 
     // Turn 2: assistant response
     expect(messages[5]).toEqual({ role: 'assistant', content: [{ type: 'text', text: 'done' }] });
+  });
+});
+
+describe('unknown tool handling', () => {
+  it('lists available tools in the unknown-tool error', async () => {
+    const store = createTestStore();
+
+    let streamCalls = 0;
+    const mockProvider: ProviderStream = {
+      name: 'test',
+      stream: () => ({
+        iterable: (async function* () {
+          if (streamCalls++ === 0) {
+            yield { type: 'tool-call', id: 'call_1', name: 'Bogus', input: {} } as const;
+          }
+        })(),
+        cancel() {},
+      }),
+      check: async () => 'APPROVE',
+    };
+
+    const dummyTool = (name: string): Tool => ({
+      definition: { name, description: 'dummy', inputSchema: { type: 'object', properties: {} } },
+      execute: async () => ({ output: 'ok' }),
+    });
+
+    const loop = new TurnLoop(
+      {
+        provider: mockProvider,
+        model: 'test-model',
+        tools: [dummyTool('Read'), dummyTool('Glob')],
+        cwd: tmpDir,
+        settings: { providers: {}, current_provider: 'test' },
+      },
+      store,
+    );
+
+    const result = await loop.run('call something');
+    const toolResults = result.events.filter((e) => e.type === 'tool-result');
+    expect(toolResults).toHaveLength(1);
+    const error = (toolResults[0] as { error?: string }).error;
+    expect(error).toContain('Unknown tool: Bogus');
+    expect(error).toContain('Available tools: Read, Glob');
   });
 });
 
