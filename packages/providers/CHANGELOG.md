@@ -1,5 +1,11 @@
 # @curie-agent/providers
 
+## 0.3.4
+
+### Patch Changes
+
+- Add OpenRouter sticky-session routing (`session_id`) and prompt-cache support (`cache_control`, cache usage reporting) to reduce token costs on multi-turn conversations.
+
 ## 0.2.5
 
 ### Patch Changes
