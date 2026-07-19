@@ -23,6 +23,7 @@ export interface ProviderStream {
     signal?: AbortSignal;
     effort?: ReasoningEffort;
     maxTokens?: number;
+    sessionId?: string;
   }): CancelableIterable<ProviderEvent>;
   /** Non-streaming call — used for quick evaluations (e.g. harm-check). */
   check(prompt: string, args?: { model?: string; system?: string; signal?: AbortSignal }): Promise<string>;
@@ -398,6 +399,7 @@ export class TurnLoop {
           signal: abortCtrl.signal,
           effort: self.config.effort,
           maxTokens,
+          sessionId: session.id,
         });
 
         // Wire the AbortSignal's abort event to cancel the stream immediately.

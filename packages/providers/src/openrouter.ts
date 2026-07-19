@@ -107,7 +107,11 @@ export class OpenRouterProvider implements Provider {
 
     const reasoning = effortToReasoning(args.effort);
 
-    const streamParams: OpenAI.ChatCompletionCreateParams & { reasoning?: object } = {
+    const streamParams: OpenAI.ChatCompletionCreateParams & {
+      reasoning?: object;
+      session_id?: string;
+      cache_control?: { type: 'ephemeral' };
+    } = {
       model,
       messages: allMessages,
       stream: true,
@@ -116,6 +120,10 @@ export class OpenRouterProvider implements Provider {
       max_tokens: args.maxTokens ?? 65536,
       ...(reasoning ? { reasoning } : {}),
       ...(this._providerOrder && this._providerOrder.length > 0 ? { provider: { order: this._providerOrder } } : {}),
+      ...(args.sessionId ? { session_id: args.sessionId } : {}),
+      // Sticky routing (session_id) pins the conversation to one upstream instance;
+      // cache_control lets OpenRouter auto-insert cache breakpoints on that pinned request.
+      cache_control: { type: 'ephemeral' },
       stream_options: { include_usage: true },
     };
 
@@ -202,10 +210,16 @@ export class OpenRouterProvider implements Provider {
       }
 
       if (lastUsage) {
+        // OpenRouter reports cache stats under prompt_tokens_details (not in OpenAI SDK types, cast to any).
+        const usageDetails = lastUsage as OpenAI.CompletionUsage & {
+          prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+        };
         yield {
           type: 'usage',
           inputTokens: lastUsage.prompt_tokens ?? 0,
           outputTokens: lastUsage.completion_tokens ?? 0,
+          cacheReadTokens: usageDetails.prompt_tokens_details?.cached_tokens,
+          cacheWriteTokens: usageDetails.prompt_tokens_details?.cache_write_tokens,
         };
       }
 
@@ -261,6 +275,8 @@ export class OpenRouterProvider implements Provider {
       max_tokens: args.maxTokens ?? 16384,
       ...(reasoning ? { reasoning } : {}),
       ...(this._providerOrder && this._providerOrder.length > 0 ? { provider: { order: this._providerOrder } } : {}),
+      ...(args.sessionId ? { session_id: args.sessionId } : {}),
+      cache_control: { type: 'ephemeral' },
     } as any);
 
     const choice = response.choices[0];

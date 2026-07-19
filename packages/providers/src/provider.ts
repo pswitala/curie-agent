@@ -28,6 +28,8 @@ export interface ProviderStreamArgs {
   maxTokens?: number;
   system?: string;
   effort?: ReasoningEffort;
+  /** Stable per-conversation id. Providers that support sticky routing (e.g. OpenRouter) use this to pin requests to the same upstream instance, maximizing prompt-cache hits. */
+  sessionId?: string;
 }
 
 export interface ProviderCompleteArgs {
@@ -39,6 +41,8 @@ export interface ProviderCompleteArgs {
   maxTokens?: number;
   system?: string;
   effort?: ReasoningEffort;
+  /** Stable per-conversation id. Providers that support sticky routing (e.g. OpenRouter) use this to pin requests to the same upstream instance, maximizing prompt-cache hits. */
+  sessionId?: string;
 }
 
 export interface ProviderCompleteResult {
