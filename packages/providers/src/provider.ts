@@ -14,6 +14,12 @@ export type ProviderEvent =
   | { type: 'thinking-block'; thinking: string; signature: string }
   | { type: 'tool-call'; id: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }
   | { type: 'tool-result-request'; callId: string }
+  /**
+   * `inputTokens` is the TOTAL prompt size (including any cached tokens) —
+   * `cacheReadTokens`/`cacheWriteTokens` are subsets of it, not additional
+   * tokens on top. Adapters whose raw usage excludes cache tokens (e.g.
+   * Anthropic's `input_tokens`) must add them back in before emitting.
+   */
   | { type: 'usage'; inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
   | { type: 'stop'; reason: string; errorDetail?: string };
 
@@ -48,7 +54,8 @@ export interface ProviderCompleteArgs {
 export interface ProviderCompleteResult {
   text: string;
   stopReason: 'stop' | 'end_turn' | 'tool_use' | 'length' | 'content_filter' | 'aborted';
-  usage?: { inputTokens: number; outputTokens: number };
+  /** `inputTokens` is the TOTAL prompt size including cached tokens; cache fields are subsets. */
+  usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
   toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }>;
 }
 

@@ -65,20 +65,30 @@ export function getTzOffsetString(timeZone: string, date: Date = new Date()): st
   return `${sign}${hours}:${mins}`;
 }
 
-/** Format current date/time as a readable string for system prompt injection. */
-export function formatDate(): string {
-  const now = new Date();
+/** Format a date/time as a readable string for prompt injection. Defaults to now. */
+export function formatDate(date: Date = new Date()): string {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  const localStr = now.toLocaleString('en-US', { timeZone: timezone });
-  const offset = getTzOffsetString(timezone, now);
+  const localStr = date.toLocaleString('en-US', { timeZone: timezone });
+  const offset = getTzOffsetString(timezone, date);
   return `${localStr} (Timezone: ${timezone}, Offset: ${offset})`;
 }
 
 /**
- * Wrap a system prompt with current date context.
+ * Wrap a system prompt with (stable, non-time-varying) OS context.
+ * Kept out of the date-stamping path so the system prompt stays byte-identical
+ * across turns, which is required for provider-side prompt caching to work.
  * Returns the enriched prompt, or undefined if no system prompt given.
  */
-export function withDateContext(systemPrompt: string | undefined): string | undefined {
+export function withOsContext(systemPrompt: string | undefined): string | undefined {
   if (!systemPrompt) return undefined;
-  return `[Current date and time: ${formatDate()}]\n[Operating system: ${getOsInfo()}]\n\n${systemPrompt}`;
+  return `[Operating system: ${getOsInfo()}]\n\n${systemPrompt}`;
+}
+
+/**
+ * Prepend a send-time timestamp to a single message. Pure function of
+ * (text, timestampMs) so the same message reconstructed from stored events
+ * produces byte-identical output, keeping cached prefixes valid across resumes.
+ */
+export function withMessageTimestamp(text: string, timestampMs: number): string {
+  return `[Message sent at: ${formatDate(new Date(timestampMs))}]\n${text}`;
 }

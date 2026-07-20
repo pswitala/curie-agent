@@ -429,5 +429,36 @@ describe('GoogleGeminiProvider', () => {
       );
       expect(events.some((e) => e.type === 'thinking-block')).toBe(false);
     });
+
+    it('reads cachedContentTokenCount into cacheReadTokens on the usage event', async () => {
+      const p = new GoogleGeminiProvider('key');
+      const events = await collectEvents(p, 'gemini-2.5-flash',
+        'data: {"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}\n' +
+        'data: {"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":20,"cachedContentTokenCount":80}}\n\n',
+      );
+      const usage = events.find((e) => e.type === 'usage') as any;
+      expect(usage.inputTokens).toBe(100);
+      expect(usage.outputTokens).toBe(20);
+      expect(usage.cacheReadTokens).toBe(80);
+    });
+  });
+
+  describe('complete - usage', () => {
+    it('parses usage including cacheReadTokens from usageMetadata', async () => {
+      const p = new GoogleGeminiProvider('key');
+      const body = {
+        candidates: [{ content: { parts: [{ text: 'hi there' }] } }],
+        usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, cachedContentTokenCount: 80 },
+      };
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => body,
+      }));
+      const result = await p.complete({ messages: [{ role: 'user', content: 'hi' }] });
+      vi.unstubAllGlobals();
+      expect(result.usage?.inputTokens).toBe(100);
+      expect(result.usage?.outputTokens).toBe(20);
+      expect(result.usage?.cacheReadTokens).toBe(80);
+    });
   });
 });

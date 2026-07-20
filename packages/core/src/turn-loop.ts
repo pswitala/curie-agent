@@ -4,7 +4,7 @@ import { SessionStore, type SessionInfo } from './session-store.js';
 import { PermissionEngine, type ApprovalMode } from './permission.js';
 import type { CurieSettings } from './settings.js';
 import { createSnapshot } from './safety/snapshot.js';
-import { withDateContext } from './context.js';
+import { withOsContext, withMessageTimestamp } from './context.js';
 
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'max' | 'auto';
 
@@ -40,6 +40,7 @@ export type ProviderEvent =
   | { type: 'thinking-block'; thinking: string; signature: string }
   | { type: 'tool-call'; id: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }
   | { type: 'tool-result-request'; callId: string }
+  /** `inputTokens` is the TOTAL prompt size including cached tokens; cache fields are subsets. */
   | { type: 'usage'; inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
   | { type: 'stop'; reason: string; errorDetail?: string };
 
@@ -193,7 +194,7 @@ export class TurnLoop {
         if (hasActiveTurn) {
           messages.push(...this.buildTurnMessages(currentTurn));
         }
-        messages.push({ role: 'user', content: event.text });
+        messages.push({ role: 'user', content: withMessageTimestamp(event.text, event.timestamp) });
         currentTurn = { assistantDeltas: [], thinkingDeltas: [], toolCalls: [], toolResults: [] };
         hasActiveTurn = true;
         continue;
@@ -314,9 +315,10 @@ export class TurnLoop {
     this.abort = false;
     this.abortController = new AbortController();
     emit({ type: 'session-start', id: session.id, model: this.config.model, provider: this.config.provider.name, cwd: this.config.cwd, timestamp: Date.now() });
-    emit({ type: 'user-prompt', id: session.id, text: prompt, cwd: this.config.cwd, timestamp: Date.now() });
+    const promptTs = Date.now();
+    emit({ type: 'user-prompt', id: session.id, text: prompt, cwd: this.config.cwd, timestamp: promptTs });
 
-    this.messages.push({ role: 'user', content: prompt });
+    this.messages.push({ role: 'user', content: withMessageTimestamp(prompt, promptTs) });
     let turn = 0;
     const maxTurns = this.config.maxTurns ?? 50;
     let continuationCount = 0;
@@ -395,7 +397,7 @@ export class TurnLoop {
           messages: streamMessages as any,
           tools: self.config.tools.map((t) => t.definition),
           model: self.config.model,
-          system: withDateContext(self.config.system),
+          system: withOsContext(self.config.system),
           signal: abortCtrl.signal,
           effort: self.config.effort,
           maxTokens,

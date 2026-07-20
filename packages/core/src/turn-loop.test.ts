@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { Event } from './event-bus.js';
 import { TurnLoop } from './turn-loop.js';
-import { EventBus, type ProviderStream, type Tool } from './turn-loop.js';
+import { EventBus, type ProviderStream, type Tool, type ProviderEvent } from './turn-loop.js';
 import { SessionStore } from './session-store.js';
+import { withMessageTimestamp } from './context.js';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -75,7 +76,7 @@ describe('reconstructMessages', () => {
     const messages = (loop as any).reconstructMessages(events);
 
     expect(messages).toHaveLength(2);
-    expect(messages[0]).toEqual({ role: 'user', content: 'hello' });
+    expect(messages[0]).toEqual({ role: 'user', content: withMessageTimestamp('hello', 1000) });
     expect(messages[1]).toEqual({
       role: 'assistant',
       content: [{ type: 'text', text: 'Hi ' }, { type: 'text', text: 'there!' }],
@@ -110,7 +111,7 @@ describe('reconstructMessages', () => {
     const messages = (loop as any).reconstructMessages(events);
 
     expect(messages).toHaveLength(3);
-    expect(messages[0]).toEqual({ role: 'user', content: 'read file' });
+    expect(messages[0]).toEqual({ role: 'user', content: withMessageTimestamp('read file', 1000) });
     expect(messages[1]).toEqual({
       role: 'assistant',
       content: [
@@ -173,9 +174,9 @@ describe('reconstructMessages', () => {
     const messages = (loop as any).reconstructMessages(events);
 
     expect(messages).toHaveLength(4);
-    expect(messages[0]).toEqual({ role: 'user', content: 'first' });
+    expect(messages[0]).toEqual({ role: 'user', content: withMessageTimestamp('first', 1000) });
     expect(messages[1]).toEqual({ role: 'assistant', content: [{ type: 'text', text: 'response 1' }] });
-    expect(messages[2]).toEqual({ role: 'user', content: 'second' });
+    expect(messages[2]).toEqual({ role: 'user', content: withMessageTimestamp('second', 2000) });
     expect(messages[3]).toEqual({ role: 'assistant', content: [{ type: 'text', text: 'response 2' }] });
   });
 
@@ -194,7 +195,7 @@ describe('reconstructMessages', () => {
     const messages = (loop as any).reconstructMessages(events);
 
     expect(messages).toHaveLength(2);
-    expect(messages[0]).toEqual({ role: 'user', content: 'hello' });
+    expect(messages[0]).toEqual({ role: 'user', content: withMessageTimestamp('hello', 1000) });
     expect(messages[1]).toEqual({ role: 'assistant', content: [{ type: 'text', text: 'hi' }] });
   });
 
@@ -236,7 +237,7 @@ describe('reconstructMessages', () => {
     expect(messages).toHaveLength(6);
 
     // Turn 1: user message
-    expect(messages[0]).toEqual({ role: 'user', content: 'do stuff' });
+    expect(messages[0]).toEqual({ role: 'user', content: withMessageTimestamp('do stuff', 1000) });
 
     // Turn 1: assistant with 2 tool-use blocks
     expect(messages[1]).toEqual({
@@ -254,10 +255,110 @@ describe('reconstructMessages', () => {
     expect(messages[3]).toEqual({ role: 'tool', toolUseId: 'call_2', toolName: 'Glob', content: 'b.txt\nc.txt' });
 
     // Turn 2: user message
-    expect(messages[4]).toEqual({ role: 'user', content: 'got it' });
+    expect(messages[4]).toEqual({ role: 'user', content: withMessageTimestamp('got it', 2000) });
 
     // Turn 2: assistant response
     expect(messages[5]).toEqual({ role: 'assistant', content: [{ type: 'text', text: 'done' }] });
+  });
+});
+
+describe('prompt-cache stability', () => {
+  it('reconstructs a resumed session\'s user messages byte-identical to what was originally streamed', async () => {
+    const store = createTestStore();
+    const calls: Array<{ messages: Array<{ role: string; content: unknown }> }> = [];
+    const responses = ['reply one', 'reply two'];
+    let callIndex = 0;
+
+    const provider: ProviderStream = {
+      name: 'test',
+      stream: (args) => {
+        calls.push(args as { messages: Array<{ role: string; content: unknown }> });
+        const text = responses[callIndex++] ?? 'ok';
+        return {
+          iterable: (async function* () {
+            yield { type: 'text-delta', text } as ProviderEvent;
+            yield { type: 'stop', reason: 'stop' } as ProviderEvent;
+          })(),
+          cancel() {},
+        };
+      },
+      check: async () => 'APPROVE',
+    };
+
+    const loop1 = new TurnLoop(
+      { provider, model: 'test-model', tools: [], cwd: tmpDir, settings: { providers: {}, current_provider: 'test' } },
+      store,
+    );
+    const result1 = await loop1.run('first message');
+
+    const loop2 = new TurnLoop(
+      {
+        provider,
+        model: 'test-model',
+        tools: [],
+        cwd: tmpDir,
+        settings: { providers: {}, current_provider: 'test' },
+        resumeSessionId: result1.sessionId,
+      },
+      store,
+    );
+    await loop2.run('second message');
+
+    expect(calls).toHaveLength(2);
+    // The first user message as reconstructed on resume must be byte-identical
+    // to what was actually streamed live in turn 1 — otherwise every resume
+    // busts the provider's cached prefix.
+    expect(calls[1]!.messages[0]).toEqual(calls[0]!.messages[0]);
+  });
+
+  it('keeps the system prompt byte-identical across turns within one run, with no timestamp', async () => {
+    const store = createTestStore();
+    const calls: Array<{ system?: string }> = [];
+    let turnIdx = 0;
+
+    const provider: ProviderStream = {
+      name: 'test',
+      stream: (args) => {
+        calls.push(args as { system?: string });
+        return {
+          iterable: (async function* () {
+            if (turnIdx++ === 0) {
+              yield { type: 'tool-call', id: 'call_1', name: 'Read', input: {} } as ProviderEvent;
+            } else {
+              yield { type: 'text-delta', text: 'done' } as ProviderEvent;
+            }
+            yield { type: 'stop', reason: 'stop' } as ProviderEvent;
+          })(),
+          cancel() {},
+        };
+      },
+      check: async () => 'APPROVE',
+    };
+
+    const readTool: Tool = {
+      definition: { name: 'Read', description: 'read a file', inputSchema: { type: 'object', properties: {} } },
+      execute: async () => ({ output: 'file contents' }),
+    };
+
+    const loop = new TurnLoop(
+      {
+        provider,
+        model: 'test-model',
+        tools: [readTool],
+        cwd: tmpDir,
+        settings: { providers: {}, current_provider: 'test' },
+        system: 'You are curie-agent, a helpful coding assistant.',
+      },
+      store,
+    );
+
+    await loop.run('do something with a file');
+
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(calls[0]!.system).toBe(calls[1]!.system);
+    expect(calls[0]!.system).toContain('[Operating system:');
+    expect(calls[0]!.system).not.toContain('[Current date and time:');
+    expect(calls[0]!.system).not.toContain('[Message sent at:');
   });
 });
 

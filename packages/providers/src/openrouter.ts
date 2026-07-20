@@ -296,8 +296,16 @@ export class OpenRouterProvider implements Provider {
       };
     }).filter(tc => tc.id) ?? [];
 
+    const usageDetails = response.usage as (OpenAI.CompletionUsage & {
+      prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+    }) | undefined;
     const usage = response.usage
-      ? { inputTokens: response.usage.prompt_tokens, outputTokens: response.usage.completion_tokens }
+      ? {
+          inputTokens: response.usage.prompt_tokens,
+          outputTokens: response.usage.completion_tokens,
+          cacheReadTokens: usageDetails?.prompt_tokens_details?.cached_tokens,
+          cacheWriteTokens: usageDetails?.prompt_tokens_details?.cache_write_tokens,
+        }
       : undefined;
 
     return {

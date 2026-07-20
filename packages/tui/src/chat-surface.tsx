@@ -41,6 +41,7 @@ interface ChatSurfaceProps {
   effort?: string;
   inputTokens?: number;
   outputTokens?: number;
+  cacheReadTokens?: number;
   contextWindowSize?: number;
   contextFillPct?: number;
   project?: string;
@@ -90,6 +91,7 @@ export function ChatSurface({
   effort,
   inputTokens = 0,
   outputTokens = 0,
+  cacheReadTokens,
   contextWindowSize = 200_000,
   contextFillPct = 0,
   project = 'homepage-refactor-0422',
@@ -664,7 +666,7 @@ export function ChatSurface({
         {currentTab === 'projects' ? (
           <ProjectsTab projects={projects ?? []} theme={theme} isActive={currentTab === 'projects'} onSelectProject={onSelectProject} />
         ) : currentTab === 'stats' ? (
-          <StatsTab theme={theme} isActive={currentTab === 'stats'} model={model} inputTokens={inputTokens} outputTokens={outputTokens} contextWindowSize={contextWindowSize} />
+          <StatsTab theme={theme} isActive={currentTab === 'stats'} model={model} inputTokens={inputTokens} outputTokens={outputTokens} cacheReadTokens={cacheReadTokens} contextWindowSize={contextWindowSize} />
         ) : currentTab === 'channels' ? (
           <ChannelsTab channels={channels ?? []} theme={theme} isActive={currentTab === 'channels'} onSelectChannel={onChannelSelect} />
         ) : currentTab === 'agents' ? (

@@ -332,8 +332,8 @@ async function createAndRunTurnLoop(turnLoop: TurnLoop, prompt: string, system: 
   // Actually, the TurnLoop reads config.system directly in its run() method.
   // We can't mutate it after construction, so we need a different approach.
 
-  // The TurnLoop reads this.config.system in run() at line 334:
-  //   system: withDateContext(self.config.system)
+  // The TurnLoop reads this.config.system in run():
+  //   system: withOsContext(self.config.system)
   // We need to mutate it. Since config is private, we use a workaround:
   // Cast to access the private config.
   const tl = turnLoop as unknown as { config: { system?: string } };

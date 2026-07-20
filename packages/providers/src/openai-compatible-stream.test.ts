@@ -135,6 +135,25 @@ describe('streamOpenAICompatible', () => {
     expect(events[events.length - 1]).toEqual({ type: 'stop', reason: 'stop' });
   });
 
+  it('surfaces cached_tokens from prompt_tokens_details as cacheReadTokens', async () => {
+    const client = makeClient([makeChunk('hi', undefined, {
+      prompt_tokens: 100,
+      completion_tokens: 5,
+      total_tokens: 105,
+      prompt_tokens_details: { cached_tokens: 80 },
+    } as Chunk['usage'])]);
+    const events = await collect(streamOpenAICompatible(client, {} as OpenAI.ChatCompletionCreateParams));
+    const usage = events.find((e) => e.type === 'usage') as { cacheReadTokens?: number };
+    expect(usage.cacheReadTokens).toBe(80);
+  });
+
+  it('leaves cacheReadTokens undefined when the provider reports no cache stats', async () => {
+    const client = makeClient([makeChunk('hi', undefined, { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 })]);
+    const events = await collect(streamOpenAICompatible(client, {} as OpenAI.ChatCompletionCreateParams));
+    const usage = events.find((e) => e.type === 'usage') as { cacheReadTokens?: number };
+    expect(usage.cacheReadTokens).toBeUndefined();
+  });
+
   it('suppresses thinking-delta and thinking-block when suppressThinking is true', async () => {
     const client = makeClient([makeChunk('hello <think>this is reasoning</think> world')]);
     const events = await collect(

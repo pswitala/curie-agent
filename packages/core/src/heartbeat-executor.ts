@@ -155,7 +155,7 @@ export class HeartbeatExecutor {
       settings: this.config.settings,
       effort: this.config.effort,
       maxTurns: this.config.maxTurns ?? 30,
-      // baseSystem (AGENTS.md + skills) is enriched by withDateContext() in TurnLoop
+      // baseSystem (AGENTS.md + skills) is enriched by withOsContext() in TurnLoop
       system: fullSystem ? `${baseSystem}\n\n${fullSystem}` : baseSystem,
     }).run(userInstruction);
 

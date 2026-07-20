@@ -712,6 +712,7 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
   useEffect(() => { debugRef.current = debug; }, [debug]);
   const [inputTokens, setInputTokens] = useState<number | undefined>(undefined);
   const [outputTokens, setOutputTokens] = useState<number | undefined>(undefined);
+  const [cacheReadTokens, setCacheReadTokens] = useState<number | undefined>(undefined);
   const [currentTab, setCurrentTab] = useState<TabId>('assistant');
   const [duration, setDuration] = useState('00:00:00');
   const [status, setStatus] = useState('idle');
@@ -855,6 +856,7 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
     ws.on('usage', (event: WsEvent) => {
       if (event.inputTokens) setInputTokens(Number(event.inputTokens));
       if (event.outputTokens) setOutputTokens(Number(event.outputTokens));
+      if (event.cacheReadTokens != null) setCacheReadTokens(Number(event.cacheReadTokens));
     });
 
     ws.on('error', (event: WsEvent) => {
@@ -1310,6 +1312,7 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
       effort={currentEffort}
       inputTokens={inputTokens}
       outputTokens={outputTokens}
+      cacheReadTokens={cacheReadTokens}
       contextWindowSize={200_000}
       contextFillPct={0}
       duration={duration}

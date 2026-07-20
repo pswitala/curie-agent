@@ -89,6 +89,23 @@ describe('OpenRouterProvider', () => {
       }));
     });
 
+    it('parses cacheReadTokens/cacheWriteTokens from prompt_tokens_details on complete()', async () => {
+      mockCreate.mockResolvedValue({
+        choices: [{ message: { content: 'hello' }, finish_reason: 'stop' }],
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 20,
+          prompt_tokens_details: { cached_tokens: 80, cache_write_tokens: 5 },
+        },
+      });
+      const p = new OpenRouterProvider('key');
+      const result = await p.complete({ messages: [{ role: 'user', content: 'hi' }] });
+      expect(result.usage?.inputTokens).toBe(100);
+      expect(result.usage?.outputTokens).toBe(20);
+      expect(result.usage?.cacheReadTokens).toBe(80);
+      expect(result.usage?.cacheWriteTokens).toBe(5);
+    });
+
     it('parses cacheReadTokens/cacheWriteTokens from prompt_tokens_details on the usage event', async () => {
       mockCreate.mockResolvedValue(makeAsyncIterableStream([
         {

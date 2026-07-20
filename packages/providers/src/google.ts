@@ -214,6 +214,7 @@ export class GoogleGeminiProvider implements Provider {
       let accumulatedThinking = '';
       let totalInputTokens = 0;
       let totalOutputTokens = 0;
+      let totalCachedTokens: number | undefined;
 
       for await (const chunk of self.parseSSEStream(response)) {
         if (args.signal?.aborted || controller.signal.aborted) {
@@ -239,6 +240,10 @@ export class GoogleGeminiProvider implements Provider {
         if (usage) {
           totalInputTokens = Number(usage.promptTokenCount ?? totalInputTokens);
           totalOutputTokens = Number(usage.candidatesTokenCount ?? totalOutputTokens);
+          // promptTokenCount already includes cached tokens — this is a subset, not additive.
+          if (typeof usage.cachedContentTokenCount === 'number') {
+            totalCachedTokens = usage.cachedContentTokenCount;
+          }
         }
       }
 
@@ -272,7 +277,7 @@ export class GoogleGeminiProvider implements Provider {
       }
 
       if (totalInputTokens || totalOutputTokens) {
-        yield { type: 'usage', inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
+        yield { type: 'usage', inputTokens: totalInputTokens, outputTokens: totalOutputTokens, cacheReadTokens: totalCachedTokens };
       }
 
       yield { type: 'stop', reason: 'stop' };
@@ -344,7 +349,7 @@ export class GoogleGeminiProvider implements Provider {
       throw new Error(`Google API error ${response.status}: ${errText}`);
     }
 
-    const json = await response.json() as unknown as ApiChunk;
+    const json = await response.json() as unknown as ApiChunk & { usageMetadata?: Record<string, unknown> };
     const rawParts = (json.candidates?.[0]?.content?.parts ?? []) as Record<string, unknown>[];
 
     // Collect text (non-thought) parts
@@ -365,9 +370,19 @@ export class GoogleGeminiProvider implements Provider {
         })
       : undefined;
 
+    const usageMeta = json.usageMetadata;
+    const usage = usageMeta
+      ? {
+          inputTokens: Number(usageMeta.promptTokenCount ?? 0),
+          outputTokens: Number(usageMeta.candidatesTokenCount ?? 0),
+          cacheReadTokens: typeof usageMeta.cachedContentTokenCount === 'number' ? usageMeta.cachedContentTokenCount : undefined,
+        }
+      : undefined;
+
     return {
       text: allText.join('\n'),
       stopReason: toolCalls ? 'tool_use' : 'stop',
+      usage,
       toolCalls,
     };
   }

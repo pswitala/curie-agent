@@ -91,6 +91,8 @@ export class JsonRpcHandler {
           let totalTokens = 0;
           let totalInputTokens = 0;
           let totalOutputTokens = 0;
+          let totalCacheReadTokens = 0;
+          let totalCacheWriteTokens = 0;
           let totalToolCalls = 0;
           let totalMessages = 0;
           let totalCost = 0;
@@ -180,6 +182,8 @@ export class JsonRpcHandler {
                   totalInputTokens += inT;
                   totalOutputTokens += outT;
                   totalTokens += inT + outT;
+                  if ('cacheReadTokens' in e) totalCacheReadTokens += Number(e.cacheReadTokens) || 0;
+                  if ('cacheWriteTokens' in e) totalCacheWriteTokens += Number(e.cacheWriteTokens) || 0;
 
                   const eventCost = estimateCost(s.model, inT, outT, customCost);
                   totalCost += eventCost;
@@ -210,6 +214,8 @@ export class JsonRpcHandler {
               totalTokens,
               totalInputTokens,
               totalOutputTokens,
+              totalCacheReadTokens,
+              totalCacheWriteTokens,
               totalToolCalls,
               totalMessages,
               totalCost,

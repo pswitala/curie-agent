@@ -12,6 +12,8 @@ interface StatsTabProps {
   inputTokens?: number;
   /** Total output tokens (model response). */
   outputTokens?: number;
+  /** Cached input tokens (subset of inputTokens), when the provider reports them. */
+  cacheReadTokens?: number;
   /** Model's context window size in tokens (default 200k). */
   contextWindowSize?: number;
 }
@@ -38,7 +40,7 @@ function padLeft(s: string, n: number): string {
   return ' '.repeat(n - s.length) + s;
 }
 
-export function StatsTab({ theme, isActive, model, inputTokens, outputTokens, contextWindowSize }: StatsTabProps) {
+export function StatsTab({ theme, isActive, model, inputTokens, outputTokens, cacheReadTokens, contextWindowSize }: StatsTabProps) {
   const primary = theme?.primary || '#7aa2f7';
   const muted = theme?.muted || '#565f89';
   const fg = theme?.foreground || '#a9b1d6';
@@ -123,7 +125,10 @@ export function StatsTab({ theme, isActive, model, inputTokens, outputTokens, co
         </Box>
         {ctxInput > 0 && ctxOutput > 0 && (
           <Box>
-            <Text color={muted}>  └─ {ctxFmt(ctxInput)} in / {ctxFmt(ctxOutput)} out</Text>
+            <Text color={muted}>
+              {'  └─ '}{ctxFmt(ctxInput)} in / {ctxFmt(ctxOutput)} out
+              {cacheReadTokens && cacheReadTokens > 0 ? ` (${ctxFmt(cacheReadTokens)} cached)` : ''}
+            </Text>
           </Box>
         )}
         {ctxInput === 0 && (

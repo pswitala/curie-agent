@@ -111,6 +111,9 @@ export class OpenAIProvider implements Provider {
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
       ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
       ...(modelIsReasoning && reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      // Routing hint: OpenAI uses this to prefer the same cache-warm backend
+      // across turns of one conversation, mirroring OpenRouter's session_id.
+      ...(args.sessionId ? { prompt_cache_key: args.sessionId } : {}),
       stream_options: { include_usage: true },
     } as OpenAI.ChatCompletionCreateParams;
 
@@ -137,6 +140,7 @@ export class OpenAIProvider implements Provider {
       ...(tools ? { tools } : {}),
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
       ...(args.maxTokens ? { max_output_tokens: args.maxTokens } : {}),
+      ...(args.sessionId ? { prompt_cache_key: args.sessionId } : {}),
       reasoning: {
         ...(reasoningEffort ?? { effort: 'low' }),
         summary: 'auto',
@@ -151,6 +155,7 @@ export class OpenAIProvider implements Provider {
       const pendingTools = new Map<number, { callId: string; name: string; input: Record<string, unknown> }>();
       let lastUsageInput = 0;
       let lastUsageOutput = 0;
+      let lastCachedTokens: number | undefined;
 
       for await (const raw of sdkStream) {
         if (args.signal?.aborted) break;
@@ -182,6 +187,9 @@ export class OpenAIProvider implements Provider {
           if (u) {
             lastUsageInput = Number(u.input_tokens ?? 0);
             lastUsageOutput = Number(u.output_tokens ?? 0);
+            const details = u.input_tokens_details as Record<string, unknown> | undefined;
+            const cached = details?.cached_tokens;
+            lastCachedTokens = typeof cached === 'number' ? cached : undefined;
           }
         }
       }
@@ -192,7 +200,7 @@ export class OpenAIProvider implements Provider {
       }
 
       if (lastUsageInput || lastUsageOutput) {
-        yield { type: 'usage', inputTokens: lastUsageInput, outputTokens: lastUsageOutput };
+        yield { type: 'usage', inputTokens: lastUsageInput, outputTokens: lastUsageOutput, cacheReadTokens: lastCachedTokens };
       }
 
       yield { type: 'stop', reason: args.signal?.aborted ? 'aborted' : 'stop' };
@@ -291,6 +299,7 @@ export class OpenAIProvider implements Provider {
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
       ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
       ...(modelIsReasoning && reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      ...(args.sessionId ? { prompt_cache_key: args.sessionId } : {}),
       stream_options: { include_usage: true },
     };
     const response = await this.client.chat.completions.create(responseParams as any) as OpenAI.ChatCompletion;
@@ -305,7 +314,11 @@ export class OpenAIProvider implements Provider {
     }).filter(tc => tc.id) ?? [];
 
     const usage = response.usage
-      ? { inputTokens: response.usage.prompt_tokens, outputTokens: response.usage.completion_tokens }
+      ? {
+          inputTokens: response.usage.prompt_tokens,
+          outputTokens: response.usage.completion_tokens,
+          cacheReadTokens: response.usage.prompt_tokens_details?.cached_tokens,
+        }
       : undefined;
 
     return {
@@ -333,6 +346,7 @@ export class OpenAIProvider implements Provider {
       ...(tools ? { tools } : {}),
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
       ...(args.maxTokens ? { max_output_tokens: args.maxTokens } : {}),
+      ...(args.sessionId ? { prompt_cache_key: args.sessionId } : {}),
       ...(reasoningEffort ? { reasoning: reasoningEffort } : {}),
       truncation: 'auto',
     };
@@ -350,9 +364,17 @@ export class OpenAIProvider implements Provider {
         return { id: fc.call_id as string, name: fc.name as string, input };
       });
 
-    const usageObj = response.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+    const usageObj = response.usage as {
+      input_tokens?: number;
+      output_tokens?: number;
+      input_tokens_details?: { cached_tokens?: number };
+    } | undefined;
     const usage = usageObj
-      ? { inputTokens: usageObj.input_tokens ?? 0, outputTokens: usageObj.output_tokens ?? 0 }
+      ? {
+          inputTokens: usageObj.input_tokens ?? 0,
+          outputTokens: usageObj.output_tokens ?? 0,
+          cacheReadTokens: usageObj.input_tokens_details?.cached_tokens,
+        }
       : undefined;
 
     return {

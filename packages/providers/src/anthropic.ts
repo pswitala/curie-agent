@@ -44,6 +44,44 @@ function isAdaptiveModel(model: string): boolean {
   return ADAPTIVE_MODELS.has(model);
 }
 
+/** Wraps the system prompt in a cacheable text block. Cached separately from tools/messages. */
+function buildSystemBlocks(system: string | undefined): Anthropic.TextBlockParam[] | undefined {
+  if (!system) return undefined;
+  return [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
+}
+
+/** Marks the last tool definition as a cache breakpoint (tool list is stable across turns). */
+function withToolsCacheBreakpoint(tools: Anthropic.Tool[] | undefined): Anthropic.Tool[] | undefined {
+  if (!tools || tools.length === 0) return tools;
+  const [lastTool] = tools.slice(-1);
+  if (!lastTool) return tools;
+  return [...tools.slice(0, -1), { ...lastTool, cache_control: { type: 'ephemeral' } }];
+}
+
+interface AnthropicCacheUsage {
+  input_tokens: number | null;
+  output_tokens: number;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+}
+
+/**
+ * Anthropic's `input_tokens` excludes cache read/write tokens. Add them back
+ * in so `inputTokens` reports the TOTAL prompt size, matching every other
+ * provider adapter and keeping context-fill % / auto-compaction correct.
+ */
+function toUsageEvent(usage: AnthropicCacheUsage): ProviderEvent {
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+  return {
+    type: 'usage',
+    inputTokens: (usage.input_tokens ?? 0) + cacheRead + cacheWrite,
+    outputTokens: usage.output_tokens,
+    cacheReadTokens: usage.cache_read_input_tokens ?? undefined,
+    cacheWriteTokens: usage.cache_creation_input_tokens ?? undefined,
+  };
+}
+
 export class AnthropicProvider implements Provider {
   readonly name = 'anthropic';
   readonly models = [
@@ -77,14 +115,19 @@ export class AnthropicProvider implements Provider {
     const adaptiveEffort = effortToAdaptiveEffort(args.effort);
 
     const messages = this.mapMessages(args.messages);
-    const tools = args.tools ? this.mapTools(args.tools) : undefined;
+    const tools = withToolsCacheBreakpoint(args.tools ? this.mapTools(args.tools) : undefined);
 
     const streamArgs: Anthropic.MessageStreamParams = {
       model,
       max_tokens: args.maxTokens || 65536,
-      system: args.system,
+      system: buildSystemBlocks(args.system),
       messages,
       tools,
+      // Automatically places a cache breakpoint on the last cacheable block in
+      // the request (i.e. the growing message history), advancing each turn —
+      // sessionId sticky routing is not needed since Anthropic direct is a
+      // single upstream.
+      cache_control: { type: 'ephemeral' },
     };
 
     if (useAdaptive) {
@@ -166,13 +209,7 @@ export class AnthropicProvider implements Provider {
         }
 
         if (event.type === 'message_delta' && event.usage) {
-          yield {
-            type: 'usage',
-            inputTokens: event.usage.input_tokens || 0,
-            outputTokens: event.usage.output_tokens || 0,
-            cacheReadTokens: event.usage.cache_read_input_tokens ?? undefined,
-            cacheWriteTokens: event.usage.cache_creation_input_tokens ?? undefined,
-          };
+          yield toUsageEvent(event.usage);
         }
       }
 
@@ -186,13 +223,7 @@ export class AnthropicProvider implements Provider {
       try {
         const final = await sdkStream.finalMessage();
         if (final.usage) {
-          yield {
-            type: 'usage',
-            inputTokens: final.usage.input_tokens,
-            outputTokens: final.usage.output_tokens,
-            cacheReadTokens: final.usage.cache_read_input_tokens ?? undefined,
-            cacheWriteTokens: final.usage.cache_creation_input_tokens ?? undefined,
-          };
+          yield toUsageEvent(final.usage);
         }
         if (final.stop_reason === 'max_tokens') {
           stopReason = 'length';
@@ -255,14 +286,15 @@ export class AnthropicProvider implements Provider {
     const adaptiveEffort = effortToAdaptiveEffort(args.effort);
 
     const messages = this.mapMessages(args.messages);
-    const tools = args.tools ? this.mapTools(args.tools) : undefined;
+    const tools = withToolsCacheBreakpoint(args.tools ? this.mapTools(args.tools) : undefined);
 
     const createArgs: Anthropic.MessageCreateParams = {
       model,
       max_tokens: args.maxTokens || 16384,
-      system: args.system,
+      system: buildSystemBlocks(args.system),
       messages,
       tools,
+      cache_control: { type: 'ephemeral' },
     };
 
     if (useAdaptive) {
@@ -309,7 +341,14 @@ export class AnthropicProvider implements Provider {
         ? 'end_turn'
         : 'stop',
       usage: response.usage
-        ? { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens }
+        ? {
+            inputTokens: response.usage.input_tokens
+              + (response.usage.cache_read_input_tokens ?? 0)
+              + (response.usage.cache_creation_input_tokens ?? 0),
+            outputTokens: response.usage.output_tokens,
+            cacheReadTokens: response.usage.cache_read_input_tokens ?? undefined,
+            cacheWriteTokens: response.usage.cache_creation_input_tokens ?? undefined,
+          }
         : undefined,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     };
