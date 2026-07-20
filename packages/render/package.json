@@ -1,6 +1,6 @@
 {
   "name": "@curie-agent/render",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "publish": true,
   "type": "module",
   "files": [
