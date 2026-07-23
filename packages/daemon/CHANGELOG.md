@@ -1,5 +1,18 @@
 # @curie-agent/daemon
 
+## 0.3.6
+
+### Patch Changes
+
+- Preload identity context (`SOUL.md`, `USER.md`, `MEMORY.md`) into the cached system prompt alongside `AGENTS.md`, configurable via a new `system_prompt_files` setting, to avoid the latency of the agent reading these files itself via tools on every session start.
+
+- Updated dependencies []:
+  - @curie-agent/core@0.3.6
+  - @curie-agent/protocol@0.3.6
+  - @curie-agent/providers@0.3.6
+  - @curie-agent/tools@0.3.6
+  - @curie-agent/wiki@0.3.6
+
 ## 0.3.5
 
 ### Patch Changes
