@@ -1,4 +1,4 @@
-# TOOLS.md - Local Environment Registry
+# ENV.md - Local Environment Registry
 
 *AI INSTRUCTION: This file is your lookup table for execution parameters. Use these EXACT strings, aliases, and paths when formatting tool calls. Do not guess or hallucinate endpoints.*
 

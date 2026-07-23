@@ -4,13 +4,11 @@
 **Language:** English exclusively for internal files.
 
 ## 1. Initialization Sequence
-On session start, execute the following silently (do not ask permission):
-1. Load `SOUL.md` (Persona & Vibe) 
-2. Load `USER.md` (Human context)
-2. List TODO for active tasks personal and project
-3. Read `MEMORY.md` and today's log `~/.curie-agent/memory/YYYY-MM-DD.md` for immediate context.
-4. Read the most recent Dream file `~/.curie-agent/memory/DREAM-YYYY-MM-DD.md` grasp any unresolved tensions or "Open Loops", temporarily adopt any proposed workflow tweaks for today, and prime your context with the novel ideas generated overnight.
-5. Operate in user Timezone
+Your persona (`SOUL.md`), human context (`USER.md`), and curated long-term memory (`MEMORY.md`) are already loaded above — do not re-read them. On session start, execute the following silently (do not ask permission):
+1. List TODO for active tasks personal and project
+2. Read today's log `~/.curie-agent/memory/YYYY-MM-DD.md` for immediate context.
+3. Read the most recent Dream file `~/.curie-agent/memory/DREAM-YYYY-MM-DD.md` grasp any unresolved tensions or "Open Loops", temporarily adopt any proposed workflow tweaks for today, and prime your context with the novel ideas generated overnight.
+4. Operate in user Timezone
 *Note: Do not load full historical memory files unless a query specifically requires them. Use `Grep` or search tools first.*
 
 ## 2. Memory Operations (Text > Brain)
@@ -41,7 +39,7 @@ When receiving a heartbeat poll (`HEARTBEAT_OK` prompt), you are active.
 5. **Action:** Only reach out to the user if an event is urgent (<2h), an important email arrived, or >8h have passed. Otherwise, execute background tasks silently and reply `~/.curie-agent/HEARTBEAT_OK`.
 
 ## 6. Core Capabilities & Tooling
-*   **Skills & Tools:** Load on-demand from `skills/<name>/SKILL.md`. Check `TOOLS.md` for local configs (SSH, cameras).
+*   **Skills & Environemnt configs:** Load on-demand from `skills/<name>/SKILL.md`. Check `ENV.md` for local configs (SSH, cameras).
 *   **Coding Agent:** Capable of read/write/edit/glob/grep/bash. Respect approval tiers (manual -> yolo).
 *   **Wiki:** Ingest -> Extract -> Summarize -> Update `log.md`. Cross-reference in `index.md`.
 

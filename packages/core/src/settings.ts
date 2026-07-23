@@ -85,6 +85,9 @@ export interface CurieSettings {
   tools_per_call: number;
   websearch_per_call: number;
 
+  // System prompt: identity files to inline (relative to ~/.curie-agent/), in order
+  system_prompt_files: string[];
+
   // Brave Search
   brave_search_api_key: string;
 
@@ -179,6 +182,7 @@ export const DEFAULT_SETTINGS: CurieSettings = {
   channels: { bot_token: '', user_id: '', chat_id: '', allow_groups: false, tab_active: 'main' },
   tools_per_call: 10,
   websearch_per_call: 5,
+  system_prompt_files: ['AGENTS.md', 'SOUL.md', 'USER.md', 'MEMORY.md'],
   brave_search_api_key: '',
   heartbeat: { schedule: 'off', mode: 'yolo', intraday: '', daily: '6:00', weekly: 'monday@6:00', monthly: '1@6:00', dreaming: '2:00' },
   mcp_servers: {},
@@ -223,6 +227,20 @@ function pickNumber(parsed: Record<string, unknown>, ...keys: string[]): number 
   }
   for (const [k, v] of Object.entries(parsed)) {
     if (typeof v !== 'number') continue;
+    if (targets.has(normalize(k))) return v;
+  }
+  return undefined;
+}
+
+function pickStringArray(parsed: Record<string, unknown>, ...keys: string[]): string[] | undefined {
+  const normalize = (s: string) => s.replace(/[_-]/g, '').toLowerCase();
+  const targets = new Set(keys.map(normalize));
+  for (const key of keys) {
+    const direct = parsed[key];
+    if (Array.isArray(direct) && direct.every((v): v is string => typeof v === 'string')) return direct;
+  }
+  for (const [k, v] of Object.entries(parsed)) {
+    if (!Array.isArray(v) || !v.every((x): x is string => typeof x === 'string')) continue;
     if (targets.has(normalize(k))) return v;
   }
   return undefined;
@@ -337,6 +355,7 @@ export function migrateFlatToNested(parsed: Record<string, unknown>): CurieSetti
       ? pickNumber(parsed, 'TOOLS_PER_CALL', 'tools_per_call')! : DEFAULT_SETTINGS.tools_per_call,
     websearch_per_call: (typeof pickNumber(parsed, 'WEBSEARCH_PER_CALL', 'websearch_per_call') === 'number' && pickNumber(parsed, 'WEBSEARCH_PER_CALL', 'websearch_per_call')! > 0)
       ? pickNumber(parsed, 'WEBSEARCH_PER_CALL', 'websearch_per_call')! : DEFAULT_SETTINGS.websearch_per_call,
+    system_prompt_files: pickStringArray(parsed, 'system_prompt_files', 'SYSTEM_PROMPT_FILES') || DEFAULT_SETTINGS.system_prompt_files,
     brave_search_api_key: pickString(parsed, 'BRAVE_SEARCH_API_KEY', 'brave_search_api_key', 'BRAVE_API_KEY') || '',
     heartbeat: {
       schedule: (pickString(parsed, 'HEARTBEAT', 'heartbeat') || 'off') as 'on' | 'off',
@@ -585,6 +604,7 @@ export function parseNestedSettings(parsed: Record<string, unknown>): CurieSetti
       ? getNumber(['tools_per_call', 'TOOLS_PER_CALL'])! : DEFAULT_SETTINGS.tools_per_call,
     websearch_per_call: (typeof getNumber(['websearch_per_call', 'WEBSEARCH_PER_CALL']) === 'number' && getNumber(['websearch_per_call', 'WEBSEARCH_PER_CALL'])! > 0)
       ? getNumber(['websearch_per_call', 'WEBSEARCH_PER_CALL'])! : DEFAULT_SETTINGS.websearch_per_call,
+    system_prompt_files: pickStringArray(parsed, 'system_prompt_files', 'SYSTEM_PROMPT_FILES') || DEFAULT_SETTINGS.system_prompt_files,
     brave_search_api_key: getString(['brave_search_api_key', 'BRAVE_SEARCH_API_KEY', 'BRAVE_API_KEY']),
     heartbeat: heartbeatConfig,
     mcp_servers: (parsed.mcp_servers || parsed.MCP_SERVERS) as Record<string, unknown> || {},

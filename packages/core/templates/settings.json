@@ -59,6 +59,7 @@
   },
   "tools_per_call": 20,
   "websearch_per_call": 10,
+  "system_prompt_files": ["AGENTS.md", "SOUL.md", "USER.md", "MEMORY.md"],
   "brave_search_api_key": "BSAP012345",
   "heartbeat": {
     "schedule": "on",

@@ -7,13 +7,13 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { spawn, execSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 
 import { ChatSurface, COLD_START_BANNER, getInitialWizardState, advanceStep, getConfirmationMessage, isAlreadyInitialized, PROVIDER_INFO } from '@curie-agent/tui';
 import type { InitWizardState } from '@curie-agent/tui';
 import { getTheme } from '@curie-agent/render';
-import { SettingsManager, DEFAULT_SETTINGS, createIdentityFilesAuto } from '@curie-agent/core';
+import { SettingsManager, DEFAULT_SETTINGS, createIdentityFilesAuto, buildBaseSystemPrompt } from '@curie-agent/core';
 import type { CurieSettings } from '@curie-agent/core';
 import { ensureToken, loadToken } from '@curie-agent/daemon';
 import type { DaemonServer } from '@curie-agent/daemon';
@@ -382,19 +382,15 @@ async function handleDaemonCommand(subcommand: string): Promise<{ keepRunning: b
         mergedTools = [...allTools, ...result.tools] as any;
       }
 
-      // Read AGENTS.md for system prompt (if exists), then append skills catalog
-      const agentsPath = join(homedir(), '.curie-agent', 'AGENTS.md');
-      const agentsMd = existsSync(agentsPath) ? readFileSync(agentsPath, 'utf-8') : undefined;
+      // Build system prompt from the configured identity files (~/.curie-agent/), then append skills catalog
+      const curieDir = join(homedir(), '.curie-agent');
       const skills = discoverAllSkills(process.cwd());
       const skillsSection = formatSkillsForPrompt(skills);
-      let systemPrompt: string | undefined;
-      if (agentsMd && skillsSection) {
-        systemPrompt = agentsMd + '\n\n' + skillsSection;
-      } else if (agentsMd) {
-        systemPrompt = agentsMd;
-      } else if (skillsSection) {
-        systemPrompt = skillsSection;
-      }
+      const systemPrompt = buildBaseSystemPrompt({
+        curieDir,
+        files: settingsManager.get().system_prompt_files,
+        skillsSection,
+      });
 
       // Read web_ip from settings for daemon binding
       const settings = settingsManager.get();

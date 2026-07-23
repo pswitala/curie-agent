@@ -35,6 +35,7 @@ export type { SubagentConfig, SubagentHandle } from './subagent-executor.js';
 export { TokenMonitor, parseTieredPricing, selectTier, estimateCost, type PriceTier } from './token-monitor.js';
 export type { TokenMonitorConfig, TokenEvent } from './token-monitor.js';
 export { withOsContext, withMessageTimestamp, formatDate } from './context.js';
+export { buildBaseSystemPrompt } from './identity-context.js';
 export { listSnapshots, revertTo, createSnapshot } from './safety/snapshot.js';
 export { isPathAllowed, resolveSafePath, parseAllowlist, curieAgentDir } from './safety/path-guard.js';
 export { createIdentityFiles, createIdentityFilesFromTemplates, createIdentityFilesAuto } from './identity-files.js';
