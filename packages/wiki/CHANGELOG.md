@@ -1,5 +1,14 @@
 # @curie-agent/wiki
 
+## 0.3.8
+
+### Patch Changes
+
+- Patch release 0.3.8.
+
+- Updated dependencies []:
+  - @curie-agent/core@0.3.8
+
 ## 0.3.7
 
 ### Patch Changes
