@@ -1,5 +1,15 @@
 # @curie-agent/mcp
 
+## 0.3.7
+
+### Patch Changes
+
+- Patch release 0.3.7.
+
+- Updated dependencies []:
+  - @curie-agent/core@0.3.7
+  - @curie-agent/tools@0.3.7
+
 ## 0.3.6
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @curie-agent/providers
 
+## 0.3.7
+
+### Patch Changes
+
+- Patch release 0.3.7.
+
 ## 0.3.6
 
 ### Patch Changes

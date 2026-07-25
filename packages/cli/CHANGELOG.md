@@ -1,5 +1,22 @@
 # @curie-agent/cli
 
+## 0.3.7
+
+### Patch Changes
+
+- Patch release 0.3.7.
+
+- Updated dependencies []:
+  - @curie-agent/core@0.3.7
+  - @curie-agent/daemon@0.3.7
+  - @curie-agent/mcp@0.3.7
+  - @curie-agent/protocol@0.3.7
+  - @curie-agent/providers@0.3.7
+  - @curie-agent/render@0.3.7
+  - @curie-agent/tools@0.3.7
+  - @curie-agent/tui@0.3.7
+  - @curie-agent/wiki@0.3.7
+
 ## 0.3.6
 
 ### Patch Changes
