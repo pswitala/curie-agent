@@ -26,6 +26,22 @@
     --wood: #3d2e1e;
     --wood-light: #5c4530;
     --accent-glow: rgba(212, 165, 74, 0.15);
+
+    /* Chart series palette (dark) — validated against every dark theme's --s1
+       surface with the dataviz skill's validate_palette.js. Only [data-theme="white"]
+       overrides these; the other 8 dark themes share this set via :root. */
+    --chart-1: #3987e5;
+    --chart-2: #d95926;
+    --chart-3: #199e70;
+    --chart-4: #c98500;
+    --chart-5: #d55181;
+    --chart-6: #008300;
+    --chart-7: #9085e9;
+    --chart-8: #e66767;
+    --chart-grid: #2c2c2a;
+    --chart-axis: #383835;
+    --chart-ink: #ffffff;
+    --chart-ink-muted: #898781;
   }
 
   [data-theme="curie"] {
@@ -218,6 +234,21 @@
     --wood: #e0e0e0;
     --wood-light: #d4d4d4;
     --accent-glow: rgba(202, 138, 4, 0.15);
+
+    /* Chart series palette (light) — the only light theme; validated against
+       this theme's --s1 surface with the dataviz skill's validate_palette.js. */
+    --chart-1: #2a78d6;
+    --chart-2: #eb6834;
+    --chart-3: #1baf7a;
+    --chart-4: #eda100;
+    --chart-5: #e87ba4;
+    --chart-6: #008300;
+    --chart-7: #4a3aa7;
+    --chart-8: #e34948;
+    --chart-grid: #e1e0d9;
+    --chart-axis: #c3c2b7;
+    --chart-ink: #0b0b0b;
+    --chart-ink-muted: #52514e;
   }
 
   [data-theme="grey"] {

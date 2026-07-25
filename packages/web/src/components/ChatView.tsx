@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { marked } from 'marked';
 import { useApi } from '../lib/api-context.js';
 import ChatInput from './ChatInput.js';
+import ChartBlock from './charts/ChartBlock.js';
 import type { JsonRpcClient } from '../lib/jsonrpc-client.js';
 import type { WsEvent } from '../lib/ws-client.js';
 
@@ -231,6 +232,11 @@ function formatToolArgs(name: string, input: Record<string, unknown>): string {
   return Object.entries(input)
     .map(([k, v]) => `${k}: ${String(v).slice(0, 60)}`)
     .join(', ');
+}
+
+function findToolError(events: WsEvent[], toolCallId: string): string | undefined {
+  const result = events.find((e) => e.type === 'tool-result' && (e as any).toolCallId === toolCallId) as any;
+  return result?.error;
 }
 
 function escapeHtml(text: string): string {
@@ -501,6 +507,7 @@ type MessageEntry =
   | { type: 'approval-request'; toolCallId: string; name: string; input: Record<string, unknown>; decision: string; mode?: string; time: string }
   | { type: 'reminder-fired'; message: string; taskId: string; time: string }
   | { type: 'error'; content: string; time: string }
+  | { type: 'chart'; spec: unknown; toolCallId: string; time: string }
   | AgentActionEntry;
 
 interface AgentActionEntry {
@@ -533,6 +540,14 @@ function eventToMessage(event: WsEvent): MessageEntry | null {
     case 'tool-call': {
       const name = (event as any).name || 'tool';
       const input = (event as any).input || {};
+      if (name === 'Chart') {
+        return {
+          type: 'chart',
+          spec: input,
+          toolCallId: (event as any).toolCallId || '',
+          time: formatTime(event.timestamp),
+        };
+      }
       const args = formatToolArgs(name, input);
       return {
         type: 'tool-group',
@@ -544,6 +559,10 @@ function eventToMessage(event: WsEvent): MessageEntry | null {
     case 'approval-request': {
       const toolCallId = (event as any).toolCallId;
       const name = (event as any).name || 'tool';
+      // Chart is a pure tool (see PURE_TOOLS in permission.ts) — it fires this
+      // event like every tool call but is never actually approved/denied, so
+      // showing it would add a spurious block to the collapsed wrapper.
+      if (name === 'Chart') return null;
       const input = (event as any).input || {};
       const decision = (event as any).decision;
       const mode = (event as any).mode;
@@ -651,6 +670,7 @@ function buildMessages(events: WsEvent[]): MessageEntry[] {
     agentRun = [];
     assistantBuf = '';
     currentWrapper = null;
+    committedCount = 0;
   };
 
   for (const event of events) {
@@ -753,7 +773,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
   // unrelated clients to be pulled into sessions started by other devices.
 
   // Coalesce + wrap in a single pass via buildMessages
-  const groupedMessages = buildMessages(events);
+  const groupedMessages = useMemo(() => buildMessages(events), [events]);
 
   const shouldAutoScrollRef = useRef(true);
 
@@ -1265,6 +1285,10 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
 
              if (msg.type === 'reminder-fired') {
                return <ReminderBlock key={i} message={msg.message} time={msg.time} />;
+             }
+
+             if (msg.type === 'chart') {
+               return <ChartBlock key={i} spec={msg.spec} error={findToolError(events, msg.toolCallId)} />;
              }
 
              if (msg.type === 'error') {
