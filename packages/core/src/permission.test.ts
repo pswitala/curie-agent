@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { PermissionEngine } from './permission.js';
+import { PermissionEngine, PURE_TOOLS } from './permission.js';
+
+describe('PURE_TOOLS export', () => {
+  it('is exported for cross-package reuse (e.g. daemon tool-call counting)', () => {
+    expect(PURE_TOOLS.has('Chart')).toBe(true);
+  });
+});
 
 describe('PermissionEngine — PURE_TOOLS (Chart)', () => {
   it('allows Chart in auto mode without the unconditional ask', () => {

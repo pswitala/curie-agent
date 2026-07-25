@@ -1,8 +1,11 @@
 /**
  * Chart tool — lets the model draw an inline chart in the web UI chat pane.
- * The web client reads the spec straight off this tool's `tool-call` event
- * (see ChatView.tsx); `execute` only validates and acks, it never echoes the
- * spec back (that would duplicate the whole dataset into message history).
+ * `execute`'s `output` (replayed into message history every turn) stays a
+ * terse ack — it never echoes the spec back, that would duplicate the whole
+ * dataset into message history. The fully coerced spec is returned separately
+ * as `clientOutput`, which only reaches the `tool-result` event (see
+ * ChatView.tsx, which reads the chart spec from there, not from the model's
+ * raw pre-coercion `tool-call` input).
  */
 
 import { z } from 'zod';
@@ -213,7 +216,10 @@ export const chartTool = createTool(
       }
     }
 
-    return { output: { rendered: type, series: series.length, points: totalPoints } };
+    return {
+      output: { rendered: type, series: series.length, points: totalPoints },
+      clientOutput: input,
+    };
   },
   undefined,
   { aliases: { data: 'series', values: 'series' } },

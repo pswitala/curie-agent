@@ -2,7 +2,7 @@ import os, { homedir } from 'node:os';
 import path, { join, isAbsolute, resolve as pathResolve } from 'node:path';
 import { readFileSync, existsSync, readdirSync, statSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { Method } from '@curie-agent/protocol';
-import { TurnLoop, parseReminderTime, listSnapshots, revertTo, createIdentityFilesAuto, SubagentExecutor, isPathAllowed, parseAllowlist, createSnapshot, type SessionInfo } from '@curie-agent/core';
+import { TurnLoop, parseReminderTime, listSnapshots, revertTo, createIdentityFilesAuto, SubagentExecutor, isPathAllowed, parseAllowlist, createSnapshot, PURE_TOOLS, type SessionInfo } from '@curie-agent/core';
 import { EventBus } from '@curie-agent/core';
 import type { SessionStore, SettingsManager, Event, ProviderStream, Tool, CurieSettings } from '@curie-agent/core';
 import { listSkills, discoverAllSkills } from '@curie-agent/tools';
@@ -69,7 +69,7 @@ export class JsonRpcHandler {
         case Method.SESSION_STATS: {
           const sessions = this.sessionStore.list();
           const todayStr = new Date().toDateString();
-          const todaySessions = sessions.filter(s => new Date(s.createdAt).toDateString() === todayStr);
+          const todaySessions = sessions.filter(s => new Date(s.updatedAt).toDateString() === todayStr);
 
           const hourly = Array.from({ length: 24 }, (_, i) => ({
             hour: i,
@@ -188,11 +188,14 @@ export class JsonRpcHandler {
                   const eventCost = estimateCost(s.model, inT, outT, customCost);
                   totalCost += eventCost;
                 } else if (e.type === 'tool-call') {
-                  bucket.toolCalls += 1;
-                  totalToolCalls += 1;
+                  const toolName = 'name' in e && typeof e.name === 'string' ? e.name : undefined;
+                  if (!toolName || !PURE_TOOLS.has(toolName)) {
+                    bucket.toolCalls += 1;
+                    totalToolCalls += 1;
 
-                  if ('name' in e && typeof e.name === 'string') {
-                    toolCallsCount[e.name] = (toolCallsCount[e.name] || 0) + 1;
+                    if (toolName) {
+                      toolCallsCount[toolName] = (toolCallsCount[toolName] || 0) + 1;
+                    }
                   }
                 } else if (e.type === 'user-prompt') {
                   bucket.messages += 1;

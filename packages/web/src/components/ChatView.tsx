@@ -234,9 +234,10 @@ function formatToolArgs(name: string, input: Record<string, unknown>): string {
     .join(', ');
 }
 
-function findToolError(events: WsEvent[], toolCallId: string): string | undefined {
+export function findToolResult(events: WsEvent[], toolCallId: string): { output?: unknown; error?: string } | undefined {
   const result = events.find((e) => e.type === 'tool-result' && (e as any).toolCallId === toolCallId) as any;
-  return result?.error;
+  if (!result) return undefined;
+  return { output: result.output, error: result.error };
 }
 
 function escapeHtml(text: string): string {
@@ -507,7 +508,7 @@ type MessageEntry =
   | { type: 'approval-request'; toolCallId: string; name: string; input: Record<string, unknown>; decision: string; mode?: string; time: string }
   | { type: 'reminder-fired'; message: string; taskId: string; time: string }
   | { type: 'error'; content: string; time: string }
-  | { type: 'chart'; spec: unknown; toolCallId: string; time: string }
+  | { type: 'chart'; toolCallId: string; rawInput: unknown; time: string }
   | AgentActionEntry;
 
 interface AgentActionEntry {
@@ -518,7 +519,7 @@ interface AgentActionEntry {
   time: string;
 }
 
-function eventToMessage(event: WsEvent): MessageEntry | null {
+export function eventToMessage(event: WsEvent): MessageEntry | null {
   switch (event.type) {
     case 'user-prompt':
       return { type: 'user', content: (event as any).text || '', time: formatTime(event.timestamp) };
@@ -543,8 +544,8 @@ function eventToMessage(event: WsEvent): MessageEntry | null {
       if (name === 'Chart') {
         return {
           type: 'chart',
-          spec: input,
           toolCallId: (event as any).toolCallId || '',
+          rawInput: input,
           time: formatTime(event.timestamp),
         };
       }
@@ -1288,7 +1289,8 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
              }
 
              if (msg.type === 'chart') {
-               return <ChartBlock key={i} spec={msg.spec} error={findToolError(events, msg.toolCallId)} />;
+               const tr = findToolResult(events, msg.toolCallId);
+               return <ChartBlock key={i} spec={tr?.output} error={tr?.error} pending={!tr} rawInput={msg.rawInput} />;
              }
 
              if (msg.type === 'error') {

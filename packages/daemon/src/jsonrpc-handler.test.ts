@@ -109,5 +109,38 @@ describe('JsonRpcHandler', () => {
     expect((result as any).error).toBeDefined();
     expect((result as any).error.code).toBe(-32602);
   });
+
+  describe('session.stats', () => {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    it('includes a session resumed today even though it was created yesterday', async () => {
+      sessionStore.list.mockReturnValue([
+        { id: 'resumed', cwd: '/tmp', model: 'sonnet', provider: 'anthropic', createdAt: yesterday.getTime(), updatedAt: Date.now(), type: 'webui' },
+      ]);
+      sessionStore.loadEvents.mockReturnValue([
+        { type: 'tool-call', id: 'e1', toolCallId: 'c1', name: 'Read', input: {}, timestamp: Date.now() } as any,
+      ]);
+
+      const result = await handler.handle({ jsonrpc: '2.0', id: 10, method: Method.SESSION_STATS });
+      const stats = (result as any).result;
+      expect(stats.summary.totalSessionsToday).toBe(1);
+      expect(stats.summary.totalToolCalls).toBe(1);
+    });
+
+    it('excludes Chart (a PURE_TOOLS entry) from tool-call counts, matching the ChatView per-turn badge', async () => {
+      sessionStore.list.mockReturnValue([
+        { id: 's1', cwd: '/tmp', model: 'sonnet', provider: 'anthropic', createdAt: Date.now(), updatedAt: Date.now(), type: 'webui' },
+      ]);
+      sessionStore.loadEvents.mockReturnValue([
+        { type: 'tool-call', id: 'e1', toolCallId: 'c1', name: 'Chart', input: {}, timestamp: Date.now() } as any,
+        { type: 'tool-call', id: 'e2', toolCallId: 'c2', name: 'Read', input: {}, timestamp: Date.now() } as any,
+      ]);
+
+      const result = await handler.handle({ jsonrpc: '2.0', id: 11, method: Method.SESSION_STATS });
+      const stats = (result as any).result;
+      expect(stats.summary.totalToolCalls).toBe(1);
+      expect(stats.topTools.map((t: any) => t.name)).toEqual(['Read']);
+    });
+  });
 });
 

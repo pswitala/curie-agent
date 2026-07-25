@@ -2,7 +2,7 @@ export { EventBus } from './event-bus.js';
 export type { Event, EventType } from './event-bus.js';
 export { SessionStore, ulid } from './session-store.js';
 export type { SessionInfo, SessionFile } from './session-store.js';
-export { PermissionEngine } from './permission.js';
+export { PermissionEngine, PURE_TOOLS } from './permission.js';
 export type { ApprovalMode, PermissionRule, PermissionResult, PermissionDecision } from './permission.js';
 export { TurnLoop } from './turn-loop.js';
 export type { TurnLoopConfig, TurnLoopResult, ReasoningEffort, Message, AssistantBlock, ProviderStream, Tool, ProviderEvent } from './turn-loop.js';

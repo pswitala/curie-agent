@@ -234,4 +234,33 @@ describe('Chart tool', () => {
     expect(serialized).not.toContain('222222');
     expect(Object.keys(result.output as object).sort()).toEqual(['points', 'rendered', 'series']);
   });
+
+  it('returns the fully coerced spec as clientOutput, for the UI only', async () => {
+    const result = await chartTool.execute(
+      {
+        type: 'linechart',
+        title: 'Aliased for UI',
+        normalize: 'true',
+        data: [{ label: 'A', points: [{ label: 'a', value: '$1,234' }, { label: 'b', value: 2 }] }],
+      },
+      settings,
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.clientOutput).toEqual({
+      type: 'line',
+      title: 'Aliased for UI',
+      normalize: true,
+      series: [{ name: 'A', points: [{ x: 'a', y: 1234 }, { x: 'b', y: 2 }] }],
+    });
+  });
+
+  it('does not set clientOutput on an error branch', async () => {
+    const series = Array.from({ length: 4 }, (_, i) => ({
+      name: `S${i}`,
+      points: [{ x: 1, y: i }],
+    }));
+    const result = await chartTool.execute({ type: 'scatter', title: 'Too many series', series }, settings);
+    expect(result.error).toBeDefined();
+    expect(result.clientOutput).toBeUndefined();
+  });
 });

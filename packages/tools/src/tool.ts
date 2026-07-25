@@ -21,6 +21,10 @@ export interface Tool {
 export interface ToolResult {
   output: unknown;
   error?: string;
+  /** Optional richer payload for the tool-result *event* only (persisted to
+   *  events.jsonl / broadcast over WS) — never sent back to the model, so it
+   *  doesn't affect message-history cost. */
+  clientOutput?: unknown;
 }
 
 export interface ToolContext {

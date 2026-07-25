@@ -405,6 +405,50 @@ describe('unknown tool handling', () => {
   });
 });
 
+describe('tool-result clientOutput', () => {
+  it('emits clientOutput as the tool-result event output, while message history keeps output', async () => {
+    const store = createTestStore();
+
+    let streamCalls = 0;
+    const mockProvider: ProviderStream = {
+      name: 'test',
+      stream: () => ({
+        iterable: (async function* () {
+          if (streamCalls++ === 0) {
+            yield { type: 'tool-call', id: 'call_1', name: 'Chart', input: {} } as const;
+          }
+        })(),
+        cancel() {},
+      }),
+      check: async () => 'APPROVE',
+    };
+
+    const chartLikeTool: Tool = {
+      definition: { name: 'Chart', description: 'chart', inputSchema: { type: 'object', properties: {} } },
+      execute: async () => ({ output: 'terse', clientOutput: { rich: true } }),
+    };
+
+    const loop = new TurnLoop(
+      {
+        provider: mockProvider,
+        model: 'test-model',
+        tools: [chartLikeTool],
+        cwd: tmpDir,
+        settings: { providers: {}, current_provider: 'test' },
+      },
+      store,
+    );
+
+    const result = await loop.run('draw a chart');
+    const toolResult = result.events.find((e) => e.type === 'tool-result') as { output?: unknown } | undefined;
+    expect(toolResult?.output).toEqual({ rich: true });
+
+    const messages = loop.getMessages();
+    const toolMessage = messages.find((m: any) => m.role === 'tool');
+    expect((toolMessage as any)?.content).toBe('terse');
+  });
+});
+
 describe('TurnLoop.getMessages', () => {
   it('returns empty array for new loop', () => {
     const store = createTestStore();

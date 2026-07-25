@@ -8,7 +8,7 @@ const READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch'
 // Tools with no side effects, no I/O, and no data egress — nothing to approve,
 // in any mode. Separate from READ_ONLY_TOOLS, whose members touch the
 // filesystem or network and are legitimately harm-checkable in auto mode.
-const PURE_TOOLS = new Set(['Chart']);
+export const PURE_TOOLS = new Set(['Chart']);
 export type PermissionDecision = 'allow' | 'deny' | 'ask';
 
 export interface PermissionRule {

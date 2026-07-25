@@ -31,7 +31,7 @@ export interface ProviderStream {
 
 export interface Tool {
   definition: { name: string; description: string; inputSchema: unknown };
-  execute: (input: Record<string, unknown>, settings: any, cwd?: string, sessionId?: string) => Promise<{ output: unknown; error?: string }>;
+  execute: (input: Record<string, unknown>, settings: any, cwd?: string, sessionId?: string) => Promise<{ output: unknown; error?: string; clientOutput?: unknown }>;
 }
 
 export type ProviderEvent =
@@ -658,7 +658,7 @@ export class TurnLoop {
 
           try {
             const result = await tool.execute(tc.input, this.config.settings, this.config.cwd, this.config.sessionId);
-            emit({ type: 'tool-result', id: session.id, toolCallId: tc.id, output: result.output, error: result.error, timestamp: Date.now() });
+            emit({ type: 'tool-result', id: session.id, toolCallId: tc.id, output: result.clientOutput ?? result.output, error: result.error, timestamp: Date.now() });
             const outputStr = result.error ? `Error: ${result.error}` : (typeof result.output === 'string' ? result.output : JSON.stringify(result.output));
             this.messages.push({ role: 'tool', toolUseId: tc.id, toolName: tc.name, content: outputStr });
           } catch (err) {
