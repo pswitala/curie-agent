@@ -1,5 +1,26 @@
 # @curie-agent/protocol
 
+## 0.3.9
+
+### Patch Changes
+
+- Shrink the LLM harm-check prompt: send a tool-input digest instead of the raw payload.
+
+  `TurnLoop.evaluateHarm()` inlined `JSON.stringify(input)` into every harm-check request, so a
+  `Write` shipped the entire file body, `Edit` shipped both patch strings, and `Bash` shipped the
+  whole script to the provider on every tool call in `auto` mode.
+
+  New `summarizeToolInput()` (`@curie-agent/core/safety/tool-digest.js`) renders the tool call
+  compactly instead: high-signal fields (`command`, `file_path`, `path`, `url`, `pattern`, `glob`,
+  `prompt`) are preserved, bulk fields are reduced to a head sample plus a `…[N chars total]`
+  marker, and the whole digest is capped. Large `Write`/`Edit` harm-checks drop by roughly 50x in
+  input tokens.
+
+  Safety is unchanged: the path guard still runs inside each tool's `execute()` and the command
+  guard still runs in `PermissionEngine`, both against the full, untruncated input. The harm-check
+  system prompt now tells the evaluator that long values are abbreviated so it does not fail closed
+  on missing detail.
+
 ## 0.3.8
 
 ### Patch Changes
