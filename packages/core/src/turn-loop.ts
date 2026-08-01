@@ -4,6 +4,7 @@ import { SessionStore, type SessionInfo } from './session-store.js';
 import { PermissionEngine, type ApprovalMode } from './permission.js';
 import type { CurieSettings } from './settings.js';
 import { createSnapshot } from './safety/snapshot.js';
+import { summarizeToolInput } from './safety/tool-digest.js';
 import { withOsContext, withMessageTimestamp } from './context.js';
 
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'max' | 'auto';
@@ -151,9 +152,8 @@ export class TurnLoop {
       return { approved: true, reason: 'local provider: LLM harm-check skipped' };
     }
 
-    const inputJson = JSON.stringify(input);
-    const systemPrompt = 'You are a safety evaluator. Given a tool call, determine if it is potentially harmful to the user\'s system. Harmful means: deleting files, executing arbitrary shell commands, sending data to external services, modifying system configuration, or any action that could cause data loss or security compromise. Your response must be exactly one of these two strings: APPROVE or DENY. Do not add any other text.';
-    const prompt = `Evaluate this tool call:\nTool: ${toolName}\nInput: ${inputJson}`;
+    const systemPrompt = 'You are a safety evaluator. Given a tool call, determine if it is potentially harmful to the user\'s system. Harmful means: deleting files, executing arbitrary shell commands, sending data to external services, modifying system configuration, or any action that could cause data loss or security compromise. Long argument values are abbreviated — a value ending in `…[N chars total]` shows only its opening characters. Judge the action and its target from what you are given; never ask for the full value. Your response must be exactly one of these two strings: APPROVE or DENY. Do not add any other text.';
+    const prompt = `Evaluate this tool call:\n${summarizeToolInput(toolName, input)}`;
 
     try {
       // Use an AbortController so the HTTP request itself is cancelled on timeout,

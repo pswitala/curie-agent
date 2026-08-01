@@ -38,6 +38,7 @@ export { withOsContext, withMessageTimestamp, formatDate } from './context.js';
 export { buildBaseSystemPrompt } from './identity-context.js';
 export { listSnapshots, revertTo, createSnapshot } from './safety/snapshot.js';
 export { isPathAllowed, resolveSafePath, parseAllowlist, curieAgentDir } from './safety/path-guard.js';
+export { summarizeToolInput } from './safety/tool-digest.js';
 export { createIdentityFiles, createIdentityFilesFromTemplates, createIdentityFilesAuto } from './identity-files.js';
 export type { InitData, ProviderName } from './identity-files.js';
 export { copyInitSkills, interpolateTemplate, copyTemplateFile, copyDirectoryRecursive, getCurieDir, resolveTemplatesDir } from './template-utils.js';

@@ -464,3 +464,53 @@ describe('TurnLoop.getMessages', () => {
     expect(loop.getMessages()).toEqual([]);
   });
 });
+
+describe('TurnLoop.evaluateHarm — prompt size', () => {
+  function loopWithCapturingProvider(store: SessionStore) {
+    const seen: Array<{ prompt: string; system?: string }> = [];
+    const mockProvider: ProviderStream = {
+      name: 'test',
+      stream: () => ({ iterable: (async function* () {})(), cancel() {} }),
+      check: async (prompt, args) => {
+        seen.push({ prompt, system: args?.system });
+        return 'APPROVE';
+      },
+    };
+    const loop = new TurnLoop(
+      { provider: mockProvider, model: 'test-model', tools: [], cwd: '/tmp', settings: {} },
+      store,
+    );
+    return { loop, seen };
+  }
+
+  it('does not send a large Write body to the harm-check', async () => {
+    const { loop, seen } = loopWithCapturingProvider(createTestStore());
+    const content = 'q'.repeat(50_000);
+
+    const result = await (loop as any).evaluateHarm('Write', { file_path: '/app/main.ts', content });
+
+    expect(result.approved).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.prompt).not.toContain(content);
+    expect(seen[0]!.prompt).toContain('/app/main.ts');
+    expect(seen[0]!.prompt).toContain('…[50000 chars total]');
+    expect(seen[0]!.prompt.length).toBeLessThan(2000);
+  });
+
+  it('still sends the full Bash command, the primary safety signal', async () => {
+    const { loop, seen } = loopWithCapturingProvider(createTestStore());
+
+    await (loop as any).evaluateHarm('Bash', { command: 'rm -rf / --no-preserve-root' });
+
+    expect(seen[0]!.prompt).toContain('rm -rf / --no-preserve-root');
+  });
+
+  it('tells the evaluator that long values are abbreviated', async () => {
+    const { loop, seen } = loopWithCapturingProvider(createTestStore());
+
+    await (loop as any).evaluateHarm('Read', { file_path: '/a.ts' });
+
+    expect(seen[0]!.system).toContain('chars total');
+    expect(seen[0]!.system).toContain('never ask for the full value');
+  });
+});
