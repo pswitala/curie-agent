@@ -11,10 +11,12 @@ export interface SpawnAgentToolConfig {
   cwd: string;
   settings: CurieSettings;
   model: string;
+  /** Tools handed to the subagent. The `tools` input narrows this via allowedTools. */
+  tools: Tool[];
 }
 
 export function createSpawnAgentTool(config: SpawnAgentToolConfig): Tool {
-  const { subagentExecutor, provider, cwd, settings, model } = config;
+  const { subagentExecutor, provider, cwd, settings, model, tools } = config;
 
   return {
     definition: {
@@ -63,7 +65,7 @@ export function createSpawnAgentTool(config: SpawnAgentToolConfig): Tool {
 
       const mode = input.mode as ApprovalMode | undefined;
       const effort = input.effort as ReasoningEffort | undefined;
-      const tools = input.tools as string[] | undefined;
+      const allowedToolNames = input.tools as string[] | undefined;
       const modelOverride = input.model as string | undefined;
       const providerName = input.provider as string | undefined;
 
@@ -76,17 +78,14 @@ export function createSpawnAgentTool(config: SpawnAgentToolConfig): Tool {
         const handle = await subagentExecutor.spawn({
           provider,
           model: modelOverride || model,
-          tools: [{
-            definition: { name: 'noop', description: 'Placeholder', inputSchema: '{}' },
-            execute: async () => ({ output: null }),
-          }],
+          tools,
           cwd,
-          settings,
+          settings: spawnSettings,
           prompt,
           providerName: providerName || undefined,
           mode,
           effort,
-          allowedTools: tools,
+          allowedTools: allowedToolNames,
           type: 'subagent',
         });
 

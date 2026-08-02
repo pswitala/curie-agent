@@ -14,6 +14,7 @@ export { createSpawnAgentTool } from './spawn-agent.js';
 export { todoTool } from './todo.js';
 export { wikiTool } from './wiki.js';
 export { chartTool } from './chart.js';
+export { sendMessageTool } from './send-message.js';
 
 import { readTool } from './read.js';
 import { editTool } from './edit.js';
@@ -29,5 +30,6 @@ import { skillTool } from './skill.js';
 import { todoTool } from './todo.js';
 import { wikiTool } from './wiki.js';
 import { chartTool } from './chart.js';
+import { sendMessageTool } from './send-message.js';
 
-export const allTools = [readTool, editTool, writeTool, globTool, grepTool, bashTool, reminderTool, scheduledTaskTool, webSearchTool, webFetchTool, skillTool, todoTool, wikiTool, chartTool];
+export const allTools = [readTool, editTool, writeTool, globTool, grepTool, bashTool, reminderTool, scheduledTaskTool, webSearchTool, webFetchTool, skillTool, todoTool, wikiTool, chartTool, sendMessageTool];

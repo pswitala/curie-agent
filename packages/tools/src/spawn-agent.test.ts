@@ -1,0 +1,87 @@
+import { describe, it, expect, vi } from 'vitest';
+import { createSpawnAgentTool } from './spawn-agent';
+import { DEFAULT_SETTINGS } from '@curie-agent/core';
+import type { Tool } from '@curie-agent/core';
+
+function fakeTool(name: string): Tool {
+  return {
+    definition: { name, description: `fake ${name}`, inputSchema: { type: 'object', properties: {} } },
+    execute: async () => ({ output: null }),
+  } as unknown as Tool;
+}
+
+function setup() {
+  const spawn = vi.fn().mockResolvedValue({
+    agentId: 'a1',
+    prompt: 'do the thing',
+    status: 'running',
+    sessionId: 's1',
+  });
+  const tools = [fakeTool('Read'), fakeTool('SendMessage')];
+  const tool = createSpawnAgentTool({
+    subagentExecutor: { spawn } as never,
+    provider: { name: 'anthropic', stream: vi.fn() } as never,
+    cwd: '/tmp',
+    settings: DEFAULT_SETTINGS,
+    model: 'claude-sonnet-4-6',
+    tools,
+  });
+  return { tool, spawn, tools };
+}
+
+describe('createSpawnAgentTool', () => {
+  it('forwards the parent tools to the subagent', async () => {
+    const { tool, spawn, tools } = setup();
+
+    await tool.execute({ prompt: 'do the thing' }, DEFAULT_SETTINGS);
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const arg = spawn.mock.calls[0]?.[0] as { tools: Tool[]; allowedTools?: string[] };
+    expect(arg.tools).toBe(tools);
+    expect(arg.tools.map((t) => t.definition.name)).toEqual(['Read', 'SendMessage']);
+    expect(arg.allowedTools).toBeUndefined();
+  });
+
+  it('passes the input tool names as allowedTools without clobbering tools', async () => {
+    const { tool, spawn, tools } = setup();
+
+    await tool.execute({ prompt: 'p', tools: ['Read'] }, DEFAULT_SETTINGS);
+
+    const arg = spawn.mock.calls[0]?.[0] as { tools: Tool[]; allowedTools?: string[] };
+    expect(arg.allowedTools).toEqual(['Read']);
+    expect(arg.tools).toBe(tools);
+  });
+
+  it('applies the provider override to the spawned settings', async () => {
+    const { tool, spawn } = setup();
+
+    await tool.execute({ prompt: 'p', provider: 'openai' }, DEFAULT_SETTINGS);
+
+    const arg = spawn.mock.calls[0]?.[0] as {
+      settings: { current_provider: string };
+      providerName?: string;
+    };
+    expect(arg.settings.current_provider).toBe('openai');
+    expect(arg.providerName).toBe('openai');
+  });
+
+  it('inherits parent settings when no provider override is given', async () => {
+    const { tool, spawn } = setup();
+
+    await tool.execute({ prompt: 'p' }, DEFAULT_SETTINGS);
+
+    const arg = spawn.mock.calls[0]?.[0] as { settings: unknown; providerName?: string };
+    expect(arg.settings).toBe(DEFAULT_SETTINGS);
+    expect(arg.providerName).toBeUndefined();
+  });
+
+  it('errors without a prompt', async () => {
+    const { tool, spawn } = setup();
+
+    const result = await tool.execute({}, DEFAULT_SETTINGS);
+
+    expect(result.output).toBeNull();
+    expect(result.error).toContain('prompt');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+});

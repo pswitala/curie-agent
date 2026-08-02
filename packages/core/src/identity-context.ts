@@ -9,13 +9,17 @@ import { isPathAllowed } from './safety/path-guard.js';
  * list, to preserve today's output for existing installs; every other file is
  * wrapped in an `=== <relative-path> ===` header. List order is preserved so
  * the assembled prompt stays byte-identical across turns for prompt caching.
+ *
+ * `channelsSection` is settings-dependent, so it is appended *last* — a change
+ * to it then invalidates the smallest possible cache prefix.
  */
 export function buildBaseSystemPrompt(opts: {
   curieDir: string;
   files: string[];
   skillsSection: string;
+  channelsSection?: string;
 }): string | undefined {
-  const { curieDir, files, skillsSection } = opts;
+  const { curieDir, files, skillsSection, channelsSection } = opts;
   const sections: string[] = [];
 
   files.forEach((relPath, index) => {
@@ -32,6 +36,7 @@ export function buildBaseSystemPrompt(opts: {
   });
 
   if (skillsSection) sections.push(skillsSection);
+  if (channelsSection) sections.push(channelsSection);
 
   return sections.length > 0 ? sections.join('\n\n') : undefined;
 }

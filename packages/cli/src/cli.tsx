@@ -386,10 +386,19 @@ async function handleDaemonCommand(subcommand: string): Promise<{ keepRunning: b
       const curieDir = join(homedir(), '.curie-agent');
       const skills = discoverAllSkills(process.cwd());
       const skillsSection = formatSkillsForPrompt(skills);
+      // Only advertise the channel when it is actually configured, so the model
+      // is never told about a capability that will error.
+      const promptChannels = settingsManager.get().channels;
+      const telegramReady = Boolean(
+        promptChannels?.bot_token && (promptChannels.chat_id || promptChannels.user_id),
+      );
       const systemPrompt = buildBaseSystemPrompt({
         curieDir,
         files: settingsManager.get().system_prompt_files,
         skillsSection,
+        channelsSection: telegramReady
+          ? '=== CHANNELS ===\nTelegram is connected. Use the SendMessage tool to reach the user out-of-band; never shell out to send messages.'
+          : '',
       });
 
       // Read web_ip from settings for daemon binding
