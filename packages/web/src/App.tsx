@@ -121,6 +121,12 @@ function AppContent() {
     setActiveSessionId(sessionId);
   }, []);
 
+  /** Open an arbitrary session (e.g. a subagent's) in the Assistant view. */
+  const handleOpenSessionInChat = useCallback((sessionId: string) => {
+    setActiveSessionId(sessionId);
+    setActiveView('assistant');
+  }, []);
+
   const handleCreateSession = useCallback((sessionId: string) => {
     setActiveSessionId(sessionId);
     refetch();
@@ -309,7 +315,7 @@ function AppContent() {
             {activeView === 'channels' && <ChannelsView rpc={rpc} className="absolute inset-0" />}
             {activeView === 'stats' && <StatsView rpc={rpc} className="absolute inset-0" />}
             {activeView === 'projects' && <ProjectsView rpc={rpc} className="absolute inset-0" />}
-            {activeView === 'agents' && <SubagentsView rpc={rpc} className="absolute inset-0" />}
+            {activeView === 'agents' && <SubagentsView rpc={rpc} onOpenSession={handleOpenSessionInChat} className="absolute inset-0" />}
             {activeView === 'kanban' && <KanbanView rpc={rpc} className="absolute inset-0" />}
             {activeView === 'wiki' && <WikiView rpc={rpc} className="absolute inset-0" />}
             {activeView === 'settings' && <div className="absolute inset-0 flex items-center justify-center text-muted text-xs">Settings view — coming soon</div>}

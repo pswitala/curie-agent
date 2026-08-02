@@ -1,15 +1,19 @@
 import { useState, useCallback } from 'react';
 import { useApi } from '../lib/api-context.js';
 import { useSubagents } from '../hooks/useSubagents.js';
+import { formatDuration, formatTokenCount } from '../lib/format.js';
+import AgentEventsFeed from './AgentEventsFeed.js';
 import type { JsonRpcClient } from '../lib/jsonrpc-client.js';
 
 interface Props {
   rpc: JsonRpcClient | null;
   sessionId?: string;
   className?: string;
+  /** Open a subagent's own session in the Assistant view. */
+  onOpenSession?: (sessionId: string) => void;
 }
 
-export default function SubagentsView({ rpc, sessionId, className }: Props) {
+export default function SubagentsView({ rpc, sessionId, className, onOpenSession }: Props) {
   const { ws } = useApi();
   const { agents, running, completed, failed, spawn, cancel, send } = useSubagents();
   const [spawnOpen, setSpawnOpen] = useState(false);
@@ -29,8 +33,13 @@ export default function SubagentsView({ rpc, sessionId, className }: Props) {
   const [schedError, setSchedError] = useState<string>('');
   const [messageAgentId, setMessageAgentId] = useState('');
   const [messageText, setMessageText] = useState('');
-  const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [historyPage, setHistoryPage] = useState(0);
+
+  // A subagent runs in its own persisted session; open it in the Assistant view.
+  const handleOpen = useCallback((agentSessionId: string) => {
+    if (!agentSessionId) return;
+    onOpenSession?.(agentSessionId);
+  }, [onOpenSession]);
 
   const handleSpawn = useCallback(async () => {
     if (!spawnPrompt.trim() || !rpc) return;
@@ -90,12 +99,6 @@ export default function SubagentsView({ rpc, sessionId, className }: Props) {
   const allAgents = Array.from(agents.values()).sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
   const historyAgents = allAgents.filter(a => a.status === 'done' || a.status === 'error' || a.status === 'cancelled');
   const historySlice = historyAgents.slice(historyPage * 10, (historyPage + 1) * 10);
-
-  const formatDuration = (ms: number) => {
-    const secs = Math.floor(ms / 1000);
-    if (secs < 60) return `${secs}s`;
-    return `${Math.floor(secs / 60)}m${secs % 60}s`;
-  };
 
   return (
     <div className={`flex-1 overflow-y-auto p-4 md:p-7 scrollbar-thin ${className || ''}`}>
@@ -268,7 +271,7 @@ export default function SubagentsView({ rpc, sessionId, className }: Props) {
                 key={agent.agentId}
                 agent={agent}
                 onCancel={() => cancel(agent.agentId)}
-                onExpand={() => setExpandedAgent(expandedAgent === agent.agentId ? null : agent.agentId)}
+                onOpen={() => { handleOpen(agent.sessionId); }}
                />
             ))}
           </div>
@@ -298,7 +301,12 @@ export default function SubagentsView({ rpc, sessionId, className }: Props) {
                     const duration = agent.doneAt ? formatDuration(agent.doneAt - agent.startedAt) : '-';
                     const tokenTotal = agent.inputTokens + agent.outputTokens;
                     return (
-                      <tr key={agent.agentId} className="hover:bg-s2/30 transition-colors cursor-pointer border-b border-b1/40" onClick={() => setExpandedAgent(expandedAgent === agent.agentId ? null : agent.agentId)}>
+                      <tr
+                        key={agent.agentId}
+                        className="hover:bg-s2/30 transition-colors cursor-pointer border-b border-b1/40"
+                        title="Open session in Assistant"
+                        onClick={() => { handleOpen(agent.sessionId); }}
+                      >
                         <td className="px-4 py-2.5">
                           <span className={`text-[10px] font-mono px-2 py-0.5 rounded-[4px] ${statusColor === 'text-green' ? 'bg-green/10' : statusColor === 'text-red' ? 'bg-red/10' : 'bg-muted/10'}`}>
                             {agent.status}
@@ -335,26 +343,6 @@ export default function SubagentsView({ rpc, sessionId, className }: Props) {
               </div>
             )}
           </div>
-
-          {/* Expanded agent detail */}
-          {expandedAgent && (() => {
-            const agent = agents.get(expandedAgent);
-            if (!agent) return null;
-            return (
-              <div className="bg-s1 border border-b1 rounded-[10px] p-4 mt-2">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-mono text-muted">Agent: {agent.agentId.slice(0, 12)}...</span>
-                  <span className="text-[10px] text-muted">{new Date(agent.startedAt).toLocaleString()}</span>
-                </div>
-                <pre className="text-[12px] text-fg bg-s2 rounded-[8px] p-3 overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap font-mono">{agent.text || '(no output)'}</pre>
-                {agent.errors.length > 0 && (
-                  <div className="mt-2 text-[11px] text-red bg-red/5 rounded-[6px] p-2">
-                    {agent.errors.map((e, i) => <div key={i}>Error: {e}</div>)}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
         </div>
       )}
 
@@ -392,7 +380,7 @@ export default function SubagentsView({ rpc, sessionId, className }: Props) {
       )}
 
       {/* Live Events Feed */}
-      <EventsFeed ws={ws} />
+      <AgentEventsFeed ws={ws} />
     </div>
   );
 }
@@ -406,17 +394,17 @@ function KpiCard({ label, value, color }: { label: string; value: string; color:
   );
 }
 
-function AgentCard({ agent, onCancel, onExpand }: {
+function AgentCard({ agent, onCancel, onOpen }: {
   agent: { agentId: string; prompt: string; text: string; provider: string; toolCalls: number; inputTokens: number; outputTokens: number; startedAt: number; status: string };
   onCancel: () => void;
-  onExpand: () => void;
+  onOpen: () => void;
 }) {
   const elapsed = Date.now() - agent.startedAt;
   const tokenTotal = agent.inputTokens + agent.outputTokens;
   const statusColor = agent.status === 'running' ? 'text-yellow' : 'text-green';
 
   return (
-    <div className="bg-s1 border border-b1 rounded-[10px] p-4 hover:border-b2 transition-colors cursor-pointer select-none" onClick={onExpand}>
+    <div className="bg-s1 border border-b1 rounded-[10px] p-4 hover:border-b2 transition-colors cursor-pointer select-none" title="Open session in Assistant" onClick={onOpen}>
       <div className="flex items-center gap-2 mb-2">
         <div className={`w-[6px] h-[6px] rounded-full shrink-0 ${agent.status === 'running' ? 'bg-yellow animate-pulse' : 'bg-green'}`} />
         <span className="text-[12.5px] font-medium text-fg truncate flex-1">{agent.prompt}</span>
@@ -441,57 +429,3 @@ function AgentCard({ agent, onCancel, onExpand }: {
   );
 }
 
-function formatDuration(ms: number): string {
-  const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  return `${Math.floor(secs / 60)}m${secs % 60}s`;
-}
-
-function formatTokenCount(n: number): string {
-  if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
-}
-
-function EventsFeed({ ws }: { ws: any }) {
-  const [events, setEvents] = useState<any[]>([]);
-
-  if (!ws) return null;
-
-  // Subscribe to agent events
-  const eventTypes = ['agent-start', 'agent-text-delta', 'agent-done', 'agent-error', 'agent-tool-call'];
-  eventTypes.forEach(type => {
-    ws.on(type, (event: any) => {
-      setEvents(prev => [{ ...event, _type: type }, ...prev].slice(0, 30));
-    });
-  });
-
-  if (events.length === 0) return null;
-
-  return (
-    <div>
-      <div className="h-px bg-b1 my-5" />
-      <div className="text-[11.5px] font-medium text-muted mb-2.5">Live Agent Events</div>
-      {events.slice(0, 15).map((event, i) => (
-        <div key={i} className="flex items-center gap-3 px-3 py-1.5 rounded-lg mb-0.5 hover:bg-s2">
-          <div className={`w-[6px] h-[6px] rounded-full shrink-0 ${
-            event._type === 'agent-start' ? 'bg-yellow' :
-            event._type === 'agent-done' ? 'bg-green' :
-            event._type === 'agent-error' ? 'bg-red' :
-            event._type === 'agent-tool-call' ? 'bg-fg' :
-            'bg-muted2'
-          }`} />
-          <div className="flex-1 min-w-0">
-            <div className="text-[12px] text-text font-mono">{event._type}</div>
-            <div className="text-xs text-muted truncate">
-              {event.prompt || event.message || ''}
-            </div>
-          </div>
-          <span className="text-[10px] text-muted font-mono">
-            {new Date(event.timestamp).toLocaleTimeString()}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}

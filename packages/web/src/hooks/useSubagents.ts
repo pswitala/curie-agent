@@ -24,14 +24,29 @@ export function useSubagents() {
   useEffect(() => {
     if (!rpc) return;
     rpc.subagentList()
-      .then((data: any) => {
-        if (Array.isArray(data)) {
-          const map = new Map<string, SubagentState>();
-          for (const a of data) {
-            map.set(a.agentId, a as SubagentState);
-          }
-          setAgents(map);
+      .then((data: unknown) => {
+        if (!Array.isArray(data)) return;
+        const map = new Map<string, SubagentState>();
+        for (const row of data as Partial<SubagentState>[]) {
+          if (!row.agentId) continue;
+          // `subagent.list` omits `errors` entirely and may omit counters — default
+          // them so consumers can rely on the declared SubagentState shape.
+          map.set(row.agentId, {
+            ...row,
+            agentId: row.agentId,
+            sessionId: row.sessionId ?? '',
+            prompt: row.prompt ?? '',
+            provider: row.provider ?? 'unknown',
+            status: row.status ?? 'done',
+            text: row.text ?? '',
+            toolCalls: row.toolCalls ?? 0,
+            errors: row.errors ?? [],
+            inputTokens: row.inputTokens ?? 0,
+            outputTokens: row.outputTokens ?? 0,
+            startedAt: row.startedAt ?? 0,
+          });
         }
+        setAgents(map);
       })
       .catch(() => {});
   }, [rpc]);

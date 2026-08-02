@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { marked } from 'marked';
 import { useApi } from '../lib/api-context.js';
+import { formatTime, formatToolArgs, stringifyInput } from '../lib/format.js';
 import ChatInput from './ChatInput.js';
 import ChartBlock from './charts/ChartBlock.js';
 import type { JsonRpcClient } from '../lib/jsonrpc-client.js';
@@ -202,36 +203,6 @@ function ReminderBlock({ message, time }: { message: string; time: string }) {
       </div>
     </div>
   );
-}
-
-function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function stringifyInput(input: Record<string, unknown>): string {
-  if (!input || Object.keys(input).length === 0) return '';
-  const entries = Object.entries(input);
-  if (entries.length === 1) {
-    const entry = entries[0];
-    if (!entry) return '';
-    const k = entry[0];
-    const v = entry[1];
-    const val = typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v);
-    return `${k}: ${val}`;
-  }
-  return entries.map(([k, v]) => {
-    const val = typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v);
-    return `${k}: ${val}`;
-  }).join('\n');
-}
-
-function formatToolArgs(name: string, input: Record<string, unknown>): string {
-  if (name === 'Bash') return String(input.command || '').slice(0, 80);
-  const path = input.file_path || input.path || '';
-  if (path) return String(path);
-  return Object.entries(input)
-    .map(([k, v]) => `${k}: ${String(v).slice(0, 60)}`)
-    .join(', ');
 }
 
 export function findToolResult(events: WsEvent[], toolCallId: string): { output?: unknown; error?: string } | undefined {
