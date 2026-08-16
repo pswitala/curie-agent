@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Box, Text, Static, useInput, usePaste, useApp, useStdout } from 'ink';
-import { TAB_IDS, type TabId } from './tab-bar.js';
+import { TabBar, TAB_IDS, type TabId } from './tab-bar.js';
 import { Footer } from './footer.js';
 import { EffortPicker, EFFORT_LEVELS, type EffortLevel } from './effort-picker.js';
 import { ModePicker, MODE_LEVELS, type ModeLevel } from './mode-picker.js';
@@ -19,6 +19,28 @@ import { Markdown } from '@curie-agent/render';
 export interface SlashCommandInput {
   command: string;
   args: string;
+}
+
+/**
+ * Apply Backspace or Delete to the input buffer.
+ *
+ * Extracted as a pure function so the edge cases are testable. The one that bit
+ * us: Backspace at column 0 used to compute `text.slice(0, -1) + text.slice(0)`,
+ * which dropped the last character and then re-appended the whole string,
+ * duplicating the input instead of doing nothing.
+ */
+export function applyDeletion(
+  text: string,
+  cursor: number,
+  kind: 'backspace' | 'delete',
+): { text: string; cursor: number } {
+  const c = Math.max(0, Math.min(cursor, text.length));
+  if (kind === 'backspace') {
+    if (c === 0) return { text, cursor: 0 };
+    return { text: text.slice(0, c - 1) + text.slice(c), cursor: c - 1 };
+  }
+  if (c >= text.length) return { text, cursor: c };
+  return { text: text.slice(0, c) + text.slice(c + 1), cursor: c };
 }
 
 export interface ChatMessage {
@@ -275,7 +297,9 @@ export function ChatSurface({
       return;
     }
 
-    if (key.tab) {
+    // Tab cycles tabs, but not while composing a slash command — Tab there
+    // should stay available for command completion.
+    if (key.tab && !inputText.startsWith('/')) {
       const idx = TAB_IDS.indexOf(currentTab);
       const delta = key.shift ? -1 : 1;
       const next = TAB_IDS[(idx + delta + TAB_IDS.length) % TAB_IDS.length]!;
@@ -438,13 +462,8 @@ export function ChatSurface({
         setHistoryIndexFn(-1);
       }
       const c = cursorPos;
-      const newC = key.backspace ? Math.max(0, c - 1) : c;
-      setInputText(prev => {
-        const before = prev.slice(0, c - (key.backspace ? 1 : 0));
-        const after = prev.slice(c + (key.delete ? 1 : 0));
-        return before + after;
-      });
-      setCursorPos(newC);
+      setInputText(prev => applyDeletion(prev, c, key.backspace ? 'backspace' : 'delete').text);
+      setCursorPos(applyDeletion(inputText, c, key.backspace ? 'backspace' : 'delete').cursor);
       return;
     }
 
@@ -659,6 +678,7 @@ export function ChatSurface({
 
   return (
     <Box flexDirection="column" width="100%">
+      <TabBar active={currentTab} theme={theme} />
       <Box
         flexDirection="column"
         paddingX={1}

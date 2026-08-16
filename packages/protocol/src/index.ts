@@ -82,6 +82,15 @@ export {
 } from './methods.js';
 
 export {
+  SLASH_COMMANDS,
+  SLASH_COMMAND_CATEGORIES,
+  findSlashCommand,
+  allSlashCommandNames,
+  renderSlashCommandHelp,
+} from './slash-commands.js';
+export type { SlashCommandDef, SlashCommandHandler } from './slash-commands.js';
+
+export {
   ToolDefinitionSchema,
   ToolCallSchema,
   ToolResultSchema,

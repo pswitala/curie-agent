@@ -11,8 +11,15 @@ export { ModePicker, MODE_LEVELS } from './mode-picker.js';
 export type { ModeLevel } from './mode-picker.js';
 export { ApprovalPicker } from './approval-picker.js';
 export { MascotBanner } from './mascot.js';
-export { parseSlashCommand, handleSlashCommand, SLASH_COMMANDS } from './slash-commands.js';
-export type { SlashCommandResult, SlashCommandContext, SlashCommandDef } from './slash-commands.js';
+export {
+  parseSlashCommand,
+  SLASH_COMMANDS,
+  SLASH_COMMAND_CATEGORIES,
+  findSlashCommand,
+  allSlashCommandNames,
+  renderSlashCommandHelp,
+} from './slash-commands.js';
+export type { SlashCommandDef, SlashCommandHandler } from './slash-commands.js';
 export type { SlashCommandInput, ChatMessage } from './chat-surface.js';
 export { COLD_START_BANNER } from './chat-surface.js';
 export type { TabId } from './tab-bar.js';

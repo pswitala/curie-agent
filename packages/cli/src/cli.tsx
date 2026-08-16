@@ -12,6 +12,7 @@ import { homedir, platform } from 'node:os';
 
 import { ChatSurface, COLD_START_BANNER, getInitialWizardState, advanceStep, getConfirmationMessage, isAlreadyInitialized, PROVIDER_INFO } from '@curie-agent/tui';
 import type { InitWizardState } from '@curie-agent/tui';
+import { findSlashCommand } from '@curie-agent/protocol';
 import { getTheme } from '@curie-agent/render';
 import { SettingsManager, DEFAULT_SETTINGS, createIdentityFilesAuto, buildBaseSystemPrompt } from '@curie-agent/core';
 import type { CurieSettings } from '@curie-agent/core';
@@ -33,6 +34,14 @@ import type { WsEvent } from './daemon-client.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf-8'));
 const VERSION = pkg.version;
+
+/**
+ * Commands that change settings shown in the UI chrome. The daemon owns the
+ * write, so after it finishes we pull the values back rather than guessing what
+ * the command did — `/model pricing 3;15` and `/model window 400000` both leave
+ * the model name untouched.
+ */
+const STATE_SYNC_COMMANDS = new Set(['model', 'mode', 'effort', 'provider']);
 
 // Module-level user input history — survives App remounts by Ink.
 const userInputHistory: string[] = [];
@@ -377,9 +386,22 @@ async function handleDaemonCommand(subcommand: string): Promise<{ keepRunning: b
       const mcpServersRaw = settingsManager.get().mcp_servers;
       const mcpConfigs = parseMcpConfigs(mcpServersRaw);
       let mergedTools: typeof allTools = allTools;
+      // Connection status for `/mcp list` and the mcp.list RPC. Without this
+      // the daemon's mcpStatus stays empty and every configured server renders
+      // as "Disconnected / Tools: none" even while its tools work fine.
+      let mcpStatus: { serverId: string; connected: boolean; tools: string[] }[] = [];
       if (mcpConfigs.length > 0) {
         const result = await createMcpTools(mcpConfigs);
         mergedTools = [...allTools, ...result.tools] as any;
+        const byId = new Map(result.clients.map(c => [c.serverId, c]));
+        mcpStatus = mcpConfigs.map(cfg => {
+          const client = byId.get(cfg.id);
+          return {
+            serverId: cfg.id,
+            connected: client?.isConnected ?? false,
+            tools: client ? client.tools.map(t => t.name) : [],
+          };
+        });
       }
 
       // Build system prompt from the configured identity files (~/.curie-agent/), then append skills catalog
@@ -416,6 +438,7 @@ async function handleDaemonCommand(subcommand: string): Promise<{ keepRunning: b
         web_ip: webIp,
         port,
       });
+      daemon.app.mcpStatus = mcpStatus;
       let daemonUrl: string;
       try {
         const { url } = await daemon.start();
@@ -745,6 +768,13 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
   // Session tracking
   const sessionIdRef = useRef<string>('main');
   const busyRef = useRef(false);
+  // A daemon-handled slash command is in flight. The daemon's slash path emits
+  // assistant-delta without a preceding session-start, so busyRef alone would
+  // gate the reply out and the command would appear to do nothing.
+  const slashPendingRef = useRef(false);
+  // Set when the in-flight slash command mutates settings the header/footer
+  // display, so we re-read them from the daemon once it finishes.
+  const syncAfterSlashRef = useRef(false);
 
   // Background message queue (for messages arriving during active turn)
   const backgroundQueueRef = useRef<Array<{ role: 'system' | 'heartbeat' | 'task' | 'debug'; content: string; title?: string }>>([]);
@@ -755,6 +785,24 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
   const settingsLoadedRef = useRef(false);
 
   const startedAt = useRef(Date.now());
+
+  /** Re-read UI-visible config from the daemon after a settings-mutating command. */
+  const syncConfigState = useCallback(async () => {
+    const read = async (key: string): Promise<string> => {
+      try {
+        const v: unknown = await rpcRef.current.configGet(key);
+        // config.get returns objects for nested keys; only scalars are UI state.
+        return typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? String(v) : '';
+      } catch { return ''; }
+    };
+    const [model, mode, effort, provider] = await Promise.all([
+      read('model'), read('mode'), read('effort'), read('current_provider'),
+    ]);
+    if (model) setCurrentModel(model);
+    if (mode) setCurrentMode(mode);
+    if (effort) setCurrentEffort(effort);
+    if (provider) setCurrentProvider(provider);
+  }, []);
 
   // Duration timer
   useEffect(() => {
@@ -777,7 +825,7 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
       const text = String(event.text || '');
       if (!text) return;
 
-      if (busyRef.current) {
+      if (busyRef.current || slashPendingRef.current) {
         setMessages(prev => {
           const next = [...prev];
           const last = next[next.length - 1];
@@ -793,7 +841,13 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
 
     ws.on('assistant-stop', () => {
       busyRef.current = false;
+      slashPendingRef.current = false;
       setStatus('idle');
+
+      if (syncAfterSlashRef.current) {
+        syncAfterSlashRef.current = false;
+        void syncConfigState();
+      }
 
       // Flush background messages
       const queue = backgroundQueueRef.current;
@@ -870,6 +924,7 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
         content: `Error: ${event.message}`,
       }]);
       busyRef.current = false;
+      slashPendingRef.current = false;
       setStatus('idle');
     });
 
@@ -1023,28 +1078,47 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
     }
   }, []);
 
-  // Slash command handler — proxy to daemon
+  // Slash command handler — registry-driven dispatch.
+  //
+  // The registry in @curie-agent/protocol decides where each command runs.
+  // Anything marked `daemon` is forwarded verbatim and answered over the
+  // WebSocket; only commands needing terminal/React state are handled here.
   const onSlashCommand = useCallback(async (input: { command: string; args: string }) => {
     const { command, args } = input;
+    const def = findSlashCommand(command);
 
     // Echo the command
-    setMessages(prev => [...prev, { role: 'user', content: `/${command} ${args}` }]);
+    setMessages(prev => [...prev, { role: 'user', content: `/${command}${args ? ` ${args}` : ''}` }]);
+
+    if (!def) {
+      setMessages(prev => [...prev, {
+        role: 'system',
+        content: `Unknown command: /${command}. Type /help for usage.`,
+      }]);
+      return;
+    }
 
     try {
-      switch (command) {
-        case 'model': {
-          await rpcRef.current.configSet('model', args.trim());
-          setCurrentModel(args.trim());
-          setMessages(prev => [...prev, { role: 'system', content: `Model switched to: ${args.trim()}` }]);
-          break;
+      if (def.handler === 'daemon') {
+        slashPendingRef.current = true;
+        syncAfterSlashRef.current = STATE_SYNC_COMMANDS.has(def.name);
+        setStatus('working');
+        try {
+          await rpcRef.current.sessionSend(
+            sessionIdRef.current,
+            `/${def.name}${args ? ` ${args}` : ''}`,
+            'tui',
+          );
+        } catch (err) {
+          slashPendingRef.current = false;
+          syncAfterSlashRef.current = false;
+          setStatus('idle');
+          throw err;
         }
-        case 'mode': {
-          const mode = args.trim() as ModeLevel;
-          await rpcRef.current.configSet('mode', mode);
-          setCurrentMode(mode);
-          setMessages(prev => [...prev, { role: 'system', content: `Mode switched to: ${mode}` }]);
-          break;
-        }
+        return;
+      }
+
+      switch (def.name) {
         case 'theme': {
           const theme = args.trim();
           await rpcRef.current.configSet('theme', theme);
@@ -1052,104 +1126,30 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
           setMessages(prev => [...prev, { role: 'system', content: `Theme switched to: ${theme}` }]);
           break;
         }
-        case 'effort': {
-          const effort = args.trim() as EffortLevel;
-          await rpcRef.current.configSet('effort', effort);
-          setCurrentEffort(effort);
-          setMessages(prev => [...prev, { role: 'system', content: `Effort set to: ${effort}` }]);
-          break;
-        }
         case 'debug': {
-          const debug = args.trim().toLowerCase() === 'off' ? false : true;
-          await rpcRef.current.configSet('debug', debug);
-          setMessages(prev => [...prev, { role: 'system', content: `Debug ${debug ? 'enabled' : 'disabled'}` }]);
+          const sub = args.trim().toLowerCase();
+          // Bare /debug toggles; an explicit on/off wins.
+          const next = sub === 'on' ? true : sub === 'off' ? false : !debugRef.current;
+          await rpcRef.current.configSet('debug', next);
+          // Also update local state — debugRef gates tool-output verbosity in
+          // the TUI, so persisting alone would leave the UI unchanged.
+          setDebug(next);
+          setMessages(prev => [...prev, { role: 'system', content: `Debug ${next ? 'enabled' : 'disabled'}` }]);
           break;
         }
-        case 'status': {
-          const [statusRes, configRes] = await Promise.all([
-            rpcRef.current.daemonStatus().catch(() => ({})),
-            rpcRef.current.configGet('model').catch(() => null),
-          ]);
-          const statusData = statusRes as Record<string, unknown>;
-          const modelStr = configRes ? String(configRes) : currentModel;
-          setMessages(prev => [...prev, {
-            role: 'system',
-            content: `Status: ${String(statusData.status || 'ok')}\nVersion: ${VERSION}\nModel: ${modelStr}\nClients: ${String(statusData.clients || 0)}`,
-          }]);
+        case 'statusline': {
+          const on = args.trim().toLowerCase() !== 'off';
+          await rpcRef.current.configSet('statusline', on);
+          setMessages(prev => [...prev, { role: 'system', content: `Status line ${on ? 'enabled' : 'disabled'}` }]);
           break;
         }
-        case 'help': {
-          setMessages(prev => [...prev, {
-            role: 'system',
-            content: `Available commands:\n/model <model> - Switch AI model\n/mode <mode> - Set approval mode\n/theme <name> - Change theme\n/effort <level> - Set reasoning effort\n/debug [on|off] - Toggle debug\n/status - Show status\n/heartbeat <status|enable|disable|now> - Manage heartbeat\n/remind <msg at time> - Create reminder\n/cron <list|delete|clear> - Manage reminders\n/exit - Exit`,
-          }]);
-          break;
-        }
-        case 'heartbeat': {
-          const action = args.trim();
-          if (action === 'now') {
-            setMessages(prev => [...prev, { role: 'system', content: 'Running heartbeat...' }]);
-            try {
-              const result = await rpcRef.current.heartbeatRun();
-              const data = result as { text?: string; errors?: string[] };
-              if (data?.text) {
-                const text = data.text;
-                setMessages(prev => [...prev, { role: 'heartbeat', title: 'manual', content: text }]);
-              }
-            } catch (err) {
-              setMessages(prev => [...prev, {
-                role: 'system',
-                content: `Heartbeat failed: ${err instanceof Error ? err.message : String(err)}`,
-              }]);
-            }
-          } else if (action === 'status') {
-            const hb = await rpcRef.current.heartbeatStatus().catch(() => ({}));
-            setMessages(prev => [...prev, { role: 'system', content: `Heartbeat: ${JSON.stringify(hb)}` }]);
-          } else if (action === 'enable') {
-            await rpcRef.current.configSet('heartbeat.schedule', 'on');
-            setMessages(prev => [...prev, { role: 'system', content: 'Heartbeat enabled' }]);
-          } else if (action === 'disable') {
-            await rpcRef.current.configSet('heartbeat.schedule', 'off');
-            setMessages(prev => [...prev, { role: 'system', content: 'Heartbeat disabled' }]);
-          } else {
-            setMessages(prev => [...prev, { role: 'system', content: 'Usage: /heartbeat <status|enable|disable|now>' }]);
-          }
+        case 'stats': {
+          setCurrentTab('stats');
+          setMessages(prev => [...prev, { role: 'system', content: 'Switched to Stats tab' }]);
           break;
         }
         case 'exit': {
           process.exit(0);
-          break;
-        }
-        case 'remind': {
-          setMessages(prev => [...prev, { role: 'system', content: `Reminder feature coming soon` }]);
-          break;
-        }
-        case 'cron': {
-          const cronAction = args.trim();
-          if (cronAction === 'list') {
-            const tasks = await rpcRef.current.cronList().catch(() => []);
-            setMessages(prev => [...prev, {
-              role: 'system',
-              content: Array.isArray(tasks)
-                ? `${tasks.length} task(s): ${JSON.stringify(tasks)}`
-                : 'No tasks',
-            }]);
-          } else if (cronAction === 'clear') {
-            await rpcRef.current.cronClear().catch(() => {});
-            setMessages(prev => [...prev, { role: 'system', content: 'Completed tasks cleared' }]);
-          } else {
-            setMessages(prev => [...prev, { role: 'system', content: 'Usage: /cron <list|clear>' }]);
-          }
-          break;
-        }
-        case 'agent': {
-          // Strip --mode and --effort flags from args
-          const prompt = args.replace(/--mode\s+\S+\s*/g, '').replace(/--effort\s+\S+\s*/g, '').trim();
-          try {
-            await rpcRef.current.sessionSend(sessionIdRef.current, `/agent ${prompt}`, 'tui');
-          } catch {
-            setMessages(prev => [...prev, { role: 'system', content: `Agent started: "${prompt}"` }]);
-          }
           break;
         }
         case 'init': {
@@ -1170,38 +1170,44 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
           break;
         }
 
-        case 'todo': {
-          try {
-            await rpcRef.current.sessionSend(sessionIdRef.current, `/todo ${args}`, 'tui');
-          } catch {
-            setMessages(prev => [...prev, { role: 'system', content: `Todo command failed.` }]);
-          }
-          break;
-        }
+        case 'channels': {
+          // Telegram config lives in ~/.curie-settings.json and the daemon has
+          // no handler for it, so this stays client-side.
+          const [sub = '', ...restParts] = args.trim().split(/\s+/);
+          const rest = restParts.join(' ').trim();
+          const mgr = settingsMgrRef.current;
+          const cfg = mgr.load().channels;
+          const mask = (v: string) => (v ? `${v.slice(0, 4)}…${v.slice(-4)}` : 'not set');
 
-        case 'task': {
-          try {
-            await rpcRef.current.sessionSend(sessionIdRef.current, `/task ${args}`, 'tui');
-          } catch {
-            setMessages(prev => [...prev, { role: 'system', content: `Task command failed.` }]);
-          }
-          break;
-        }
+          const setChannel = async (key: string, value: string, label: string) => {
+            if (!value) {
+              setMessages(prev => [...prev, { role: 'system', content: `Usage: /channels ${sub} <value>` }]);
+              return;
+            }
+            await rpcRef.current.configSet(`channels.${key}`, value);
+            setMessages(prev => [...prev, { role: 'system', content: `${label} updated.` }]);
+          };
 
-        case 'cd': {
-          try {
-            await rpcRef.current.sessionSend(sessionIdRef.current, `/cd ${args.trim()}`, 'tui');
-          } catch {
-            setMessages(prev => [...prev, { role: 'system', content: `Failed to change directory. Check the path is valid and within allowed directories.` }]);
-          }
-          break;
-        }
-
-        case 'remind': {
-          try {
-            await rpcRef.current.sessionSend(sessionIdRef.current, `/remind ${args}`, 'tui');
-          } catch {
-            setMessages(prev => [...prev, { role: 'system', content: `Reminder command failed.` }]);
+          if (!sub || sub === 'list') {
+            setMessages(prev => [...prev, {
+              role: 'system',
+              content: `Telegram channel config:\n  Bot token: ${mask(cfg.bot_token)}\n  User ID:   ${cfg.user_id || 'not set'}\n  Chat ID:   ${cfg.chat_id || 'not set'}\n  Groups:    ${cfg.allow_groups ? 'allowed' : 'blocked'}\n  Active tab: ${cfg.tab_active}`,
+            }]);
+          } else if (sub === 'set-bot-token') {
+            await setChannel('bot_token', rest, 'Bot token');
+          } else if (sub === 'set-user-id') {
+            await setChannel('user_id', rest, 'User ID');
+          } else if (sub === 'set-chat-id') {
+            await setChannel('chat_id', rest, 'Chat ID');
+          } else if (sub === 'switch') {
+            await setChannel('tab_active', rest, `Active channel set to "${rest}"`);
+          } else if (sub === 'disconnect') {
+            await rpcRef.current.configSet('channels.bot_token', '');
+            await rpcRef.current.configSet('channels.user_id', '');
+            await rpcRef.current.configSet('channels.chat_id', '');
+            setMessages(prev => [...prev, { role: 'system', content: 'Telegram disconnected — token and IDs cleared.' }]);
+          } else {
+            setMessages(prev => [...prev, { role: 'system', content: `Unknown subcommand "${sub}". Usage: ${def.usage}` }]);
           }
           break;
         }
@@ -1264,7 +1270,12 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
         }
 
         default: {
-          setMessages(prev => [...prev, { role: 'system', content: `Unknown command: /${command}. Type /help for usage.` }]);
+          // Registry says this is client-handled but no case exists — a
+          // registry/implementation mismatch, caught by the registry test.
+          setMessages(prev => [...prev, {
+            role: 'system',
+            content: `/${def.name} is not available in the terminal UI. Usage: ${def.usage}`,
+          }]);
         }
       }
     } catch (err) {
@@ -1273,7 +1284,7 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
         content: `Command failed: ${err instanceof Error ? err.message : String(err)}`,
       }]);
     }
-  }, [currentModel]);
+  }, []);
 
   // Approval decision handler
   const onApprovalDecision = useCallback(async (decision: 'allow' | 'deny') => {

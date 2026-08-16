@@ -1,7 +1,8 @@
 import os, { homedir } from 'node:os';
 import path, { join, isAbsolute, resolve as pathResolve } from 'node:path';
 import { readFileSync, existsSync, readdirSync, statSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
-import { Method } from '@curie-agent/protocol';
+import { fileURLToPath } from 'node:url';
+import { Method, renderSlashCommandHelp, findSlashCommand } from '@curie-agent/protocol';
 import { TurnLoop, parseReminderTime, listSnapshots, revertTo, createIdentityFilesAuto, SubagentExecutor, isPathAllowed, parseAllowlist, createSnapshot, PURE_TOOLS, type SessionInfo } from '@curie-agent/core';
 import { EventBus } from '@curie-agent/core';
 import type { SessionStore, SettingsManager, Event, ProviderStream, Tool, CurieSettings } from '@curie-agent/core';
@@ -9,6 +10,15 @@ import { listSkills, discoverAllSkills } from '@curie-agent/tools';
 import { executeCd } from './slash-cd.js';
 import type { ProviderFactory } from './server.js';
 import type { DaemonApp } from './daemon-app.js';
+
+/** Real package version — previously hardcoded and years out of date. */
+const VERSION: string = (() => {
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(join(here, '..', '..', 'package.json'), 'utf-8')) as { version?: string };
+    return pkg.version ?? '0.0.0';
+  } catch { return '0.0.0'; }
+})();
 
 export interface JsonRpcRequest {
   jsonrpc: '2.0';
@@ -439,7 +449,7 @@ export class JsonRpcHandler {
         case Method.DAEMON_STATUS:
           result = {
             status: 'ok',
-            version: '0.2.4',
+            version: VERSION,
             clients: 0, // will be set by server
           };
           break;
@@ -1059,44 +1069,9 @@ export class JsonRpcHandler {
       const args = parts.slice(1).join(' ').trim();
       switch (command) {
         case 'help': {
-          const helpText = `### Available Slash Commands
-
-**General & Status**
-* \`/status\` — Show version, active model, provider, approval mode, CWD, active settings, and pricing.
-* \`/help\` — List all available commands with usage details.
-
-**Model & Config**
-* \`/provider <name>\` — Switch AI provider (\`anthropic | openai | google | local | openrouter | ollama\`).
-* \`/model <name>\` — Switch active model. Or use subcommands:
-  * \`/model pricing <in;out>\` — Customize pricing format per million tokens.
-  * \`/model window <tokens>\` — Adjust model context window capacity.
-* \`/effort <low|medium|high|max|auto>\` — Set reasoning effort level.
-* \`/mode <plan|edit|auto|yolo>\` — Set agent approval mode.
-* \`/tools <max_tools> [max_websearch]\` — Configure dynamic tool limit per turn.
-* \`/websearch <limit>\` — Configure maximum web search limits per turn.
-
-**Skills & MCP**
-* \`/skill [name]\` — List all globally and project-registered skills or view a specific skill's instructions.
-* \`/mcp [list|reload]\` — List connected Model Context Protocol (MCP) servers and their tools, or reload configuration.
-
-**Memory & Context**
-* \`/memory [status|add <text>]\` — View active memory files or add new memories to be organized on next turn.
-
-**System Info**
-* \`/system\` — Show OS, platform, Node version, home dir, CWD, and PathGuard status.
-* \`/context [auto [on|off|threshold N|warn N|pricing on/off]]\` — View visual token capacity fill percentage bar or configure auto-compaction.
-
-**Automation & Scheduling**
-* \`/remind <message at time>\` — Create a scheduled reminder (e.g., \`/remind review current pull request in 30 mins\`).
-* \`/cron [list|delete <id>|clear]\` — View list of active reminders or manage completed ones.
-* \`/heartbeat [status|enable|disable|now|daily <H:MM>|weekly <day@H:MM>...]\` — Control scheduled heartbeat cycles or run immediately.
-* \`/task [create <instruction at time>|list [status]|delete <id>]\` — Schedule background autonomous agent tasks.
-
-**Workspace Safety**
-* \`/snapshots\` — List Git-backed state snapshots.
-* \`/revert <index>\` — Revert workspace to a specific snapshot index.
-* \`/cd <path>\` — Change working directory with safety checks.`;
-          emitDelta(helpText);
+          // Rendered from the shared registry so help can never drift from the
+          // set of commands that actually exist.
+          emitDelta(renderSlashCommandHelp());
           break;
         }
 
@@ -1109,7 +1084,7 @@ export class JsonRpcHandler {
             : 'Not configured';
 
           const statusText = `### Curie Agent Status
-* **Version:** \`0.2.4\`
+* **Version:** \`${VERSION}\`
 * **Active Model:** \`${settings.model}\`
 * **Active Provider:** \`${provider}\`
 * **Approval Mode:** \`${settings.mode || 'auto'}\`
@@ -1320,9 +1295,13 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
               const lines = [`### Configured MCP Servers (${keys.length}):`];
               keys.forEach(k => {
                 const cfg = servers[k] as any;
-                const status = this.daemonApp?.mcpStatus?.find(s => s.serverId === k);
-                const connectedLabel = status?.connected ? '✅ Connected' : '❌ Disconnected';
-                const toolsList = status?.tools?.join(', ') || 'none';
+                const status = this.daemonApp?.mcpStatus.find(s => s.serverId === k);
+                // No recorded status is not the same as a failed connection —
+                // say so rather than claiming the server is down.
+                const connectedLabel = status === undefined
+                  ? '❔ Unknown (no connection status recorded)'
+                  : status.connected ? '✅ Connected' : '❌ Disconnected';
+                const toolsList = status?.tools.length ? status.tools.join(', ') : 'none';
                 lines.push(`* **${k}**: \`${cfg?.command}\` ${cfg?.args?.join(' ') ?? ''}`);
                 lines.push(`  └─ Status: ${connectedLabel}`);
                 lines.push(`  └─ Tools: _${toolsList}_`);
@@ -2251,7 +2230,15 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
         }
 
         default: {
-          emitDelta(`Unknown slash command: **${text}**. Type \`/help\` to see all available commands.`);
+          // Distinguish "no such command" from "real command, wrong surface" —
+          // client-handled commands need terminal/browser state the daemon
+          // doesn't have.
+          const known = findSlashCommand(command);
+          if (known?.handler === 'client') {
+            emitDelta(`\`/${known.name}\` is handled by the interface, not the daemon — ${known.description.toLowerCase()}. Usage: \`${known.usage}\``);
+          } else {
+            emitDelta(`Unknown slash command: **${text}**. Type \`/help\` to see all available commands.`);
+          }
           break;
         }
       }

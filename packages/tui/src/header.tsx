@@ -21,7 +21,7 @@ export function Header({ theme }: HeaderProps) {
           <Text bold color="cyan">{'████ █  █ ████ ████ █ ████     █   ████ ████ ██ █ █████'}</Text>
           <Text bold color="cyan">{'█    █  █ █ █  █ █  █ ██      ███  █ ▀█ █▀▀  ████   █  '}</Text>
           <Text bold color="cyan">{'████ ████ █  █ █  █ █ ████   █   █ ████ ████ █ ██   █  '}</Text>
-          <Text bold color="cyan">{'OpenSource community project fo free Agentic AI'}</Text>
+          <Text bold color="cyan">{'OpenSource community project for free Agentic AI'}</Text>
         </Box>
       </Box>
     </Box>
