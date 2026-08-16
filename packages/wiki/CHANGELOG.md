@@ -1,5 +1,40 @@
 # @curie-agent/wiki
 
+## 0.4.2
+
+### Patch Changes
+
+- Fix slash commands, their output, and MCP connection status.
+
+  **Slash commands now have a single source of truth.** The command registry moved to
+  `@curie-agent/protocol`, with each entry declaring `handler: 'client' | 'daemon'`.
+  Previously three separate implementations had drifted apart, and the most complete
+  one (in `@curie-agent/tui`) was never called at runtime.
+  - Daemon slash-command output was silently discarded in the terminal UI. The
+    `assistant-delta` gate required a `session-start` event that the slash path never
+    emits, so `/todo`, `/task`, `/cd` and `/agent` produced no visible output at all.
+  - 12 registered commands reported "Unknown command" in the TUI and now work:
+    `/context`, `/memory`, `/mcp`, `/skill`, `/tools`, `/websearch`, `/provider`,
+    `/snapshots`, `/revert`, `/statusline`, `/stats`, `/channels`.
+  - `/remind` always printed "Reminder feature coming soon" because a duplicate
+    `case` shadowed the real handler.
+  - `/model pricing` and `/model window` now work in the TUI; the previous local-only
+    handler silently swallowed subcommands.
+  - `/help` is generated from the shared registry, so it can no longer drift.
+  - `/status` reported a hardcoded version `0.2.4`; it now reads the real version.
+  - `/debug` persisted the setting without updating the UI, so output verbosity never
+    actually changed. Bare `/debug` now toggles.
+  - `/mcp` reported every configured server as disconnected with no tools, even while
+    those tools worked. `DaemonApp.mcpStatus` was declared but never populated; it is
+    now filled from the live MCP clients. Servers with no recorded status render as
+    unknown rather than falsely reporting a failure.
+  - Backspace at column 0 duplicated the input buffer (`abc` became `ababc`).
+  - The `TabBar` component was exported but never rendered; it is now visible, and
+    Tab no longer switches tabs while a slash command is being typed.
+
+- Updated dependencies []:
+  - @curie-agent/core@0.4.2
+
 ## 0.3.9
 
 ### Patch Changes
