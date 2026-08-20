@@ -124,6 +124,36 @@ export const ContextWarningEvent = z.object({
   timestamp: z.number(),
 });
 
+/**
+ * Compaction marker. Appended to the session log — never overwriting it — so
+ * the full transcript survives for the UI and audit while message
+ * reconstruction replays forward from the last marker.
+ */
+export const CompactionEvent = z.object({
+  type: z.literal('compaction'),
+  id: z.string(),
+  summary: z.string(),
+  summarizedMessageCount: z.number(),
+  tokensBefore: z.number(),
+  tokensAfter: z.number(),
+  timestamp: z.number(),
+});
+
+/**
+ * Context-window snapshot with a per-component split. Carries data, not markup,
+ * so the TUI and the web dashboard each render it natively.
+ */
+export const ContextReportEvent = z.object({
+  type: z.literal('context-report'),
+  id: z.string(),
+  model: z.string(),
+  windowTokens: z.number(),
+  usedTokens: z.number(),
+  reservedOutput: z.number(),
+  breakdown: z.array(z.object({ label: z.string(), tokens: z.number() })),
+  timestamp: z.number(),
+});
+
 export const CronTaskFiredEvent = z.object({
   type: z.literal('cron-task-fired'),
   id: z.string(),
@@ -193,6 +223,8 @@ export const EventSchema = z.discriminatedUnion('type', [
   StatusEvent,
   SessionResumedEvent,
   ContextWarningEvent,
+  CompactionEvent,
+  ContextReportEvent,
   CronTaskFiredEvent,
   HeartbeatBriefEvent,
   ChannelUpdatedEvent,

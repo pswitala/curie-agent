@@ -15,6 +15,7 @@ import { WikiTab, type WikiPageEntry } from './wiki-tab.js';
 import type { Event } from '../../core/src/event-bus.js';
 import type { ThemeColors } from '../../render/src/themes.js';
 import { Markdown } from '@curie-agent/render';
+import { ContextReport, type ContextReportData } from './context-report.js';
 
 export interface SlashCommandInput {
   command: string;
@@ -44,9 +45,11 @@ export function applyDeletion(
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'task' | 'debug' | 'thinking';
+  role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'task' | 'debug' | 'thinking' | 'context-report';
   content: string;
   title?: string;
+  /** Structured payload for role 'context-report'. */
+  contextReport?: ContextReportData;
 }
 
 export const COLD_START_BANNER = [
@@ -66,6 +69,7 @@ interface ChatSurfaceProps {
   cacheReadTokens?: number;
   contextWindowSize?: number;
   contextFillPct?: number;
+  contextUsedTokens?: number;
   project?: string;
   duration?: string;
   costUsd?: number;
@@ -116,6 +120,7 @@ export function ChatSurface({
   cacheReadTokens,
   contextWindowSize = 200_000,
   contextFillPct = 0,
+  contextUsedTokens,
   project = 'homepage-refactor-0422',
   duration = '00:00:00',
   costUsd = 0,
@@ -654,6 +659,13 @@ export function ChatSurface({
         </>
       );
     }
+    if (msg.role === 'context-report') {
+      // Rendered from data, not markup — the same event the web dashboard draws
+      // with its own component.
+      return msg.contextReport
+        ? <ContextReport key={String(key)} data={msg.contextReport} theme={theme} />
+        : null;
+    }
     if (msg.role === 'system') {
       const isReminder = msg.content.startsWith('Curie reminder:');
       if (isReminder) {
@@ -686,7 +698,7 @@ export function ChatSurface({
         {currentTab === 'projects' ? (
           <ProjectsTab projects={projects ?? []} theme={theme} isActive={currentTab === 'projects'} onSelectProject={onSelectProject} />
         ) : currentTab === 'stats' ? (
-          <StatsTab theme={theme} isActive={currentTab === 'stats'} model={model} inputTokens={inputTokens} outputTokens={outputTokens} cacheReadTokens={cacheReadTokens} contextWindowSize={contextWindowSize} />
+          <StatsTab theme={theme} isActive={currentTab === 'stats'} model={model} inputTokens={inputTokens} outputTokens={outputTokens} cacheReadTokens={cacheReadTokens} contextWindowSize={contextWindowSize} contextUsedTokens={contextUsedTokens} />
         ) : currentTab === 'channels' ? (
           <ChannelsTab channels={channels ?? []} theme={theme} isActive={currentTab === 'channels'} onSelectChannel={onChannelSelect} />
         ) : currentTab === 'agents' ? (
@@ -779,6 +791,7 @@ export function ChatSurface({
         theme={theme}
         contextFillPct={contextFillPct}
         contextWindowSize={contextWindowSize}
+        contextUsedTokens={contextUsedTokens}
         inputTokens={inputTokens}
         outputTokens={outputTokens}
       />

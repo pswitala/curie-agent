@@ -126,4 +126,56 @@ describe('OpenRouterProvider', () => {
       expect(usageEvent.cacheWriteTokens).toBe(5);
     });
   });
+
+  describe('getModels / getModelInfo', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function stubModelsFetch(payload: unknown) {
+      const fetchMock = vi.fn().mockResolvedValue({ json: async () => payload });
+      vi.stubGlobal('fetch', fetchMock);
+      return fetchMock;
+    }
+
+    it('requests /models on the base URL without a duplicated /api segment', async () => {
+      const fetchMock = stubModelsFetch({ data: [{ id: 'anthropic/claude-sonnet-4-6' }] });
+      const p = new OpenRouterProvider('key');
+      await p.getModels();
+      expect(fetchMock.mock.calls[0][0]).toBe('https://openrouter.ai/api/v1/models');
+    });
+
+    it('keeps context_length and converts per-token pricing to per-million', async () => {
+      stubModelsFetch({
+        data: [
+          {
+            id: 'anthropic/claude-sonnet-4-6',
+            context_length: 1000000,
+            pricing: { prompt: '0.000003', completion: '0.000015' },
+          },
+        ],
+      });
+      const p = new OpenRouterProvider('key');
+      await p.getModels();
+      const info = p.getModelInfo('anthropic/claude-sonnet-4-6');
+      expect(info?.contextLength).toBe(1000000);
+      expect(info?.pricePromptPerM).toBeCloseTo(3);
+      expect(info?.priceCompletionPerM).toBeCloseTo(15);
+    });
+
+    it('returns undefined for an unknown model', async () => {
+      stubModelsFetch({ data: [{ id: 'a/b' }] });
+      const p = new OpenRouterProvider('key');
+      await p.getModels();
+      expect(p.getModelInfo('nope/nope')).toBeUndefined();
+    });
+
+    it('falls back to the static list when the models API fails', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
+      const p = new OpenRouterProvider('key');
+      const models = await p.getModels();
+      expect(models).toContain('anthropic/claude-sonnet-4-6');
+      expect(p.getModelInfo('anthropic/claude-sonnet-4-6')).toBeUndefined();
+    });
+  });
 });

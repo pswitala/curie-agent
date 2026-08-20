@@ -82,8 +82,8 @@ describe('JsonRpcHandler', () => {
   it('handles config.set', async () => {
     const result = await handler.handle({ jsonrpc: '2.0', id: 5, method: Method.CONFIG_SET, params: { key: 'model', value: 'claude-opus-4-7' } });
     expect((result as any).result).toEqual({ status: 'ok', key: 'model', value: 'claude-opus-4-7' });
+    // update() persists; the extra save() it used to call was redundant.
     expect(settingsManager.update).toHaveBeenCalled();
-    expect(settingsManager.save).toHaveBeenCalled();
   });
 
   it('handles provider.list', async () => {

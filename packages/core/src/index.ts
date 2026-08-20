@@ -4,7 +4,7 @@ export { SessionStore, ulid } from './session-store.js';
 export type { SessionInfo, SessionFile } from './session-store.js';
 export { PermissionEngine, PURE_TOOLS } from './permission.js';
 export type { ApprovalMode, PermissionRule, PermissionResult, PermissionDecision } from './permission.js';
-export { TurnLoop } from './turn-loop.js';
+export { TurnLoop, reconstructMessagesFromEvents } from './turn-loop.js';
 export type { TurnLoopConfig, TurnLoopResult, ReasoningEffort, Message, AssistantBlock, ProviderStream, Tool, ProviderEvent } from './turn-loop.js';
 export { SettingsManager } from './settings.js';
 export type { CurieSettings } from './settings.js';
@@ -32,8 +32,17 @@ export { BatchTurnLoop } from './heartbeat-executor.js';
 export type { BatchResult } from './heartbeat-executor.js';
 export { SubagentExecutor } from './subagent-executor.js';
 export type { SubagentConfig, SubagentHandle } from './subagent-executor.js';
-export { TokenMonitor, parseTieredPricing, selectTier, estimateCost, type PriceTier } from './token-monitor.js';
-export type { TokenMonitorConfig, TokenEvent } from './token-monitor.js';
+export { parseTieredPricing, selectTier, estimateCost, type PriceTier } from './pricing.js';
+export {
+  resolveBudget, estimateRequestTokens, breakdownChars, toolDefinitionChars, messageChars,
+  fillPct, classify, calibrate, clampCalibration, formatTokens, DEFAULT_CALIBRATION,
+} from './context-budget.js';
+export type { ContextBudget, ContextBreakdown, ContextStatus, ToolDefinitionLike } from './context-budget.js';
+export {
+  compactMessages, renderTranscript, splitAtSafeBoundary, isSafeCut, buildSummaryMessage,
+  DEFAULT_MIN_TAIL_MESSAGES, SUMMARY_MAX_TOKENS,
+} from './compaction.js';
+export type { CompactionResult, CompactMessagesArgs } from './compaction.js';
 export { withOsContext, withMessageTimestamp, formatDate } from './context.js';
 export { buildBaseSystemPrompt } from './identity-context.js';
 export { listSnapshots, revertTo, createSnapshot } from './safety/snapshot.js';

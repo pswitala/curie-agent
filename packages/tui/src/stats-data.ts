@@ -41,15 +41,26 @@ export function loadStatsData(): StatsData {
       continue;
     }
 
+    // `inputTokens` is the FULL prompt re-sent every turn, so summing it counts
+    // the same history once per turn and inflates the total several-fold. The
+    // meaningful figure is the high-water mark; only output is genuinely additive.
+    const peakInputByDay = new Map<string, number>();
+    let sessionPeakInput = 0;
     for (const e of events) {
       if (e.type !== 'usage') continue;
       const key = toDateKey(e.timestamp);
       const bucket = perDay.get(key) ?? { input: 0, output: 0 };
-      bucket.input += e.inputTokens;
       bucket.output += e.outputTokens;
       perDay.set(key, bucket);
-      sessionTokens += e.inputTokens + e.outputTokens;
+      peakInputByDay.set(key, Math.max(peakInputByDay.get(key) ?? 0, e.inputTokens));
+      sessionPeakInput = Math.max(sessionPeakInput, e.inputTokens);
+      sessionTokens += e.outputTokens;
     }
+    for (const [key, peak] of peakInputByDay) {
+      const bucket = perDay.get(key);
+      if (bucket) bucket.input += peak;
+    }
+    sessionTokens += sessionPeakInput;
 
     // Attach session tokens to model
     if (s.model && sessionTokens > 0) {

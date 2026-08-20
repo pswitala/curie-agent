@@ -5,7 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { Method, renderSlashCommandHelp, findSlashCommand } from '@curie-agent/protocol';
 import { TurnLoop, parseReminderTime, listSnapshots, revertTo, createIdentityFilesAuto, SubagentExecutor, isPathAllowed, parseAllowlist, createSnapshot, PURE_TOOLS, type SessionInfo } from '@curie-agent/core';
 import { EventBus } from '@curie-agent/core';
-import type { SessionStore, SettingsManager, Event, ProviderStream, Tool, CurieSettings } from '@curie-agent/core';
+import {
+  compactMessages, reconstructMessagesFromEvents, resolveBudget, estimateRequestTokens,
+  breakdownChars, fillPct, formatTokens, DEFAULT_CALIBRATION, DEFAULT_SETTINGS,
+} from '@curie-agent/core';
+import type { SessionStore, SettingsManager, Event, ProviderStream, Tool, CurieSettings, CompactionResult } from '@curie-agent/core';
 import { listSkills, discoverAllSkills } from '@curie-agent/tools';
 import { executeCd } from './slash-cd.js';
 import type { ProviderFactory } from './server.js';
@@ -379,7 +383,6 @@ export class JsonRpcHandler {
           } else {
             this.settingsManager.update({ [key]: value } as never);
           }
-          this.settingsManager.save();
           this.sharedEventBus?.emit({
             type: 'config-changed',
             id: Math.random().toString(36).substring(7),
@@ -975,6 +978,7 @@ export class JsonRpcHandler {
       'tool-result', 'approval-decision', 'usage',
       'error', 'session-start', 'session-stop', 'hook', 'status',
       'session-resumed', 'context-warning', 'thinking-delta',
+      'compaction', 'context-report',
       // Subagent events
       'agent-start', 'agent-text-delta', 'agent-thinking-delta',
       'agent-tool-call', 'agent-tool-result', 'agent-usage',
@@ -989,7 +993,9 @@ export class JsonRpcHandler {
 
     try {
       const result = await loop.run(text);
-      await this.checkContextThresholds(sessionId);
+      // No post-run threshold check: TurnLoop enforces the budget before every
+      // provider call, on every code path (channels, tasks, heartbeat,
+      // subagents) — not just between prompts on this one.
       return { status: 'completed', sessionId: result.sessionId, events: result.events.length };
     } catch (err) {
       return { status: 'error', error: err instanceof Error ? err.message : 'unknown' };
@@ -1082,6 +1088,7 @@ export class JsonRpcHandler {
           const pricing = pConfig?.model_cost
             ? `\`${pConfig.model_cost}\` (per million)`
             : 'Not configured';
+          const statusBudget = resolveBudget(settings);
 
           const statusText = `### Curie Agent Status
 * **Version:** \`${VERSION}\`
@@ -1090,11 +1097,11 @@ export class JsonRpcHandler {
 * **Approval Mode:** \`${settings.mode || 'auto'}\`
 * **Reasoning Effort:** \`${settings.effort || 'auto'}\`
 * **Workspace CWD:** \`${this.getSessionCwd(sessionId) || process.cwd()}\`
-* **Tools per Turn Limit:** \`${settings.tools_per_call || 10}\`
-* **Web Search per Turn Limit:** \`${settings.websearch_per_call || 5}\`
-* **Model Context Window:** \`${(pConfig?.model_context_window || 200000).toLocaleString()} tokens\`
+* **Tools per Turn / Run:** \`${String(settings.tools_per_call || DEFAULT_SETTINGS.tools_per_call)}\` / \`${String(settings.tools_per_run || DEFAULT_SETTINGS.tools_per_run)}\`
+* **Web Search per Turn / Run:** \`${String(settings.websearch_per_call || DEFAULT_SETTINGS.websearch_per_call)}\` / \`${String(settings.websearch_per_run || DEFAULT_SETTINGS.websearch_per_run)}\`
+* **Model Context Window:** \`${statusBudget.windowTokens.toLocaleString()} tokens\` (\`${statusBudget.usableTokens.toLocaleString()}\` usable, \`${statusBudget.reservedOutput.toLocaleString()}\` reserved for output)
 * **Model Pricing:** ${pricing}
-* **Auto-Compaction:** \`${settings.auto_compact?.enabled || 'on'}\` (Threshold: \`${settings.auto_compact?.threshold ?? 80}%\`)`;
+* **Auto-Compaction:** \`${settings.auto_compact?.enabled ?? DEFAULT_SETTINGS.auto_compact.enabled}\` (warn \`${String(settings.auto_compact?.warn_threshold ?? DEFAULT_SETTINGS.auto_compact.warn_threshold)}%\`, suggest \`${String(settings.auto_compact?.threshold ?? DEFAULT_SETTINGS.auto_compact.threshold)}%\`, compact \`${String(settings.auto_compact?.forced_threshold ?? DEFAULT_SETTINGS.auto_compact.forced_threshold)}%\`)`;
           emitDelta(statusText);
           break;
         }
@@ -1256,8 +1263,11 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                   settings.websearch_per_call = wsVal;
                 }
               }
-              this.settingsManager.save();
-              emitDelta(`Tool limits updated! Tools per turn: **${settings.tools_per_call}**, WebSearch per turn: **${settings.websearch_per_call ?? 5}**`);
+              this.settingsManager.update({
+                tools_per_call: settings.tools_per_call,
+                websearch_per_call: settings.websearch_per_call,
+              });
+              emitDelta(`Tool limits updated! Tools per turn: **${String(settings.tools_per_call)}**, WebSearch per turn: **${String(settings.websearch_per_call ?? 5)}**`);
             }
           }
           break;
@@ -1275,9 +1285,8 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
             if (isNaN(val) || val < 1) {
               emitDelta(`Invalid value: "${args}". Must be a positive integer.`);
             } else {
-              settings.websearch_per_call = val;
-              this.settingsManager.save();
-              emitDelta(`WebSearch/WebFetch limit per turn set to: **${val}**`);
+              this.settingsManager.update({ websearch_per_call: val });
+              emitDelta(`WebSearch/WebFetch limit per turn set to: **${String(val)}**`);
             }
           }
           break;
@@ -1401,110 +1410,117 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
           const sub = parts[0]?.toLowerCase();
           const arg1 = parts[1]?.toLowerCase();
           const arg2 = parts[2]?.toLowerCase();
+          const d = DEFAULT_SETTINGS.auto_compact;
+
+          /** Persist through update() — get() returns a deep clone, so mutating it is a no-op. */
+          const saveAutoCompact = (patch: Partial<CurieSettings['auto_compact']>) => {
+            this.settingsManager.update({ auto_compact: { ...settings.auto_compact, ...patch } });
+          };
 
           if (sub === 'auto') {
-            const s = settings;
-            if (!s.auto_compact) {
-              s.auto_compact = { enabled: 'on', threshold: 80, warn_threshold: 15, forced_threshold: 85 };
-            }
-
+            const ac = settings.auto_compact ?? d;
             if (!arg1) {
-              emitDelta(`### Auto-Compaction Settings:
-* **Auto-compact**: \`${s.auto_compact.enabled}\`
-* **Threshold**: \`${s.auto_compact.threshold ?? 80}%\`
-* **Warning Threshold**: \`${s.auto_compact.warn_threshold ?? 15}%\`
-* **Pricing Warn**: \`${s.pricing_tier_warn ?? 'off'}\`
+              emitDelta(`### Auto-Compaction Settings
 
-**Usage**: \`/context auto [on|off|threshold N|warn N|pricing on/off]\``);
-            } else if (arg1 === 'on') {
-              s.auto_compact.enabled = 'on';
-              this.settingsManager.save();
-              emitDelta(`Autocompaction enabled.`);
-            } else if (arg1 === 'off') {
-              s.auto_compact.enabled = 'off';
-              this.settingsManager.save();
-              emitDelta(`Autocompaction disabled.`);
-            } else if (arg1 === 'threshold' && arg2) {
+* **Auto-compact**: \`${ac.enabled}\`
+* **Warn at**: \`${String(ac.warn_threshold ?? d.warn_threshold)}%\`
+* **Suggest at**: \`${String(ac.threshold ?? d.threshold)}%\`
+* **Compact at**: \`${String(ac.forced_threshold ?? d.forced_threshold)}%\`
+* **Summarizer model**: \`${ac.model || '(active model)'}\`
+* **Pricing warn**: \`${settings.pricing_tier_warn ?? 'off'}\`
+
+**Usage**: \`/context auto [on|off|threshold N|warn N|forced N|pricing on/off]\``);
+            } else if (arg1 === 'on' || arg1 === 'off') {
+              saveAutoCompact({ enabled: arg1 });
+              emitDelta(`Auto-compaction ${arg1 === 'on' ? 'enabled' : 'disabled'}.`);
+            } else if ((arg1 === 'threshold' || arg1 === 'warn' || arg1 === 'forced') && arg2) {
               const pct = parseInt(arg2, 10);
-              if (isNaN(pct) || pct < 10 || pct > 99) {
-                emitDelta(`Invalid threshold. Use a value between 10 and 99.`);
+              if (isNaN(pct) || pct < 5 || pct > 99) {
+                emitDelta(`Invalid value. Use a percentage between 5 and 99.`);
               } else {
-                s.auto_compact.threshold = pct;
-                this.settingsManager.save();
-                emitDelta(`Compaction threshold set to ${pct}%.`);
+                const key = arg1 === 'threshold' ? 'threshold' : arg1 === 'warn' ? 'warn_threshold' : 'forced_threshold';
+                saveAutoCompact({ [key]: pct });
+                emitDelta(`${arg1 === 'threshold' ? 'Suggest' : arg1 === 'warn' ? 'Warn' : 'Forced compaction'} threshold set to ${String(pct)}%.`);
               }
-            } else if (arg1 === 'warn' && arg2) {
-              const pct = parseInt(arg2, 10);
-              if (isNaN(pct) || pct < 5 || pct > 95) {
-                emitDelta(`Invalid warning threshold. Use a value between 5 and 95.`);
-              } else {
-                s.auto_compact.warn_threshold = pct;
-                this.settingsManager.save();
-                emitDelta(`Warning threshold set to ${pct}%.`);
-              }
-            } else if (arg1 === 'pricing') {
-              if (arg2 === 'on') {
-                s.pricing_tier_warn = 'on';
-                this.settingsManager.save();
-                emitDelta(`Pricing tier warnings enabled.`);
-              } else if (arg2 === 'off') {
-                s.pricing_tier_warn = 'off';
-                this.settingsManager.save();
-                emitDelta(`Pricing tier warnings disabled.`);
-              } else {
-                emitDelta(`Usage: \`/context auto pricing on/off\``);
-              }
+            } else if (arg1 === 'pricing' && (arg2 === 'on' || arg2 === 'off')) {
+              this.settingsManager.update({ pricing_tier_warn: arg2 });
+              emitDelta(`Pricing tier warnings ${arg2 === 'on' ? 'enabled' : 'disabled'}.`);
             } else {
-              emitDelta(`Usage: \`/context auto [on|off|threshold N|warn N|pricing on/off]\``);
+              emitDelta(`Usage: \`/context auto [on|off|threshold N|warn N|forced N|pricing on/off]\``);
             }
           } else if (sub === 'compact') {
-            emitDelta(`### ⚡ Manual Compaction Triggered\n\nAnalyzing conversation history and building summary...`);
+            emitDelta(`Compacting conversation history…`);
             try {
-              const summary = await this.runAutomaticCompaction(sessionId, 'detailed');
-              emitDelta(`\n\n⚡ **Manual Compaction Executed Successfully!**\n\nConversation history has been summarized, reducing the active context usage to just ~500 tokens. The agent will continue seamlessly!\n\n**Restored Context Summary:**\n\n${summary}`);
+              const r = await this.runAutomaticCompaction(sessionId);
+              emitDelta(`\n\n**Compacted.** ${String(r.summarizedMessageCount)} message(s) summarized, ` +
+                `~${formatTokens(r.estimatedTokensBefore)} → ~${formatTokens(r.estimatedTokensAfter)} tokens. ` +
+                `The full transcript is preserved on disk.\n\n**Summary:**\n\n${r.summary}`);
             } catch (err) {
-              emitDelta(`\n\n❌ **Compaction Failed**: ${err instanceof Error ? err.message : String(err)}`);
+              emitDelta(`\n\n**Compaction failed**: ${err instanceof Error ? err.message : String(err)}`);
             }
- } else {
+          } else if (sub === 'messages') {
+            const messages = reconstructMessagesFromEvents(this.sessionStore.loadEvents(sessionId) || []);
+            if (messages.length === 0) {
+              emitDelta(`No messages in this session yet.`);
+              break;
+            }
+            const lines = [`### Messages (${String(messages.length)})`, '', '| # | Role | Tokens | Detail |', '|---|---|---|---|'];
+            messages.forEach((m, i) => {
+              const tokens = estimateRequestTokens({ messages: [m] });
+              const detail = m.role === 'tool'
+                ? (m.toolName ?? 'tool')
+                : m.role === 'user'
+                  ? `${String(m.content).slice(0, 60).replace(/[\n|]/g, ' ')}…`
+                  : m.content.map((b) => b.type === 'tool-use' ? `→ ${b.name}` : b.type).join(', ');
+              lines.push(`| ${String(i + 1)} | ${m.role} | ${formatTokens(tokens)} | ${detail} |`);
+            });
+            emitDelta(lines.join('\n'));
+          } else {
+            // Emit measurements, not markup. The TUI and the web dashboard each
+            // render this natively — the hand-written HTML this replaces showed
+            // a themed gauge in the browser and nothing at all in the terminal.
+            const budget = resolveBudget(settings);
             const activeLoop = this.turnLoops.get(sessionId);
-            const history = activeLoop
-              ? activeLoop.eventBus.history()
-              : (this.sessionStore.loadEvents(sessionId) || []);
-            const usageEvents = history.filter((e: any) => e.type === 'usage');
-            const latestUsage = usageEvents[usageEvents.length - 1];
-            const input = latestUsage ? ((latestUsage as any).inputTokens || 0) : 0;
-            const output = latestUsage ? ((latestUsage as any).outputTokens || 0) : 0;
-            const model = settings.model || 'unknown';
-            const windowSize = settings.providers?.[settings.current_provider as any]?.model_context_window ?? 200000;
-            const pct = input > 0 ? Math.min(100, Math.round((input / windowSize) * 100)) : 0;
+            const model = settings.providers[settings.current_provider]?.model || settings.model;
 
-            const fmt = (n: number) => {
-              if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
-              if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-              return String(n);
+            const messages = activeLoop
+              ? activeLoop.getMessages()
+              : reconstructMessagesFromEvents(this.sessionStore.loadEvents(sessionId) || []);
+            const chars = breakdownChars({
+              system: this.systemPrompt,
+              messages,
+              toolDefinitions: this.tools.map((t) => t.definition),
+            });
+            const toTokens = (c: number) => Math.ceil(c / DEFAULT_CALIBRATION);
+            const breakdown = [
+              { label: 'System prompt', tokens: toTokens(chars.system) },
+              { label: 'Tool definitions', tokens: toTokens(chars.toolDefinitions) },
+              { label: 'Conversation', tokens: toTokens(chars.conversation) },
+              { label: 'Tool results', tokens: toTokens(chars.toolResults) },
+            ];
+            const usedTokens = breakdown.reduce((sum, b) => sum + b.tokens, 0);
+
+            const report = {
+              type: 'context-report' as const,
+              id: crypto.randomUUID(),
+              model,
+              windowTokens: budget.windowTokens,
+              usedTokens,
+              reservedOutput: budget.reservedOutput,
+              breakdown,
+              timestamp: Date.now(),
             };
+            this.sharedEventBus?.emit({ ...report, sessionId } as unknown as Event);
 
-            if (input === 0 && output === 0) {
-              emitDelta(`No token data yet. Start a conversation to see context window usage.\n\nActive model: \`${model}\` (Max Context: \`${fmt(windowSize)}\` tokens).`);
-            } else {
-              const barColor = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--yellow)' : 'var(--green)';
-              const barGradient = pct > 80
-                ? 'linear-gradient(90deg, var(--red), #e08070)'
-                : pct > 50
-                  ? 'linear-gradient(90deg, var(--yellow), #f0d090)'
-                  : 'linear-gradient(90deg, var(--green), #c0d8a8)';
-              emitDelta(`<div style="background:var(--s3);border-radius:8px;padding:12px;margin:8px 0">` +
-                `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">` +
-                `<span style="font-family:monospace;font-size:12px;color:var(--text)">Context Window (${model})</span>` +
-                `<span style="font-family:monospace;font-size:13px;font-weight:bold;color:${barColor}">${pct}%</span>` +
-                `</div>` +
-                `<div style="background:var(--s2);border-radius:4px;height:8px;overflow:hidden">` +
-                `<div style="width:${pct}%;height:100%;background:${barGradient};border-radius:4px"></div>` +
-                `</div>` +
-                `<div style="display:flex;justify-content:space-between;margin-top:8px;font-family:monospace;font-size:11px;color:var(--muted)">` +
-                `<span>In: ${fmt(input)}</span><span>Out: ${fmt(output)}</span><span>Max: ${fmt(windowSize)}</span>` +
-                `</div></div>`);
-            }
+            // Plain-text fallback so the command still says something useful on a
+            // surface that has not yet learned the event.
+            const pct = fillPct(usedTokens, budget);
+            const rows = breakdown
+              .map((b) => `* ${b.label}: ${formatTokens(b.tokens)} (${String(usedTokens > 0 ? Math.round((b.tokens / usedTokens) * 100) : 0)}%)`)
+              .join('\n');
+            emitDelta(`### Context Window — \`${model}\`\n\n` +
+              `**${String(pct)}%** — ${formatTokens(usedTokens)} of ${formatTokens(budget.usableTokens)} usable ` +
+              `(${formatTokens(budget.windowTokens)} window, ${formatTokens(budget.reservedOutput)} reserved for output)\n\n${rows}`);
           }
           break;
         }
@@ -1609,7 +1625,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
 
             case 'enable': {
               settings.heartbeat.schedule = 'on';
-              this.settingsManager.save();
+              this.settingsManager.update({ heartbeat: settings.heartbeat });
               if (this.daemonApp) {
                 this.daemonApp.taskManager.rescheduleFromSettings({
                   HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
@@ -1625,7 +1641,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
 
             case 'disable': {
               settings.heartbeat.schedule = 'off';
-              this.settingsManager.save();
+              this.settingsManager.update({ heartbeat: settings.heartbeat });
               if (this.daemonApp) {
                 this.daemonApp.taskManager.cancelAllHeartbeats();
               }
@@ -1650,7 +1666,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                   emitDelta(`Invalid times: ${invalid.join(', ')}. Hour 0-23, minute 0-59.`);
                 } else {
                   settings.heartbeat.intraday = tokens.join(',');
-                  this.settingsManager.save();
+                  this.settingsManager.update({ heartbeat: settings.heartbeat });
                   if (this.daemonApp && settings.heartbeat.schedule === 'on') {
                     this.daemonApp.taskManager.rescheduleFromSettings({
                       HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
@@ -1677,7 +1693,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                   emitDelta(`Invalid time hour/minute limits.`);
                 } else {
                   settings.heartbeat.daily = rest;
-                  this.settingsManager.save();
+                  this.settingsManager.update({ heartbeat: settings.heartbeat });
                   if (this.daemonApp && settings.heartbeat.schedule === 'on') {
                     this.daemonApp.taskManager.rescheduleFromSettings({
                       HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
@@ -1705,7 +1721,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                   emitDelta(`Invalid day or time format.`);
                 } else {
                   settings.heartbeat.weekly = rest;
-                  this.settingsManager.save();
+                  this.settingsManager.update({ heartbeat: settings.heartbeat });
                   if (this.daemonApp && settings.heartbeat.schedule === 'on') {
                     this.daemonApp.taskManager.rescheduleFromSettings({
                       HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
@@ -1732,7 +1748,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                   emitDelta(`Invalid day of month (1-31) or time format.`);
                 } else {
                   settings.heartbeat.monthly = rest;
-                  this.settingsManager.save();
+                  this.settingsManager.update({ heartbeat: settings.heartbeat });
                   if (this.daemonApp && settings.heartbeat.schedule === 'on') {
                     this.daemonApp.taskManager.rescheduleFromSettings({
                       HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
@@ -1759,7 +1775,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
                   emitDelta(`Invalid dreaming time hour/minute limits.`);
                 } else {
                   settings.heartbeat.dreaming = rest;
-                  this.settingsManager.save();
+                  this.settingsManager.update({ heartbeat: settings.heartbeat });
                   if (this.daemonApp && settings.heartbeat.schedule === 'on') {
                     this.daemonApp.taskManager.rescheduleFromSettings({
                       HEARTBEAT_INTRADAY: settings.heartbeat.intraday,
@@ -2276,138 +2292,56 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
     return true;
   }
 
-  private async runAutomaticCompaction(sessionId: string, depth: 'detailed' | 'brief'): Promise<string> {
+  /**
+   * Compact a session's history.
+   *
+   * The summarization itself lives in `@curie-agent/core` so the TurnLoop can
+   * run it mid-run — this is the out-of-band entry point for `/context compact`
+   * on an idle session.
+   *
+   * Nothing is deleted. A `compaction` marker is appended and message
+   * reconstruction replays forward from it, so the full transcript survives for
+   * the UI, resume and audit while the model carries only the summary.
+   */
+  private async runAutomaticCompaction(sessionId: string): Promise<CompactionResult> {
     if (!this.createProvider) {
       throw new Error('No provider configured');
     }
 
     const settings = this.settingsManager.get();
     const provider = this.createProvider(settings);
-    const model = settings.providers[settings.current_provider]?.model || settings.model;
+    const activeModel = settings.providers[settings.current_provider]?.model || settings.model;
 
     const events = this.sessionStore.loadEvents(sessionId) || [];
     if (events.length === 0) {
       throw new Error('No events to compact');
     }
 
-    // Build human-readable transcript
-    let transcriptParts: string[] = [];
-    for (const e of events) {
-      if (e.type === 'user-prompt' && (e as any).text) {
-        transcriptParts.push(`User: ${(e as any).text}`);
-      } else if (e.type === 'assistant-delta' && (e as any).text) {
-        const lastIdx = transcriptParts.length - 1;
-        if (lastIdx >= 0 && transcriptParts[lastIdx]?.startsWith('Assistant:')) {
-          transcriptParts[lastIdx] += (e as any).text;
-        } else {
-          transcriptParts.push(`Assistant: ${(e as any).text}`);
-        }
-      }
-    }
-    const transcript = transcriptParts.join('\n\n');
-    if (!transcript.trim()) {
+    const messages = reconstructMessagesFromEvents(events);
+    if (messages.length === 0) {
       throw new Error('No conversational history found to compact');
     }
 
-    const systemPrompt = `You are a conversation summarizer. Summarize the provided dialogue in a dense, detailed, high-fidelity paragraph or two. Focus on capturing the original goals, what was accomplished, any modified files or configurations, current settings, and what the pending next steps are. Ensure all key technical details (like file paths, specific code adjustments, command names) are preserved. Do not add any conversational intros or outros; output ONLY the raw summary text.`;
-    const prompt = `Please summarize this conversation history:\n\n${transcript}`;
+    const result = await compactMessages({
+      messages,
+      provider: provider as unknown as Parameters<typeof compactMessages>[0]['provider'],
+      model: settings.auto_compact?.model || activeModel,
+      budget: resolveBudget(settings),
+    });
 
-    const summary = await provider.check(prompt, { model, system: systemPrompt });
-    const cleanSummary = summary.trim();
+    const marker = {
+      type: 'compaction' as const,
+      id: crypto.randomUUID(),
+      summary: result.summary,
+      summarizedMessageCount: result.summarizedMessageCount,
+      tokensBefore: result.estimatedTokensBefore,
+      tokensAfter: result.estimatedTokensAfter,
+      timestamp: Date.now(),
+    };
+    this.sessionStore.appendEvent(sessionId, { ...marker, sessionId } as unknown as Event);
+    this.sharedEventBus?.emit({ ...marker, sessionId } as unknown as Event);
 
-    // Overwrite events log
-    const eventsPath = this.sessionStore.eventsPath(sessionId);
-    const newEvents = [
-      {
-        type: 'session-start',
-        id: crypto.randomUUID(),
-        model,
-        provider: settings.current_provider || 'unknown',
-        cwd: process.cwd(),
-        timestamp: Date.now(),
-      },
-      {
-        type: 'user-prompt',
-        id: crypto.randomUUID(),
-        text: `This is a continuation of a compacted conversation. Here is the high-fidelity summary of our session so far:\n\n${cleanSummary}\n\nLet's continue!`,
-        cwd: process.cwd(),
-        timestamp: Date.now() + 1,
-      },
-      {
-        type: 'assistant-delta',
-        id: crypto.randomUUID(),
-        text: `Got it! I have fully restored our conversation summary and details. Let let me know what you would like to do next!`,
-        timestamp: Date.now() + 2,
-      },
-      {
-        type: 'assistant-stop',
-        id: crypto.randomUUID(),
-        timestamp: Date.now() + 3,
-      }
-    ];
-
-    const data = newEvents.map((e) => JSON.stringify(e)).join('\n') + '\n';
-    writeFileSync(eventsPath, data, 'utf-8');
-
-    return cleanSummary;
+    return result;
   }
 
-  private async checkContextThresholds(sessionId: string): Promise<void> {
-    const settings = this.settingsManager.get();
-    const history = this.sessionStore.loadEvents(sessionId) || [];
-    const usageEvents = history.filter((e: any) => e.type === 'usage');
-    const latestUsage = usageEvents[usageEvents.length - 1] as any;
-    const input = latestUsage?.inputTokens ?? 0;
-
-    if (input === 0) return; // No token data yet
-
-    const windowSize = settings.providers?.[settings.current_provider as any]?.model_context_window ?? 200000;
-    const pct = Math.min(100, Math.round((input / windowSize) * 100));
-
-    const autoCompact = settings.auto_compact || { enabled: 'on', threshold: 80, warn_threshold: 60, forced_threshold: 85 };
-    const warnThresh = autoCompact.warn_threshold ?? 60;
-    const compactThresh = autoCompact.threshold ?? 80;
-    const forcedThresh = autoCompact.forced_threshold ?? 85;
-    const enabled = autoCompact.enabled ?? 'on';
-
-    if (pct >= forcedThresh && enabled === 'on') {
-      try {
-        const summary = await this.runAutomaticCompaction(sessionId, 'detailed');
-        const successMessage = `⚡ **Auto-Compaction Executed Successfully!**\n\nContext usage was at **${pct}%** (forced threshold: **${forcedThresh}%**).\nWe have summarized the conversation, reducing the history size down to just ~500 tokens. The agent will continue seamlessly!\n\n**Restored Context Summary:**\n\n${summary}`;
-        
-        const warningEvent = {
-          type: 'context-warning',
-          id: crypto.randomUUID(),
-          message: successMessage,
-          timestamp: Date.now(),
-        };
-        this.sharedEventBus?.emit({ ...warningEvent, sessionId } as any);
-        this.sessionStore.appendEvent(sessionId, { ...warningEvent, sessionId } as any);
-      } catch (err) {
-        console.error('[compaction] Auto-compaction failed:', err);
-      }
-    } else if (pct >= compactThresh) {
-      const suggestMessage = `⚠️ **Context Fill High (${pct}%)**\n\nYour context fill is at **${pct}%** (Threshold: **${compactThresh}%**). Suggesting conversation compaction.\n\nType \`/context compact\` to run compaction, summarize history, and free memory immediately!`;
-      
-      const warningEvent = {
-        type: 'context-warning',
-        id: crypto.randomUUID(),
-        message: suggestMessage,
-        timestamp: Date.now(),
-      };
-      this.sharedEventBus?.emit({ ...warningEvent, sessionId } as any);
-      this.sessionStore.appendEvent(sessionId, { ...warningEvent, sessionId } as any);
-    } else if (pct >= warnThresh) {
-      const warnMessage = `⚠️ **Context Warning (${pct}%)**\n\nContext window is **${pct}%** full (Warning threshold: **${warnThresh}%**).`;
-      
-      const warningEvent = {
-        type: 'context-warning',
-        id: crypto.randomUUID(),
-        message: warnMessage,
-        timestamp: Date.now(),
-      };
-      this.sharedEventBus?.emit({ ...warningEvent, sessionId } as any);
-      this.sessionStore.appendEvent(sessionId, { ...warningEvent, sessionId } as any);
-    }
-  }
 }

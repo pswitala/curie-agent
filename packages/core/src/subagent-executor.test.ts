@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SubagentExecutor } from './subagent-executor.js';
 import { EventBus } from './event-bus.js';
 import { SessionStore } from './session-store.js';
+import { DEFAULT_SETTINGS } from './settings.js';
 
 function createMockProvider() {
   return {
@@ -83,6 +84,44 @@ describe('SubagentExecutor', () => {
   it('should shutdown cleanly', () => {
     executor.shutdown();
     expect(executor.list().length).toBe(0);
+  });
+
+  it('cancel() aborts the running child TurnLoop', async () => {
+    // A provider that streams forever unless the TurnLoop breaks out of it.
+    const neverEndingProvider = {
+      name: 'test',
+      stream: vi.fn(() => ({
+        iterable: (async function* () {
+          for (;;) {
+            await new Promise((r) => setTimeout(r, 1));
+            yield { type: 'text-delta', text: '.' };
+          }
+        })(),
+        cancel: vi.fn(),
+      })),
+      check: vi.fn(() => Promise.resolve('APPROVE')),
+    };
+
+    const handle = await executor.spawn({
+      provider: neverEndingProvider as any,
+      model: 'test-model',
+      tools: [],
+      cwd: '/tmp',
+      settings: DEFAULT_SETTINGS,
+      prompt: 'run forever',
+    });
+
+    // Let the loop actually enter the stream before cancelling.
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(executor.cancel(handle.agentId)).toBe(true);
+
+    const final = await executor.waitFor(handle.agentId);
+    expect(final?.status).toBe('cancelled');
+  });
+
+  it('waitFor() returns undefined for an unknown agent', async () => {
+    expect(await executor.waitFor('nonexistent')).toBeUndefined();
   });
 
   it('should enforce concurrency limit', async () => {

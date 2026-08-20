@@ -77,9 +77,10 @@ describe('reconstructMessages', () => {
 
     expect(messages).toHaveLength(2);
     expect(messages[0]).toEqual({ role: 'user', content: withMessageTimestamp('hello', 1000) });
+    // Consecutive deltas coalesce into one block, not one block per delta.
     expect(messages[1]).toEqual({
       role: 'assistant',
-      content: [{ type: 'text', text: 'Hi ' }, { type: 'text', text: 'there!' }],
+      content: [{ type: 'text', text: 'Hi there!' }],
     });
   });
 
@@ -112,7 +113,7 @@ describe('reconstructMessages', () => {
 
     expect(messages).toHaveLength(3);
     expect(messages[0]).toEqual({ role: 'user', content: withMessageTimestamp('read file', 1000) });
-    expect(messages[1]).toEqual({
+    expect(messages[1]).toMatchObject({
       role: 'assistant',
       content: [
         { type: 'text', text: 'Let me read ' },
@@ -239,12 +240,13 @@ describe('reconstructMessages', () => {
     // Turn 1: user message
     expect(messages[0]).toEqual({ role: 'user', content: withMessageTimestamp('do stuff', 1000) });
 
-    // Turn 1: assistant with 2 tool-use blocks
-    expect(messages[1]).toEqual({
+    // Turn 1: assistant with 2 tool-use blocks. The two deltas coalesce into a
+    // single text block — one block per persisted delta would make a resumed
+    // session hundreds of tiny blocks of pure JSON overhead.
+    expect(messages[1]).toMatchObject({
       role: 'assistant',
       content: [
-        { type: 'text', text: 'checking ' },
-        { type: 'text', text: 'and ' },
+        { type: 'text', text: 'checking and ' },
         { type: 'tool-use', id: 'call_1', name: 'Read', input: { path: '/a.txt' } },
         { type: 'tool-use', id: 'call_2', name: 'Glob', input: { pattern: '*.txt' } },
       ],

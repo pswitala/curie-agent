@@ -6,6 +6,11 @@ import type { CurieSettings } from './settings.js';
 import { createSnapshot } from './safety/snapshot.js';
 import { summarizeToolInput } from './safety/tool-digest.js';
 import { withOsContext, withMessageTimestamp } from './context.js';
+import {
+  resolveBudget, estimateRequestTokens, breakdownChars, fillPct, classify, calibrate,
+  formatTokens, DEFAULT_CALIBRATION,
+} from './context-budget.js';
+import { compactMessages, buildSummaryMessage } from './compaction.js';
 
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'max' | 'auto';
 
@@ -26,8 +31,12 @@ export interface ProviderStream {
     maxTokens?: number;
     sessionId?: string;
   }): CancelableIterable<ProviderEvent>;
-  /** Non-streaming call — used for quick evaluations (e.g. harm-check). */
-  check(prompt: string, args?: { model?: string; system?: string; signal?: AbortSignal }): Promise<string>;
+  /**
+   * Non-streaming call — used for quick evaluations (harm-check) and for
+   * writing compaction summaries. `maxTokens` matters for the latter: the
+   * adapters' built-in defaults are sized for one-word harm verdicts.
+   */
+  check(prompt: string, args?: { model?: string; system?: string; signal?: AbortSignal; maxTokens?: number }): Promise<string>;
 }
 
 export interface Tool {
@@ -93,8 +102,119 @@ export type Message =
 // Brief delay to let WebSocket events flush to clients between approval requests.
 const approvalThrottleMs = 50;
 
+/**
+ * Ceiling on mid-run compactions. If a fresh summary plus the protected tail is
+ * still over budget, the history is not the problem and looping would just burn
+ * summarizer calls — fall through to the hard abort.
+ */
+const MAX_COMPACTIONS_PER_RUN = 3;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Rebuild the provider message array from a session's persisted events.
+ *
+ * Module-level so the daemon can compact an idle session without instantiating
+ * a TurnLoop — one implementation, so live and out-of-band paths cannot drift.
+ */
+export function reconstructMessagesFromEvents(allEvents: Event[]): Message[] {
+  const messages: Message[] = [];
+
+  // Compaction is append-only: the full log stays on disk for the UI and for
+  // audit, but the model only carries history from the last marker forward,
+  // seeded by that marker's summary.
+  let events = allEvents;
+  let seededFromCompaction = false;
+  for (let i = allEvents.length - 1; i >= 0; i--) {
+    const e = allEvents[i];
+    if (e?.type === 'compaction') {
+      messages.push(buildSummaryMessage(e.summary, e.timestamp));
+      events = allEvents.slice(i + 1);
+      seededFromCompaction = true;
+      break;
+    }
+  }
+
+  let currentTurn = {
+    assistantDeltas: [] as string[],
+    thinkingDeltas: [] as string[],
+    toolCalls: [] as Array<{ toolCallId: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }>,
+    toolResults: [] as Array<{ toolCallId: string; output: unknown }>,
+  };
+  // The summary message stands in for the user turn a mid-run compaction has
+  // no counterpart for, so the assistant events that follow it are replayed.
+  let hasActiveTurn = seededFromCompaction;
+
+  for (const event of events) {
+    if (event.type === 'user-prompt') {
+      if (hasActiveTurn) {
+        messages.push(...buildTurnMessages(currentTurn));
+      }
+      messages.push({ role: 'user', content: withMessageTimestamp(event.text, event.timestamp) });
+      currentTurn = { assistantDeltas: [], thinkingDeltas: [], toolCalls: [], toolResults: [] };
+      hasActiveTurn = true;
+      continue;
+    }
+    if (!hasActiveTurn) continue;
+
+    if (event.type === 'assistant-delta') {
+      currentTurn.assistantDeltas.push(event.text);
+    } else if (event.type === 'thinking-delta') {
+      currentTurn.thinkingDeltas.push(event.text);
+    } else if (event.type === 'tool-call') {
+      currentTurn.toolCalls.push({ toolCallId: event.toolCallId, name: event.name, input: event.input, thoughtSignature: event.thoughtSignature });
+    } else if (event.type === 'tool-result') {
+      currentTurn.toolResults.push({ toolCallId: event.toolCallId, output: event.output });
+    }
+  }
+  if (hasActiveTurn) {
+    messages.push(...buildTurnMessages(currentTurn));
+  }
+
+  return messages;
+}
+
+function buildTurnMessages(turn: {
+  assistantDeltas: string[];
+  thinkingDeltas: string[];
+  toolCalls: Array<{ toolCallId: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }>;
+  toolResults: Array<{ toolCallId: string; output: unknown }>;
+}): Message[] {
+  const msgs: Message[] = [];
+
+  // Assistant message: text blocks + tool-use blocks.
+  //
+  // Deltas are joined into ONE block per kind. Pushing one block per persisted
+  // delta turned a resumed session into hundreds of five-character blocks —
+  // pure JSON overhead on every subsequent request.
+  //
+  // Thinking is dropped entirely on replay: signatures are not persisted, and
+  // Anthropic rejects unsigned thinking blocks. Reconstructed thinking has no
+  // value to the model anyway; the text and tool calls it produced are kept.
+  const assistantBlocks: AssistantBlock[] = [];
+  const text = turn.assistantDeltas.join('');
+  if (text) {
+    assistantBlocks.push({ type: 'text', text });
+  }
+  for (const tc of turn.toolCalls) {
+    assistantBlocks.push({ type: 'tool-use', id: tc.toolCallId, name: tc.name, input: tc.input, thoughtSignature: tc.thoughtSignature });
+  }
+  if (assistantBlocks.length > 0) {
+    msgs.push({ role: 'assistant', content: assistantBlocks });
+  }
+
+  // Tool messages
+  for (const tr of turn.toolResults) {
+    const tc = turn.toolCalls.find(c => c.toolCallId === tr.toolCallId);
+    if (tc) {
+      const content = typeof tr.output === 'string' ? tr.output : JSON.stringify(tr.output);
+      msgs.push({ role: 'tool', toolUseId: tc.toolCallId, toolName: tc.name, content });
+    }
+  }
+
+  return msgs;
 }
 
 export class TurnLoop {
@@ -108,6 +228,15 @@ export class TurnLoop {
   private messages: Message[] = [];
   private activeSessionId: string | undefined;
   private recoveredTurns: number = 0;
+  /**
+   * Learned chars-per-token for this session. Seeded at the English default and
+   * corrected from every real `usage` report — a Polish or CJK transcript runs
+   * well under 4 chars/token, which is how a run can be estimated at half its
+   * true size and sail past the gate.
+   */
+  private calibration: number = DEFAULT_CALIBRATION;
+  /** Characters in the last request sent, used to calibrate against its usage report. */
+  private lastRequestChars = 0;
 
   constructor(config: TurnLoopConfig, store?: SessionStore) {
     this.config = config;
@@ -179,78 +308,8 @@ export class TurnLoop {
     }
   }
 
-  private reconstructMessages(events: Event[]): Message[] {
-    const messages: Message[] = [];
-    let currentTurn = {
-      assistantDeltas: [] as string[],
-      thinkingDeltas: [] as string[],
-      toolCalls: [] as Array<{ toolCallId: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }>,
-      toolResults: [] as Array<{ toolCallId: string; output: unknown }>,
-    };
-    let hasActiveTurn = false;
-
-    for (const event of events) {
-      if (event.type === 'user-prompt') {
-        if (hasActiveTurn) {
-          messages.push(...this.buildTurnMessages(currentTurn));
-        }
-        messages.push({ role: 'user', content: withMessageTimestamp(event.text, event.timestamp) });
-        currentTurn = { assistantDeltas: [], thinkingDeltas: [], toolCalls: [], toolResults: [] };
-        hasActiveTurn = true;
-        continue;
-      }
-      if (!hasActiveTurn) continue;
-
-      if (event.type === 'assistant-delta') {
-        currentTurn.assistantDeltas.push(event.text);
-      } else if (event.type === 'thinking-delta') {
-        currentTurn.thinkingDeltas.push(event.text);
-      } else if (event.type === 'tool-call') {
-        currentTurn.toolCalls.push({ toolCallId: event.toolCallId, name: event.name, input: event.input, thoughtSignature: event.thoughtSignature });
-      } else if (event.type === 'tool-result') {
-        currentTurn.toolResults.push({ toolCallId: event.toolCallId, output: event.output });
-      }
-    }
-    if (hasActiveTurn) {
-      messages.push(...this.buildTurnMessages(currentTurn));
-    }
-
-    return messages;
-  }
-
-  private buildTurnMessages(turn: {
-    assistantDeltas: string[];
-    thinkingDeltas: string[];
-    toolCalls: Array<{ toolCallId: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }>;
-    toolResults: Array<{ toolCallId: string; output: unknown }>;
-  }): Message[] {
-    const msgs: Message[] = [];
-
-    // Assistant message: thinking blocks + text blocks + tool-use blocks
-    const assistantBlocks: AssistantBlock[] = [];
-    for (const text of turn.thinkingDeltas) {
-      assistantBlocks.push({ type: 'thinking', thinking: text, signature: '' });
-    }
-    for (const text of turn.assistantDeltas) {
-      assistantBlocks.push({ type: 'text', text });
-    }
-    for (const tc of turn.toolCalls) {
-      assistantBlocks.push({ type: 'tool-use', id: tc.toolCallId, name: tc.name, input: tc.input, thoughtSignature: tc.thoughtSignature });
-    }
-    if (assistantBlocks.length > 0) {
-      msgs.push({ role: 'assistant', content: assistantBlocks });
-    }
-
-    // Tool messages
-    for (const tr of turn.toolResults) {
-      const tc = turn.toolCalls.find(c => c.toolCallId === tr.toolCallId);
-      if (tc) {
-        const content = typeof tr.output === 'string' ? tr.output : JSON.stringify(tr.output);
-        msgs.push({ role: 'tool', toolUseId: tc.toolCallId, toolName: tc.name, content });
-      }
-    }
-
-    return msgs;
+  private reconstructMessages(allEvents: Event[]): Message[] {
+    return reconstructMessagesFromEvents(allEvents);
   }
 
   async run(prompt: string): Promise<TurnLoopResult> {
@@ -324,6 +383,19 @@ export class TurnLoop {
     let continuationCount = 0;
     const maxContinuations = 5;
 
+    // Run-scoped state. The tool counters below are per-turn; these bound the
+    // whole run, which is what a 50-turn research loop actually needs.
+    let compactionsThisRun = 0;
+    let runToolCalls = 0;
+    let runWebsearchCalls = 0;
+    const advisoriesEmitted = new Set<string>();
+    /** Emit a context advisory at most once per run — a 50-turn run should not repeat it 50 times. */
+    const emitOnce = (key: string, message: string) => {
+      if (advisoriesEmitted.has(key)) return;
+      advisoriesEmitted.add(key);
+      emit({ type: 'context-warning', id: session.id, message, timestamp: Date.now() });
+    };
+
     try {
       while (turn < maxTurns && !this.abort) {
         turn++;
@@ -361,31 +433,85 @@ export class TurnLoop {
         // Capture abortController before the loop — it's always set by this point.
         const abortCtrl = self.abortController as AbortController;
 
-        // Pre-flight: abort before sending if estimated payload exceeds context window.
-        // Count actual text content chars (not JSON structure) and divide by 4 (~4 chars/token).
+        // Pre-flight budget check. Runs before EVERY provider call, so a single
+        // long run is governed the same way a multi-prompt conversation is —
+        // the previous design only checked between user prompts, which is why a
+        // 50-turn research run could grow unbounded and then hard-abort.
         {
-          const ctxWindow = self.config.settings.providers[self.config.settings.current_provider]?.model_context_window ?? 131072;
-          const reservedForOutput = self.config.settings.providers[self.config.settings.current_provider]?.max_output_tokens ?? 65536;
-          let contentChars = (self.config.system?.length ?? 0) + 200; // system prompt + date context overhead
-          for (const m of streamMessages as Array<{ role: string; content: unknown }>) {
-            if (typeof m.content === 'string') {
-              contentChars += m.content.length;
-            } else if (Array.isArray(m.content)) {
-              for (const b of m.content as Array<{ type?: string; text?: string; thinking?: string; input?: unknown }>) {
-                if (b.text) contentChars += b.text.length;
-                else if (b.thinking) contentChars += b.thinking.length;
-                else if (b.input) contentChars += JSON.stringify(b.input).length;
-              }
+          const budget = resolveBudget(self.config.settings);
+          const toolDefinitions = self.config.tools.map((t) => t.definition);
+          const parts = breakdownChars({ system: self.config.system, messages: streamMessages, toolDefinitions });
+          self.lastRequestChars = parts.system + parts.toolDefinitions + parts.conversation + parts.toolResults;
+
+          const estimated = estimateRequestTokens({
+            system: self.config.system, messages: streamMessages, toolDefinitions, calibration: self.calibration,
+          });
+          const pct = fillPct(estimated, budget);
+          const autoCompact = self.config.settings.auto_compact;
+          const status = classify(pct, autoCompact);
+
+          // Bus only, not persisted: this fires before every provider call, so
+          // appending it would add one JSONL line per turn of pure telemetry.
+          // The `compaction` marker below IS persisted — replay depends on it.
+          self.bus.emit({
+            type: 'context-report', id: session.id, model: self.config.model,
+            windowTokens: budget.windowTokens, usedTokens: estimated, reservedOutput: budget.reservedOutput,
+            breakdown: [
+              { label: 'System prompt', tokens: Math.ceil(parts.system / self.calibration) },
+              { label: 'Tool definitions', tokens: Math.ceil(parts.toolDefinitions / self.calibration) },
+              { label: 'Conversation', tokens: Math.ceil(parts.conversation / self.calibration) },
+              { label: 'Tool results', tokens: Math.ceil(parts.toolResults / self.calibration) },
+            ],
+            timestamp: Date.now(),
+          });
+
+          if (status === 'forced' && compactionsThisRun < MAX_COMPACTIONS_PER_RUN) {
+            compactionsThisRun++;
+            emit({ type: 'status', id: session.id, message: `Context ${String(pct)}% full — compacting conversation…`, timestamp: Date.now() });
+            try {
+              const result = await compactMessages({
+                messages: self.messages,
+                provider: self.config.provider,
+                model: autoCompact?.model || self.config.model,
+                budget,
+                calibration: self.calibration,
+                signal: self.abortController?.signal,
+              });
+              const compactionTs = Date.now();
+              self.messages = [buildSummaryMessage(result.summary, compactionTs), ...result.keptMessages];
+              emit({
+                type: 'compaction', id: session.id, summary: result.summary,
+                summarizedMessageCount: result.summarizedMessageCount,
+                tokensBefore: result.estimatedTokensBefore, tokensAfter: result.estimatedTokensAfter,
+                timestamp: compactionTs,
+              });
+              // Re-estimate against the compacted history before sending anything.
+              turn--;
+              continue;
+            } catch (err) {
+              // Fall through to the hard abort below — compaction failing is not
+              // a reason to send a request we know is over budget.
+              emit({ type: 'status', id: session.id, timestamp: Date.now(), message:
+                `Compaction failed: ${err instanceof Error ? err.message : String(err)}` });
             }
           }
-          const estimatedInputTokens = Math.ceil(contentChars / 4);
-          if (estimatedInputTokens > ctxWindow - reservedForOutput) {
+
+          if (estimated > budget.usableTokens) {
             emit({ type: 'error', id: session.id, timestamp: Date.now(), message:
-              `Estimated input (~${Math.round(estimatedInputTokens / 1000)}k tokens) would exceed the context window ` +
-              `(${Math.round(ctxWindow / 1000)}k) for provider "${self.config.settings.current_provider}". ` +
-              `Run /context compact to summarize history, or switch to a model with a larger context window.` });
+              `Estimated input (~${formatTokens(estimated)} tokens) would exceed the usable context ` +
+              `(${formatTokens(budget.usableTokens)} of a ${formatTokens(budget.windowTokens)} window, ` +
+              `${formatTokens(budget.reservedOutput)} reserved for output) for provider ` +
+              `"${self.config.settings.current_provider}"` +
+              (compactionsThisRun > 0 ? ` — still over budget after ${String(compactionsThisRun)} compaction(s).` : '.') +
+              ` Run /context compact, or switch to a model with a larger context window.` });
             emit({ type: 'session-stop', id: session.id, reason: 'error', timestamp: Date.now() });
             return { events: self.bus.history(), sessionId: session.id, reason: 'error' };
+          }
+
+          if (status === 'suggest') {
+            emitOnce('suggest', `Context ${String(pct)}% full — run \`/context compact\` to summarize history.`);
+          } else if (status === 'warn') {
+            emitOnce('warn', `Context ${String(pct)}% full.`);
           }
         }
 
@@ -435,6 +561,12 @@ export class TurnLoop {
                 break;
 
               case 'usage':
+                // Correct the chars-per-token ratio against ground truth, so the
+                // next pre-flight estimate reflects this conversation's actual
+                // tokenizer density rather than an English-prose assumption.
+                if (self.lastRequestChars > 0 && event.inputTokens > 0) {
+                  self.calibration = calibrate(self.lastRequestChars, event.inputTokens);
+                }
                 emit({ type: 'usage', id: session.id, inputTokens: event.inputTokens, outputTokens: event.outputTokens, cacheReadTokens: event.cacheReadTokens, cacheWriteTokens: event.cacheWriteTokens, timestamp: Date.now() });
                 break;
 
@@ -555,26 +687,40 @@ export class TurnLoop {
           if (this.abort) break;
 
           // --- Tool usage limits ---
+          // Per-turn caps bound one model response; per-run caps bound the whole
+          // `run()`. Without the latter, `maxTurns` 50 x `tools_per_call` 10 is
+          // 500 tool calls in a single user turn with nothing to stop it.
           const totalLimit = this.config.settings.tools_per_call ?? 10;
           const websearchLimit = this.config.settings.websearch_per_call ?? 5;
+          const runToolLimit = this.config.settings.tools_per_run ?? 200;
+          const runWebsearchLimit = this.config.settings.websearch_per_run ?? 60;
 
-          if (totalToolCalls >= totalLimit) {
-            const msg = `Tool call limit reached (${totalLimit} per turn). Skipping remaining tool call(s).`;
+          /** Skip this call and every one after it in the batch, telling the model why. */
+          const skipRemaining = (msg: string) => {
             emit({ type: 'status', id: session.id, message: msg, timestamp: Date.now() });
             for (const remaining of toolCalls.slice(toolCalls.indexOf(tc))) {
               this.messages.push({ role: 'tool', toolUseId: remaining.id, toolName: remaining.name, content: `Skipped: ${msg}` });
               emit({ type: 'tool-result', id: session.id, toolCallId: remaining.id, output: null, error: msg, timestamp: Date.now() });
             }
+          };
+
+          if (totalToolCalls >= totalLimit) {
+            skipRemaining(`Tool call limit reached (${String(totalLimit)} per turn). Skipping remaining tool call(s).`);
+            break;
+          }
+
+          if (runToolCalls >= runToolLimit) {
+            skipRemaining(`Tool call limit reached (${String(runToolLimit)} for this run). Wrap up and summarize what you have.`);
             break;
           }
 
           if (websearchTools.has(tc.name) && websearchToolCalls >= websearchLimit) {
-            const msg = `WebSearch/WebFetch limit reached (${websearchLimit} per turn). Skipping remaining tool call(s).`;
-            emit({ type: 'status', id: session.id, message: msg, timestamp: Date.now() });
-            for (const remaining of toolCalls.slice(toolCalls.indexOf(tc))) {
-              this.messages.push({ role: 'tool', toolUseId: remaining.id, toolName: remaining.name, content: `Skipped: ${msg}` });
-              emit({ type: 'tool-result', id: session.id, toolCallId: remaining.id, output: null, error: msg, timestamp: Date.now() });
-            }
+            skipRemaining(`WebSearch/WebFetch limit reached (${String(websearchLimit)} per turn). Skipping remaining tool call(s).`);
+            break;
+          }
+
+          if (websearchTools.has(tc.name) && runWebsearchCalls >= runWebsearchLimit) {
+            skipRemaining(`WebSearch/WebFetch limit reached (${String(runWebsearchLimit)} for this run). Wrap up with the sources you have.`);
             break;
           }
           // --- End tool usage limits ---
@@ -645,7 +791,11 @@ export class TurnLoop {
           }
 
           totalToolCalls++;
-          if (websearchTools.has(tc.name)) websearchToolCalls++;
+          runToolCalls++;
+          if (websearchTools.has(tc.name)) {
+            websearchToolCalls++;
+            runWebsearchCalls++;
+          }
 
           const tool = this.config.tools.find((t) => t.definition.name === tc.name);
           if (!tool) {

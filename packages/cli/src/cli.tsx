@@ -11,10 +11,10 @@ import { readFileSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 
 import { ChatSurface, COLD_START_BANNER, getInitialWizardState, advanceStep, getConfirmationMessage, isAlreadyInitialized, PROVIDER_INFO } from '@curie-agent/tui';
-import type { InitWizardState } from '@curie-agent/tui';
+import type { InitWizardState, ChatMessage } from '@curie-agent/tui';
 import { findSlashCommand } from '@curie-agent/protocol';
 import { getTheme } from '@curie-agent/render';
-import { SettingsManager, DEFAULT_SETTINGS, createIdentityFilesAuto, buildBaseSystemPrompt } from '@curie-agent/core';
+import { SettingsManager, DEFAULT_SETTINGS, createIdentityFilesAuto, buildBaseSystemPrompt, estimateCost, formatTokens } from '@curie-agent/core';
 import type { CurieSettings } from '@curie-agent/core';
 import { ensureToken, loadToken } from '@curie-agent/daemon';
 import type { DaemonServer } from '@curie-agent/daemon';
@@ -724,11 +724,12 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
   const rpcRef = useRef<DaemonRpcClient>(new DaemonRpcClient(daemonUrl, token));
   const wsRef = useRef<DaemonWsClient>(new DaemonWsClient(daemonUrl, token));
 
-  const [messages, setMessages] = useState<
-    Array<{ role: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'decision' | 'heartbeat' | 'task' | 'debug' | 'thinking'; content: string; title?: string }>
-  >([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const [currentModel, setCurrentModel] = useState(initialModel || '');
+  // Read inside WebSocket handlers, which close over their first render.
+  const currentModelRef = useRef(currentModel);
+  useEffect(() => { currentModelRef.current = currentModel; }, [currentModel]);
   const [currentProvider, setCurrentProvider] = useState('connecting...');
   const [currentTheme, setCurrentTheme] = useState(themeName);
   const [currentMode, setCurrentMode] = useState(initialMode || 'auto');
@@ -741,6 +742,12 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
   const [inputTokens, setInputTokens] = useState<number | undefined>(undefined);
   const [outputTokens, setOutputTokens] = useState<number | undefined>(undefined);
   const [cacheReadTokens, setCacheReadTokens] = useState<number | undefined>(undefined);
+  // Context gauge. These were hardcoded to 200_000 / 0 / 0, so the footer read
+  // `(0%)` in muted grey no matter how full the window actually was.
+  const [contextWindowSize, setContextWindowSize] = useState(200_000);
+  const [contextUsedTokens, setContextUsedTokens] = useState(0);
+  const [contextUsableTokens, setContextUsableTokens] = useState(200_000);
+  const [costUsd, setCostUsd] = useState(0);
   const [currentTab, setCurrentTab] = useState<TabId>('assistant');
   const [duration, setDuration] = useState('00:00:00');
   const [status, setStatus] = useState('idle');
@@ -772,6 +779,8 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
   // assistant-delta without a preceding session-start, so busyRef alone would
   // gate the reply out and the command would appear to do nothing.
   const slashPendingRef = useRef(false);
+  /** Set while a bare `/context` is in flight, so only that report renders a full breakdown. */
+  const contextReportRequestedRef = useRef(false);
   // Set when the in-flight slash command mutates settings the header/footer
   // display, so we re-read them from the daemon once it finishes.
   const syncAfterSlashRef = useRef(false);
@@ -916,6 +925,52 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
       if (event.inputTokens) setInputTokens(Number(event.inputTokens));
       if (event.outputTokens) setOutputTokens(Number(event.outputTokens));
       if (event.cacheReadTokens != null) setCacheReadTokens(Number(event.cacheReadTokens));
+      setCostUsd(prev => prev + estimateCost(
+        currentModelRef.current, Number(event.inputTokens ?? 0), Number(event.outputTokens ?? 0),
+      ));
+    });
+
+    // The turn loop emits this before every provider call, so the gauge tracks
+    // the live prompt size rather than the last completed request.
+    ws.on('context-report', (event: WsEvent) => {
+      const window = Number(event.windowTokens ?? 0);
+      const reserved = Number(event.reservedOutput ?? 0);
+      if (window > 0) {
+        setContextWindowSize(window);
+        setContextUsableTokens(Math.max(1, window - reserved));
+      }
+      setContextUsedTokens(Number(event.usedTokens ?? 0));
+
+      // Only `/context` renders the full breakdown into the transcript; the
+      // per-turn reports would otherwise flood the chat.
+      if (!contextReportRequestedRef.current) return;
+      contextReportRequestedRef.current = false;
+      setMessages(prev => [...prev, {
+        role: 'context-report',
+        content: '',
+        contextReport: {
+          model: String(event.model ?? ''),
+          windowTokens: window,
+          usedTokens: Number(event.usedTokens ?? 0),
+          reservedOutput: reserved,
+          breakdown: (event.breakdown as Array<{ label: string; tokens: number }> | undefined) ?? [],
+        },
+      }]);
+    });
+
+    ws.on('compaction', (event: WsEvent) => {
+      const before = Number(event.tokensBefore ?? 0);
+      const after = Number(event.tokensAfter ?? 0);
+      setContextUsedTokens(after);
+      setMessages(prev => [...prev, {
+        role: 'system',
+        content: `Context compacted — ${String(event.summarizedMessageCount ?? 0)} message(s) summarized, ` +
+          `~${formatTokens(before)} → ~${formatTokens(after)} tokens. Full transcript preserved on disk.`,
+      }]);
+    });
+
+    ws.on('context-warning', (event: WsEvent) => {
+      setMessages(prev => [...prev, { role: 'system', content: String(event.message ?? '') }]);
     });
 
     ws.on('error', (event: WsEvent) => {
@@ -1102,6 +1157,8 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
       if (def.handler === 'daemon') {
         slashPendingRef.current = true;
         syncAfterSlashRef.current = STATE_SYNC_COMMANDS.has(def.name);
+        // A bare `/context` (no subcommand) asks for the rendered breakdown.
+        contextReportRequestedRef.current = def.name === 'context' && !args.trim();
         setStatus('working');
         try {
           await rpcRef.current.sessionSend(
@@ -1329,10 +1386,11 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
       inputTokens={inputTokens}
       outputTokens={outputTokens}
       cacheReadTokens={cacheReadTokens}
-      contextWindowSize={200_000}
-      contextFillPct={0}
+      contextWindowSize={contextWindowSize}
+      contextFillPct={Math.min(100, Math.round((contextUsedTokens / contextUsableTokens) * 100))}
+      contextUsedTokens={contextUsedTokens}
       duration={duration}
-      costUsd={0}
+      costUsd={costUsd}
       activeTab={currentTab}
       status={status}
       contextMode="CodeContext Zen"

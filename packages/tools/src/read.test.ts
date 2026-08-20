@@ -84,6 +84,26 @@ describe('Read tool', () => {
     expect(result.error).toContain('PDF files are not supported');
   });
 
+  it('reads a small image as base64', async () => {
+    const filePath = path.join(tmpDir, 'small.png');
+    fs.writeFileSync(filePath, Buffer.alloc(1024, 1));
+    const result = await runRead({ file_path: filePath });
+    expect(result.error).toBeUndefined();
+    const out = result.output as { type: string; encoding: string; data: string };
+    expect(out.type).toBe('image');
+    expect(out.encoding).toBe('base64');
+    expect(out.data.length).toBeGreaterThan(0);
+  });
+
+  it('rejects images larger than 1.5 MB', async () => {
+    const filePath = path.join(tmpDir, 'huge.png');
+    fs.writeFileSync(filePath, Buffer.alloc(1_600_000, 1));
+    const result = await runRead({ file_path: filePath });
+    expect(result.output).toBeNull();
+    expect(result.error).toContain('Image too large');
+    expect(result.error).toContain('context window');
+  });
+
   it('accepts the path alias for file_path', async () => {
     const filePath = path.join(tmpDir, 'alias.txt');
     fs.writeFileSync(filePath, 'aliased');

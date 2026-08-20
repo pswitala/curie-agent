@@ -3,6 +3,8 @@ import type { MCPClient } from './client.js';
 import type { Tool as MCPTool } from '@modelcontextprotocol/sdk/types.js';
 import type { CurieSettings } from '@curie-agent/core';
 
+const MAX_OUTPUT = 100_000;
+
 export class MCPToolAdapter implements CurieTool {
   readonly definition: ToolDef;
   private client: MCPClient;
@@ -39,7 +41,13 @@ export class MCPToolAdapter implements CurieTool {
       }
     }
 
-    const outputStr = outputParts.join('\n');
+    let outputStr = outputParts.join('\n');
+    if (outputStr.length > MAX_OUTPUT) {
+      const totalKb = Math.round(outputStr.length / 1000);
+      outputStr =
+        outputStr.slice(0, MAX_OUTPUT) +
+        `\n...[truncated at ${String(MAX_OUTPUT / 1000)} KB of ${String(totalKb)} KB — narrow the tool arguments to get less output]`;
+    }
 
     if (result.isError) {
       return { output: outputStr, error: `MCP tool "${this.mcpToolName}" reported error` };

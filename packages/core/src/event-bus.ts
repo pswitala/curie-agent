@@ -15,6 +15,13 @@ export type Event =
   | { type: 'status'; id: string; message: string; spinner?: boolean; timestamp: number }
   | { type: 'session-resumed'; id: string; turnsRecovered: number; timestamp: number }
 | { type: 'context-warning'; id: string; message: string; timestamp: number }
+// Compaction marker. Appended, never overwriting: message reconstruction replays
+// forward from the last marker, so the full transcript stays on disk for the UI,
+// audit and debugging while the model only carries the summary.
+| { type: 'compaction'; id: string; summary: string; summarizedMessageCount: number; tokensBefore: number; tokensAfter: number; timestamp: number }
+// Context-window snapshot with a per-component split. Carries data, not markup,
+// so the TUI and the web dashboard can each render it natively.
+| { type: 'context-report'; id: string; model: string; windowTokens: number; usedTokens: number; reservedOutput: number; breakdown: Array<{ label: string; tokens: number }>; timestamp: number }
 // Subagent events
 | { type: 'agent-start'; id: string; agentId: string; sessionId: string; prompt: string; timestamp: number }
 | { type: 'agent-text-delta'; id: string; agentId: string; text: string; timestamp: number }

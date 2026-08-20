@@ -105,6 +105,7 @@ export class ChannelManager {
       'tool-result', 'approval-request', 'approval-decision', 'usage',
       'error', 'session-start', 'session-stop', 'hook', 'status',
       'session-resumed', 'context-warning', 'thinking-delta',
+      'compaction', 'context-report',
     ];
     const unsubscribes: Array<() => void> = [];
     for (const type of eventTypes) {

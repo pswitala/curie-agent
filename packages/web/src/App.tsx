@@ -15,6 +15,8 @@ import { useWebSessions } from './hooks/useWebSessions.js';
 import { useSession } from './hooks/useSession.js';
 import { useConfig } from './hooks/useConfig.js';
 import AuthorizationScreen from './components/AuthorizationScreen.js';
+import { formatTokenCount } from './lib/format.js';
+import { estimateCost } from './lib/cost.js';
 
 type View = 'assistant' | 'channels' | 'stats' | 'projects' | 'agents' | 'kanban' | 'wiki' | 'settings';
 
@@ -88,7 +90,7 @@ function AppContent() {
   };
 
   const { sessions, refetch } = useWebSessions();
-  const { events, addLiveEvent } = useSession(activeSessionId);
+  const { events, addLiveEvent, contextReport } = useSession(activeSessionId);
 
   const theme = (get('theme') as string) || 'curie';
 
@@ -301,6 +303,7 @@ function AppContent() {
               <SetupWizard rpc={rpc} onComplete={() => setShowSetupWizard(false)} className="absolute inset-0" />
             ) : activeView === 'assistant' && (
               <ChatArea
+                contextReport={contextReport}
                 cmdResult={cmdResult}
                 onClearCmdResult={handleClearCmdResult}
                 rpc={rpc}
@@ -442,37 +445,11 @@ function AppContent() {
                   const latestUsage = usageEvents[usageEvents.length - 1];
                   const contextTokens = latestUsage ? (latestUsage.inputTokens || 0) : 0;
 
-                  function formatTokenCount(n: number): string {
-                    if (n < 1000) return String(n);
-                    return `${(n / 1000).toFixed(1)}k`;
-                  }
-
                   const currentProvider = (get('current_provider') as string) || 'anthropic';
                   const modelCost = providers.find((p) => p.name === currentProvider)?.model_cost;
                   const m = (get('model') as string) || 'sonnet';
-                  function estimateCost(inputTokens: number, outputTokens: number): number {
-                    if (modelCost) {
-                      const [inStr, outStr] = modelCost.split(';');
-                      const inPrice = parseFloat(inStr || '0');
-                      const outPrice = parseFloat(outStr || '0');
-                      if (!isNaN(inPrice) && !isNaN(outPrice)) {
-                        return (inputTokens * inPrice + outputTokens * outPrice) / 1_000_000;
-                      }
-                    }
-                    const pricing: Record<string, { in: number; out: number }> = {
-                      'opus': { in: 15, out: 75 },
-                      'sonnet': { in: 3, out: 15 },
-                      'haiku': { in: 0.8, out: 4 },
-                      'gpt-4o': { in: 2.5, out: 10 },
-                      'gpt-4': { in: 5, out: 15 },
-                      'qwen': { in: 0.112, out: 0.224 },
-                    };
-                    const key = Object.keys(pricing).find(k => m.toLowerCase().includes(k)) || 'sonnet';
-                    const p = pricing[key]!;
-                    return (inputTokens * p.in + outputTokens * p.out) / 1_000_000;
-                  }
                   const totalCost = usageEvents.reduce((acc, curr) =>
-                    acc + estimateCost(curr.inputTokens || 0, curr.outputTokens || 0), 0);
+                    acc + estimateCost(m, curr.inputTokens || 0, curr.outputTokens || 0, modelCost), 0);
 
                   return (
                     <div className="grid grid-cols-3 gap-3 text-center">

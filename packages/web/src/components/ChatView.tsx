@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { useApi } from '../lib/api-context.js';
 import { formatTime, formatToolArgs, stringifyInput } from '../lib/format.js';
 import ChatInput from './ChatInput.js';
 import ChartBlock from './charts/ChartBlock.js';
 import type { JsonRpcClient } from '../lib/jsonrpc-client.js';
 import type { WsEvent } from '../lib/ws-client.js';
+import type { ContextReport } from '../hooks/useSession.js';
 
 const GREETINGS = [
   'what are we discovering today?',
@@ -38,6 +40,7 @@ interface Props {
   totalTokens?: number;
   contextTokens?: number;
   costUsd?: number;
+  contextReport?: ContextReport | null;
   onSwitchView?: (view: string) => void;
 }
 
@@ -80,6 +83,49 @@ function ThinkingBlock({ content }: { content: string }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(Math.round(n));
+}
+
+/**
+ * Marks where the model's history was summarized.
+ *
+ * The transcript above the divider is still shown in full — compaction is
+ * append-only, so what shrank is what the model carries, not what was recorded.
+ * Without this line the two would look identical and the difference would be
+ * invisible.
+ */
+function CompactionDivider({ entry }: { entry: Extract<MessageEntry, { type: 'compaction' }> }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="px-3 py-2 animate-fadeIn">
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-px" style={{ background: 'var(--b1)' }} />
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-[11px] font-mono px-2 py-0.5 rounded transition-colors duration-150"
+          style={{ color: 'var(--muted)', background: 'var(--s2)', border: '1px solid var(--b1)' }}
+          title="Everything above is preserved on disk; only the model's working history was summarized."
+        >
+          {`context compacted · ${String(entry.summarizedMessageCount)} message${entry.summarizedMessageCount === 1 ? '' : 's'} · ${fmtTokens(entry.tokensBefore)} → ${fmtTokens(entry.tokensAfter)} tokens`}
+          <span className="ml-1.5" style={{ opacity: 0.6 }}>{expanded ? '▾' : '▸'}</span>
+        </button>
+        <div className="flex-1 h-px" style={{ background: 'var(--b1)' }} />
+      </div>
+      {expanded && (
+        <div
+          className="mt-2 text-[12px] leading-[1.6] rounded-lg px-3 py-2 markdown-body"
+          style={{ background: 'var(--s1)', border: '1px solid var(--b1)' }}
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(entry.summary) }}
+        />
+      )}
     </div>
   );
 }
@@ -220,9 +266,34 @@ marked.setOptions({
   breaks: true,
 });
 
-function renderMarkdown(content: string): string {
+/**
+ * marked v18 has no sanitizer, and this output goes straight into
+ * dangerouslySetInnerHTML. Model output and fetched web content both reach it,
+ * so an unsanitized `<img src=x onerror=…>` in a scraped page would execute in
+ * the dashboard. Nothing in the daemon emits raw HTML any more — `/context`
+ * became a structured event — so the allowlist can stay strict.
+ */
+function sanitize(html: string): string {
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: [
+      'p', 'br', 'hr', 'span', 'div',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'strong', 'em', 'b', 'i', 'u', 's', 'del', 'ins', 'mark', 'sub', 'sup',
+      'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+      'blockquote', 'code', 'pre', 'kbd', 'samp', 'var',
+      'a', 'img',
+      'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption',
+      'input', // GFM task-list checkboxes
+    ],
+    ALLOWED_ATTR: ['href', 'title', 'alt', 'src', 'class', 'lang', 'colspan', 'rowspan', 'start', 'type', 'checked', 'disabled'],
+    ALLOWED_URI_REGEXP: /^(?:https?|mailto):/i,
+    FORBID_ATTR: ['style', 'srcset', 'formaction', 'form'],
+  });
+}
+
+export function renderMarkdown(content: string): string {
   try {
-    return marked.parse(content) as string;
+    return sanitize(marked.parse(content) as string);
   } catch {
     return escapeHtml(content);
   }
@@ -479,6 +550,8 @@ type MessageEntry =
   | { type: 'approval-request'; toolCallId: string; name: string; input: Record<string, unknown>; decision: string; mode?: string; time: string }
   | { type: 'reminder-fired'; message: string; taskId: string; time: string }
   | { type: 'error'; content: string; time: string }
+  | { type: 'context-warning'; content: string; time: string }
+  | { type: 'compaction'; summary: string; summarizedMessageCount: number; tokensBefore: number; tokensAfter: number; time: string }
   | { type: 'chart'; toolCallId: string; rawInput: unknown; time: string }
   | AgentActionEntry;
 
@@ -559,9 +632,21 @@ export function eventToMessage(event: WsEvent): MessageEntry | null {
       };
     }
     case 'context-warning':
+      // Its own type, not 'assistant' — buildMessages concatenates assistant
+      // entries with no separator, which welded these onto the model's last
+      // sentence.
       return {
-        type: 'assistant',
+        type: 'context-warning',
         content: (event as any).message || '',
+        time: formatTime(event.timestamp),
+      };
+    case 'compaction':
+      return {
+        type: 'compaction',
+        summary: (event as any).summary || '',
+        summarizedMessageCount: Number((event as any).summarizedMessageCount ?? 0),
+        tokensBefore: Number((event as any).tokensBefore ?? 0),
+        tokensAfter: Number((event as any).tokensAfter ?? 0),
         time: formatTime(event.timestamp),
       };
     case 'error':
@@ -585,7 +670,7 @@ export function eventToMessage(event: WsEvent): MessageEntry | null {
 // so it must NOT trigger turn boundaries. The only real boundaries are:
 // - user / error / heartbeat-brief / reminder-fired events
 // - EOF (final flush)
-function buildMessages(events: WsEvent[]): MessageEntry[] {
+export function buildMessages(events: WsEvent[]): MessageEntry[] {
   const result: MessageEntry[] = [];
   let agentRun: MessageEntry[] = [];
   let assistantBuf = '';
@@ -708,7 +793,7 @@ function buildMessages(events: WsEvent[]): MessageEntry[] {
   return result;
 }
 
-export default function ChatView({ cmdResult, rpc, className, activeSessionId, onCreateSession, onClearCmdResult, events, addLiveEvent, totalTokens, contextTokens, costUsd, onSwitchView }: Props) {
+export default function ChatView({ cmdResult, rpc, className, activeSessionId, onCreateSession, onClearCmdResult, events, addLiveEvent, totalTokens, contextTokens, costUsd, contextReport, onSwitchView }: Props) {
   const { ws, connected, connectionStatus } = useApi();
   const [typing, setTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1280,6 +1365,22 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
                );
              }
 
+             if (msg.type === 'context-warning') {
+               return (
+                 <div key={i} className="px-3 py-0.5 animate-fadeIn">
+                   <div
+                     className="text-[12px] leading-[1.6] rounded-lg px-3 py-2 markdown-body"
+                     style={{ background: 'color-mix(in srgb, var(--yellow) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--yellow) 25%, transparent)' }}
+                     dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+                   />
+                 </div>
+               );
+             }
+
+             if (msg.type === 'compaction') {
+               return <CompactionDivider key={i} entry={msg} />;
+             }
+
              return (
                <div key={i} className="px-3 py-0.5 animate-fadeIn transition-colors duration-100">
                  <div className="flex items-baseline gap-2 mb-1">
@@ -1323,6 +1424,7 @@ export default function ChatView({ cmdResult, rpc, className, activeSessionId, o
           totalTokens={totalTokens}
           contextTokens={contextTokens}
           costUsd={costUsd}
+          contextReport={contextReport}
         />
       </div>
     </div>

@@ -92,6 +92,7 @@ export class GoogleGeminiProvider implements Provider {
       tools?: unknown[];
       thinking?: boolean;
       effort?: string;
+      maxTokens?: number;
     },
   ): Record<string, unknown> {
     const safeModel = model.startsWith('models/') ? model : `models/${model}`;
@@ -101,6 +102,9 @@ export class GoogleGeminiProvider implements Provider {
     }
     if (opts?.tools && opts.tools.length) body.tools = opts.tools;
     const generationConfig: Record<string, unknown> = {};
+    if (opts?.maxTokens) {
+      generationConfig.maxOutputTokens = opts.maxTokens;
+    }
     if (opts?.thinking) {
       generationConfig.thinkingConfig = {
         includeThoughts: true,
@@ -183,6 +187,7 @@ export class GoogleGeminiProvider implements Provider {
       tools: tools ? [{ functionDeclarations: tools }] : undefined,
       thinking,
       effort: args.effort,
+      maxTokens: args.maxTokens,
     });
 
     const controller = new AbortController();
@@ -295,10 +300,13 @@ export class GoogleGeminiProvider implements Provider {
     model?: string;
     system?: string;
     signal?: AbortSignal;
+    /** Callers that need long output (compaction summaries) must raise this. */
+    maxTokens?: number;
   }): Promise<string> {
     const model = args?.model || this.defaultModel;
     const requestBody = this.buildRequestBody(model, [{ role: 'user', parts: [{ text: prompt }] }], {
       system: args?.system,
+      maxTokens: args?.maxTokens,
     });
 
     const response = await fetch(this.apiEndpoint(model, 'generateContent'), {
@@ -332,6 +340,7 @@ export class GoogleGeminiProvider implements Provider {
       tools: tools ? [{ functionDeclarations: tools }] : undefined,
       thinking,
       effort: args.effort,
+      maxTokens: args.maxTokens,
     });
 
     const response = await fetch(this.apiEndpoint(model, 'generateContent'), {

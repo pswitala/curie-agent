@@ -173,6 +173,21 @@ describe('AnthropicProvider', () => {
       expect(usageEvent.cacheWriteTokens).toBe(0);
     });
 
+    it('emits exactly one usage event per turn, from finalMessage()', async () => {
+      // message_delta carries a partial usage; finalMessage() carries the full one.
+      // Only the latter must be emitted, or consumers that sum usage double-count.
+      mockStream.mockReturnValue(makeSdkStream(
+        [{ type: 'message_delta', usage: { input_tokens: 20, output_tokens: 3 } }],
+        { usage: { input_tokens: 20, output_tokens: 5, cache_read_input_tokens: 80 }, content: [] },
+      ));
+      const p = new AnthropicProvider('key');
+      const events = await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }] }).iterable);
+      const usageEvents = events.filter((e: any) => e.type === 'usage') as any[];
+      expect(usageEvents).toHaveLength(1);
+      expect(usageEvents[0].outputTokens).toBe(5);
+      expect(usageEvents[0].inputTokens).toBe(100);
+    });
+
     it('adds cache read/write tokens back into inputTokens on complete()', async () => {
       mockCreate.mockResolvedValue({
         content: [{ type: 'text', text: 'hi there' }],

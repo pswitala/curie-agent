@@ -10,6 +10,9 @@ import type {
 } from './provider.js';
 import { streamOpenAICompatible } from './openai-compatible-stream.js';
 
+/** Default output cap for `check()` — sized for one-word harm verdicts. */
+const CHECK_MAX_TOKENS = 2048;
+
 type CancelableIterable<T> = { iterable: AsyncIterable<T>; cancel(): void };
 
 /** Estimate token count from text byte length. ~4 bytes per token for Llama-family models. */
@@ -153,6 +156,8 @@ export class OllamaProvider implements Provider {
     model?: string;
     system?: string;
     signal?: AbortSignal;
+    /** Callers that need long output (compaction summaries) must raise this. */
+    maxTokens?: number;
   }): Promise<string> {
     const model = args?.model || this.defaultModel;
     const messages: OpenAI.ChatCompletionMessageParam[] = [
@@ -168,7 +173,7 @@ export class OllamaProvider implements Provider {
     const response = await this.client.chat.completions.create({
       model,
       messages,
-      max_tokens: 2048,
+      max_tokens: args?.maxTokens ?? CHECK_MAX_TOKENS,
       temperature: 0,
     }, { signal: args?.signal });
     const result = response.choices[0]?.message?.content?.trim() ?? '';

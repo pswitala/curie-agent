@@ -13,11 +13,24 @@ export interface SessionInfo {
   type?: string;
 }
 
+/** Payload of a `context-report` event — the daemon's context-window snapshot. */
+export interface ContextReport {
+  model: string;
+  windowTokens: number;
+  usedTokens: number;
+  reservedOutput: number;
+  breakdown: { label: string; tokens: number }[];
+}
+
 export function useSession(sessionId: string | null) {
   const { rpc, ws } = useApi();
   const [info, setInfo] = useState<SessionInfo | null>(null);
   const [events, setEvents] = useState<WsEvent[]>([]);
   const [loading, setLoading] = useState(false);
+  // Latest-wins, deliberately NOT appended to `events`: the turn loop emits one
+  // of these before every provider call, so accumulating them would flood the
+  // transcript. They are live telemetry, not conversation.
+  const [contextReport, setContextReport] = useState<ContextReport | null>(null);
 
   // Fetch session and load history
   useEffect(() => {
@@ -72,11 +85,23 @@ export function useSession(sessionId: string | null) {
       'user-prompt', 'assistant-delta', 'assistant-stop', 'tool-call',
       'tool-result', 'error', 'status', 'usage', 'thinking-delta',
       'heartbeat-brief', 'approval-request', 'approval-decision', 'context-warning',
-      'cron-task-fired'
+      'cron-task-fired', 'compaction',
     ] as const;
     for (const eventType of eventTypes) {
       unsubscribes.push(ws.on(eventType, handleEvent));
     }
+
+    unsubscribes.push(ws.on('context-report', (event: WsEvent) => {
+      const evtSessionId = (event as any).sessionId;
+      if (evtSessionId && evtSessionId !== sessionId) return;
+      setContextReport({
+        model: String((event as any).model ?? ''),
+        windowTokens: Number((event as any).windowTokens ?? 0),
+        usedTokens: Number((event as any).usedTokens ?? 0),
+        reservedOutput: Number((event as any).reservedOutput ?? 0),
+        breakdown: ((event as any).breakdown ?? []) as { label: string; tokens: number }[],
+      });
+    }));
 
     return () => {
       for (const unsub of unsubscribes) unsub();
@@ -87,5 +112,5 @@ export function useSession(sessionId: string | null) {
     setEvents(prev => [...prev, event]);
   }, []);
 
-  return { info, events, loading, addLiveEvent };
+  return { info, events, loading, addLiveEvent, contextReport };
 }

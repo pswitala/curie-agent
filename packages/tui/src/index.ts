@@ -22,6 +22,8 @@ export {
 export type { SlashCommandDef, SlashCommandHandler } from './slash-commands.js';
 export type { SlashCommandInput, ChatMessage } from './chat-surface.js';
 export { COLD_START_BANNER } from './chat-surface.js';
+export { ContextReport, formatCtxTokens } from './context-report.js';
+export type { ContextReportData } from './context-report.js';
 export type { TabId } from './tab-bar.js';
 export { ProjectsTab } from './projects-tab.js';
 export type { ProjectEntry } from './projects-tab.js';

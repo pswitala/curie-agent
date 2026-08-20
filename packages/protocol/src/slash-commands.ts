@@ -50,7 +50,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'memory', description: 'View memory file sizes or capture a memory', usage: '/memory [status|add <text>]', category: 'Knowledge', handler: 'daemon' },
   { name: 'todo', description: 'Manage tasks in tasks.json', usage: '/todo <list|add|complete|remove>', category: 'Knowledge', handler: 'daemon' },
   { name: 'stats', description: 'Daily usage, sessions, streaks', usage: '/stats', category: 'Knowledge', handler: 'client' },
-  { name: 'context', description: 'Visual grid showing context window usage, compaction, autocompaction', usage: '/context [auto|messages|compact [detailed|brief]]', category: 'Knowledge', handler: 'daemon' },
+  { name: 'context', description: 'Context window usage breakdown, compaction, auto-compaction settings', usage: '/context [messages|compact|auto [on|off|threshold N|warn N|forced N|pricing on/off]]', category: 'Knowledge', handler: 'daemon' },
   { name: 'wiki', description: 'Open the wiki tab or run a wiki operation', usage: '/wiki [list|search <query>|lint|status]', category: 'Knowledge', handler: 'client' },
   // Automation
   { name: 'remind', description: 'Create a reminder', usage: '/remind <message at time>', category: 'Automation', handler: 'daemon' },

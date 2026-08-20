@@ -55,6 +55,8 @@ export interface AutoCompactConfig {
   threshold: number;
   warn_threshold: number;
   forced_threshold: number;
+  /** Model used to write compaction summaries. Empty = use the active model. */
+  model?: string;
 }
 
 export interface WikiConfig {
@@ -81,9 +83,11 @@ export interface CurieSettings {
   // Channels (Telegram)
   channels: ChannelsConfig;
 
-  // Tool limits
+  // Tool limits — per_call is per model turn, per_run is per TurnLoop.run()
   tools_per_call: number;
   websearch_per_call: number;
+  tools_per_run: number;
+  websearch_per_run: number;
 
   // System prompt: identity files to inline (relative to ~/.curie-agent/), in order
   system_prompt_files: string[];
@@ -134,6 +138,8 @@ export interface CurieSettings {
   MCP_SERVERS?: Record<string, unknown>;
   TOOLS_PER_CALL?: number;
   WEBSEARCH_PER_CALL?: number;
+  TOOLS_PER_RUN?: number;
+  WEBSEARCH_PER_RUN?: number;
   HEARTBEAT?: 'on' | 'off';
   HEARTBEAT_INTRADAY?: string;
   HEARTBEAT_DAILY?: string;
@@ -155,18 +161,25 @@ export interface CurieSettings {
 
 // ── Default settings (nested format) ────────────────────────────────────────
 
+/**
+ * Explicit per-provider output reserve. Previously `undefined`, which made the
+ * turn-loop fall back to an invisible 65536 — half of the 131072 default window.
+ */
+const DEFAULT_MAX_OUTPUT_TOKENS = 32768;
+const DEFAULT_LOCAL_MAX_OUTPUT_TOKENS = 8192;
+
 function makeDefaultProviders(): ProviderMap {
   const p: Partial<ProviderMap> = {};
   for (const name of ['anthropic', 'openai', 'openrouter', 'google', 'ollama', 'local'] as const) {
-    p[name] = { api_key: '', url: '', model: '', model_cost: '', model_context_window: 131072 };
+    p[name] = { api_key: '', url: '', model: '', model_cost: '', model_context_window: 131072, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS };
   }
   return {
     anthropic: { ...p.anthropic!, url: 'https://api.anthropic.com', model: 'claude-sonnet-4-6', model_context_window: 200000 },
     openai: { ...p.openai!, url: 'https://api.openai.com', model: 'gpt-4o' },
     openrouter: { ...p.openrouter!, url: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-sonnet-4-6', model_context_window: 200000 },
     google: { ...p.google!, model: 'gemini-2.5-pro' },
-    ollama: { ...p.ollama!, url: 'http://localhost:11434/v1', model: 'llama3' },
-    local: { ...p.local!, model: 'custom' },
+    ollama: { ...p.ollama!, url: 'http://localhost:11434/v1', model: 'llama3', max_output_tokens: DEFAULT_LOCAL_MAX_OUTPUT_TOKENS },
+    local: { ...p.local!, model: 'custom', max_output_tokens: DEFAULT_LOCAL_MAX_OUTPUT_TOKENS },
   } as ProviderMap;
 }
 
@@ -182,12 +195,14 @@ export const DEFAULT_SETTINGS: CurieSettings = {
   channels: { bot_token: '', user_id: '', chat_id: '', allow_groups: false, tab_active: 'main' },
   tools_per_call: 10,
   websearch_per_call: 5,
+  tools_per_run: 200,
+  websearch_per_run: 60,
   system_prompt_files: ['AGENTS.md', 'SOUL.md', 'USER.md', 'MEMORY.md'],
   brave_search_api_key: '',
   heartbeat: { schedule: 'off', mode: 'yolo', intraday: '', daily: '6:00', weekly: 'monday@6:00', monthly: '1@6:00', dreaming: '2:00' },
   mcp_servers: {},
   safety: { path_guard: 'on', path_allowlist: '', command_guard: 'on', snapshots: 'on' },
-  auto_compact: { enabled: 'on', threshold: 75, warn_threshold: 60, forced_threshold: 85 },
+  auto_compact: { enabled: 'on', threshold: 75, warn_threshold: 60, forced_threshold: 85, model: '' },
   pricing_tier_warn: 'on',
   wiki: { path: '', autoLint: 'off' },
   web_ip: '',
@@ -303,12 +318,12 @@ export function migrateFlatToNested(parsed: Record<string, unknown>): CurieSetti
   const localUrl = pickString(parsed, 'MODEL_URL') || '';
 
   const providers: ProviderMap = {
-    anthropic: { api_key: anthropicKey, url: anthropicUrl, model: DEFAULT_SETTINGS.providers.anthropic.model, model_cost: '', model_context_window: 200000 },
-    openai: { api_key: openaiKey, url: openaiUrl, model: DEFAULT_SETTINGS.providers.openai.model, model_cost: '', model_context_window: 131072 },
-    openrouter: { api_key: orKey, url: orUrl, model: DEFAULT_SETTINGS.providers.openrouter.model, model_cost: '', model_context_window: 200000 },
-    google: { api_key: googleKey, url: googleUrl, model: DEFAULT_SETTINGS.providers.google.model, model_cost: '', model_context_window: 131072 },
-    ollama: { api_key: ollamaKey, url: ollamaUrl, model: DEFAULT_SETTINGS.providers.ollama.model, model_cost: '', model_context_window: 131072 },
-    local: { api_key: localKey, url: localUrl, model: DEFAULT_SETTINGS.providers.local.model, model_cost: '', model_context_window: 131072 },
+    anthropic: { api_key: anthropicKey, url: anthropicUrl, model: DEFAULT_SETTINGS.providers.anthropic.model, model_cost: '', model_context_window: 200000, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS },
+    openai: { api_key: openaiKey, url: openaiUrl, model: DEFAULT_SETTINGS.providers.openai.model, model_cost: '', model_context_window: 131072, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS },
+    openrouter: { api_key: orKey, url: orUrl, model: DEFAULT_SETTINGS.providers.openrouter.model, model_cost: '', model_context_window: 200000, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS },
+    google: { api_key: googleKey, url: googleUrl, model: DEFAULT_SETTINGS.providers.google.model, model_cost: '', model_context_window: 131072, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS },
+    ollama: { api_key: ollamaKey, url: ollamaUrl, model: DEFAULT_SETTINGS.providers.ollama.model, model_cost: '', model_context_window: 131072, max_output_tokens: DEFAULT_LOCAL_MAX_OUTPUT_TOKENS },
+    local: { api_key: localKey, url: localUrl, model: DEFAULT_SETTINGS.providers.local.model, model_cost: '', model_context_window: 131072, max_output_tokens: DEFAULT_LOCAL_MAX_OUTPUT_TOKENS },
   };
 
   // Preserve flat model into the active provider's model
@@ -355,6 +370,10 @@ export function migrateFlatToNested(parsed: Record<string, unknown>): CurieSetti
       ? pickNumber(parsed, 'TOOLS_PER_CALL', 'tools_per_call')! : DEFAULT_SETTINGS.tools_per_call,
     websearch_per_call: (typeof pickNumber(parsed, 'WEBSEARCH_PER_CALL', 'websearch_per_call') === 'number' && pickNumber(parsed, 'WEBSEARCH_PER_CALL', 'websearch_per_call')! > 0)
       ? pickNumber(parsed, 'WEBSEARCH_PER_CALL', 'websearch_per_call')! : DEFAULT_SETTINGS.websearch_per_call,
+    tools_per_run: (pickNumber(parsed, 'TOOLS_PER_RUN', 'tools_per_run') ?? 0) > 0
+      ? pickNumber(parsed, 'TOOLS_PER_RUN', 'tools_per_run')! : DEFAULT_SETTINGS.tools_per_run,
+    websearch_per_run: (pickNumber(parsed, 'WEBSEARCH_PER_RUN', 'websearch_per_run') ?? 0) > 0
+      ? pickNumber(parsed, 'WEBSEARCH_PER_RUN', 'websearch_per_run')! : DEFAULT_SETTINGS.websearch_per_run,
     system_prompt_files: pickStringArray(parsed, 'system_prompt_files', 'SYSTEM_PROMPT_FILES') || DEFAULT_SETTINGS.system_prompt_files,
     brave_search_api_key: pickString(parsed, 'BRAVE_SEARCH_API_KEY', 'brave_search_api_key', 'BRAVE_API_KEY') || '',
     heartbeat: {
@@ -378,6 +397,7 @@ export function migrateFlatToNested(parsed: Record<string, unknown>): CurieSetti
       threshold: acThreshold,
       warn_threshold: acWarnThreshold,
       forced_threshold: acForcedThreshold,
+      model: pickString(parsed, 'AUTO_COMPACT_MODEL', 'auto_compact_model') || '',
     },
     pricing_tier_warn: (pickString(parsed, 'PRICING_TIER_WARN', 'pricing_tier_warn') || 'on') as 'on' | 'off',
     wiki: { path: '', autoLint: 'off' },
@@ -463,8 +483,15 @@ export class SettingsManager {
     return this.settings;
   }
 
+  /**
+   * Returns a deep clone. A shallow copy used to let callers mutate nested
+   * objects (`auto_compact`, `providers`, …) in place while top-level scalar
+   * writes were silently dropped by `save()` — the two behaved differently for
+   * no reason a caller could see. Mutating the result is now always a no-op;
+   * persist through `update()` / `setProviderKey()`.
+   */
   get(): CurieSettings {
-    return { ...this.settings };
+    return structuredClone(this.settings);
   }
 
   /** Get the currently active model name from provider config. */
@@ -547,7 +574,7 @@ export function parseNestedSettings(parsed: Record<string, unknown>): CurieSetti
           model: getString([`providers.${name}.model`]) || (raw.model as string) || (DEFAULT_SETTINGS.providers[name as string]!.model),
           model_cost: (raw.model_cost as string) || '',
           model_context_window: typeof raw.model_context_window === 'number' ? raw.model_context_window : (DEFAULT_SETTINGS.providers[name as string]!.model_context_window),
-          max_output_tokens: typeof raw.max_output_tokens === 'number' ? raw.max_output_tokens : undefined,
+          max_output_tokens: typeof raw.max_output_tokens === 'number' ? raw.max_output_tokens : DEFAULT_SETTINGS.providers[name as string]!.max_output_tokens,
           provider_order: Array.isArray(raw.provider_order) ? raw.provider_order : undefined,
         };
       }
@@ -588,6 +615,7 @@ export function parseNestedSettings(parsed: Record<string, unknown>): CurieSetti
     threshold: getNumber(['auto_compact.threshold', 'AUTO_COMPACT_THRESHOLD']) ?? (rawAutoComp?.threshold as number) ?? DEFAULT_SETTINGS.auto_compact.threshold,
     warn_threshold: getNumber(['auto_compact.warn_threshold', 'AUTO_COMPACT_WARN_THRESHOLD']) ?? (rawAutoComp?.warn_threshold as number) ?? DEFAULT_SETTINGS.auto_compact.warn_threshold,
     forced_threshold: getNumber(['auto_compact.forced_threshold', 'AUTO_COMPACT_FORCED_THRESHOLD']) ?? (rawAutoComp?.forced_threshold as number) ?? DEFAULT_SETTINGS.auto_compact.forced_threshold,
+    model: getString(['auto_compact.model']) || (rawAutoComp?.model as string) || '',
   };
 
   return {
@@ -604,6 +632,10 @@ export function parseNestedSettings(parsed: Record<string, unknown>): CurieSetti
       ? getNumber(['tools_per_call', 'TOOLS_PER_CALL'])! : DEFAULT_SETTINGS.tools_per_call,
     websearch_per_call: (typeof getNumber(['websearch_per_call', 'WEBSEARCH_PER_CALL']) === 'number' && getNumber(['websearch_per_call', 'WEBSEARCH_PER_CALL'])! > 0)
       ? getNumber(['websearch_per_call', 'WEBSEARCH_PER_CALL'])! : DEFAULT_SETTINGS.websearch_per_call,
+    tools_per_run: (getNumber(['tools_per_run', 'TOOLS_PER_RUN']) ?? 0) > 0
+      ? getNumber(['tools_per_run', 'TOOLS_PER_RUN'])! : DEFAULT_SETTINGS.tools_per_run,
+    websearch_per_run: (getNumber(['websearch_per_run', 'WEBSEARCH_PER_RUN']) ?? 0) > 0
+      ? getNumber(['websearch_per_run', 'WEBSEARCH_PER_RUN'])! : DEFAULT_SETTINGS.websearch_per_run,
     system_prompt_files: pickStringArray(parsed, 'system_prompt_files', 'SYSTEM_PROMPT_FILES') || DEFAULT_SETTINGS.system_prompt_files,
     brave_search_api_key: getString(['brave_search_api_key', 'BRAVE_SEARCH_API_KEY', 'BRAVE_API_KEY']),
     heartbeat: heartbeatConfig,

@@ -16,6 +16,8 @@ interface StatsTabProps {
   cacheReadTokens?: number;
   /** Model's context window size in tokens (default 200k). */
   contextWindowSize?: number;
+  /** Live estimated prompt size. Falls back to inputTokens before the first report. */
+  contextUsedTokens?: number;
 }
 
 const CHART_ROWS = 6;
@@ -40,7 +42,7 @@ function padLeft(s: string, n: number): string {
   return ' '.repeat(n - s.length) + s;
 }
 
-export function StatsTab({ theme, isActive, model, inputTokens, outputTokens, cacheReadTokens, contextWindowSize }: StatsTabProps) {
+export function StatsTab({ theme, isActive, model, inputTokens, outputTokens, cacheReadTokens, contextWindowSize, contextUsedTokens }: StatsTabProps) {
   const primary = theme?.primary || '#7aa2f7';
   const muted = theme?.muted || '#565f89';
   const fg = theme?.foreground || '#a9b1d6';
@@ -98,7 +100,7 @@ export function StatsTab({ theme, isActive, model, inputTokens, outputTokens, ca
 
   // Context window inline data
   const windowSize = contextWindowSize ?? 200_000;
-  const ctxInput = inputTokens ?? 0;
+  const ctxInput = contextUsedTokens ?? inputTokens ?? 0;
   const ctxOutput = outputTokens ?? 0;
   const ctxPct = ctxInput > 0 ? Math.min(100, Math.round((ctxInput / windowSize) * 100)) : 0;
   const ctxFilled = Math.round((ctxPct / 100) * 24);

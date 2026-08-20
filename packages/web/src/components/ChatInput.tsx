@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useConfig } from '../hooks/useConfig.js';
+import { formatTokenCount } from '../lib/format.js';
+import type { ContextReport } from '../hooks/useSession.js';
 
 interface Props {
   onSend: (text: string) => void;
@@ -9,17 +11,55 @@ interface Props {
   totalTokens?: number;
   contextTokens?: number;
   costUsd?: number;
+  /** Latest context-window snapshot from the daemon, when one has arrived. */
+  contextReport?: ContextReport | null;
 }
 
-function formatTokenCount(n: number): string {
-  if (n < 1000) return String(n);
-  return `${(n / 1000).toFixed(1)}k`;
+/**
+ * Always-visible context fill indicator.
+ *
+ * The footer previously showed a bare `ctx 45.2k` with no denominator, so there
+ * was no way to see how close a session was to its limit until it failed.
+ * Percentage is against usable tokens (window minus the output reserve), which
+ * is what the turn loop actually budgets against.
+ */
+function ContextGauge({ report, fallbackTokens, windowTokens }: {
+  report?: ContextReport | null;
+  fallbackTokens: number;
+  windowTokens: number;
+}) {
+  const used = report?.usedTokens ?? fallbackTokens;
+  const total = report?.windowTokens || windowTokens;
+  const usable = Math.max(1, total - (report?.reservedOutput ?? 0));
+  const pct = Math.min(100, Math.round((used / usable) * 100));
+  const color = pct >= 85 ? 'var(--red)' : pct >= 50 ? 'var(--yellow)' : 'var(--green)';
+
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 text-[10px] text-muted font-mono"
+      title={`Context: ${formatTokenCount(used)} of ${formatTokenCount(usable)} usable (${formatTokenCount(total)} window)`}
+    >
+      <span style={{ opacity: 0.6 }}>ctx</span>
+      <span
+        className="inline-block rounded-full overflow-hidden"
+        style={{ width: 36, height: 4, background: 'var(--s3)' }}
+      >
+        <span className="block h-full rounded-full" style={{ width: `${String(pct)}%`, background: color }} />
+      </span>
+      <span style={{ color, opacity: 0.85 }}>{`${String(pct)}%`}</span>
+      <span style={{ opacity: 0.5 }}>{`${formatTokenCount(used)}/${formatTokenCount(total)}`}</span>
+    </span>
+  );
 }
 
-export default function ChatInput({ onSend, onCancel, cmdInput, onClearCmdInput, totalTokens, contextTokens, costUsd }: Props) {
+export default function ChatInput({ onSend, onCancel, cmdInput, onClearCmdInput, totalTokens, contextTokens, costUsd, contextReport }: Props) {
   const { providers, get } = useConfig();
   const currentProvider = get('current_provider') as string | undefined;
   const model = get('model') as string | undefined;
+  // `model_context_window` was already fetched by useConfig and had zero consumers.
+  const configuredWindow = Number(
+    providers.find(p => p.name === currentProvider)?.model_context_window ?? 200_000,
+  );
 
   const activeProvider = providers.find(p => p.name === currentProvider && p.configured)
     || providers.find(p => p.configured)
@@ -99,7 +139,7 @@ export default function ChatInput({ onSend, onCancel, cmdInput, onClearCmdInput,
             <>
               <span className="text-[10px] text-muted font-mono" style={{ opacity: 0.6 }}>{formatTokenCount(totalTokens)} tokens</span>
               <span className="opacity-30 mx-1"> · </span>
-              <span className="text-[10px] text-muted font-mono" style={{ opacity: 0.6 }}>ctx {formatTokenCount(contextTokens ?? 0)}</span>
+              <ContextGauge report={contextReport} fallbackTokens={contextTokens ?? 0} windowTokens={configuredWindow} />
               <span className="opacity-30 mx-1"> · </span>
               <span className="text-[10px] text-muted font-mono" style={{ color: 'var(--green)', opacity: 0.6 }}>${(costUsd ?? 0).toFixed(4)}</span>
               <div className="flex-1" />

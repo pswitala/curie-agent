@@ -51,6 +51,8 @@ export interface SubagentHandle {
 export class SubagentExecutor {
   private agents: Map<string, SubagentHandle> = new Map();
   private running: Map<string, Promise<void>> = new Map();
+  /** Live TurnLoop per running agent, so cancel() can actually abort the child. */
+  private loops: Map<string, TurnLoop> = new Map();
   private maxConcurrent: number;
 
   constructor(
@@ -124,10 +126,22 @@ export class SubagentExecutor {
       sessionId: subSession.id,
     }).finally(() => {
       this.running.delete(agentId);
+      this.loops.delete(agentId);
     });
 
     this.running.set(agentId, promise);
     return handle;
+  }
+
+  /**
+   * Await a spawned subagent's completion and return its final handle.
+   * Resolves immediately if the agent has already finished. Returns undefined
+   * for an unknown agentId.
+   */
+  async waitFor(agentId: string): Promise<SubagentHandle | undefined> {
+    const promise = this.running.get(agentId);
+    if (promise) await promise;
+    return this.agents.get(agentId);
   }
 
   private async runSubagent(config: SubagentConfig & { sessionId: string }): Promise<void> {
@@ -146,6 +160,8 @@ export class SubagentExecutor {
       sessionId: config.sessionId,
       type: config.type || 'subagent',
     }, this.sessionStore);
+
+    if (agentId) this.loops.set(agentId, turnLoop);
 
     // Use config.system directly as the subagent's system prompt
     const runPromise = config.system
@@ -256,12 +272,9 @@ export class SubagentExecutor {
     handle.status = 'cancelled';
     handle.doneAt = Date.now();
 
-    // Cancel the TurnLoop if running
-    const promise = this.running.get(agentId);
-    if (promise) {
-      // We need to find and cancel the TurnLoop — stored in the running promise
-      // For now, emit cancellation event
-    }
+    // Abort the child TurnLoop so it actually stops mid-turn, rather than
+    // running to completion while the handle claims it was cancelled.
+    this.loops.get(agentId)?.cancel();
 
     this.eventBus.emit({
       type: 'agent-error',
@@ -312,6 +325,7 @@ export class SubagentExecutor {
     }
     this.agents.clear();
     this.running.clear();
+    this.loops.clear();
   }
 
   private getRunningCount(): number {

@@ -6,6 +6,7 @@ import { createTool, expandPath, type ToolContext } from './tool.js';
 
 const DEFAULT_LINE_LIMIT = 2000;
 const MAX_LINE_LENGTH = 2000;
+const MAX_IMAGE_BYTES = 1_500_000;
 
 const ReadSchema = z.object({
   file_path: z
@@ -56,6 +57,12 @@ export const readTool = createTool(
     const ext = path.extname(filePath).toLowerCase();
 
     if (['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'].includes(ext)) {
+      if (stat.size > MAX_IMAGE_BYTES) {
+        return {
+          output: null,
+          error: `Image too large: ${filePath} is ${String(Math.round(stat.size / 1000))} KB (limit ${String(MAX_IMAGE_BYTES / 1000)} KB). Base64 images this size blow out the context window. Ask the user to resize or downsample the image first.`,
+        };
+      }
       const buf = fs.readFileSync(filePath);
       return {
         output: {

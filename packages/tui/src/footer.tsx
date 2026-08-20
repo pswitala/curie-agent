@@ -18,6 +18,8 @@ interface FooterProps {
   contextFillPct?: number;
   contextWarning?: string;
   contextWindowSize?: number;
+  /** Live estimated prompt size. Falls back to inputTokens before the first report. */
+  contextUsedTokens?: number;
   inputTokens?: number;
   outputTokens?: number;
 }
@@ -36,7 +38,7 @@ function formatCtxSize(n: number): string {
   return String(n);
 }
 
-export function Footer({ status, mode, effort, model, project, duration, totalTokens, costUsd, activeTab, theme, contextFillPct = 0, contextWarning, contextWindowSize = 200_000, inputTokens = 0, outputTokens = 0 }: FooterProps) {
+export function Footer({ status, mode, effort, model, project, duration, totalTokens, costUsd, activeTab, theme, contextFillPct = 0, contextWarning, contextWindowSize = 200_000, contextUsedTokens, inputTokens = 0, outputTokens = 0 }: FooterProps) {
   const activeTabLabel = TABS.find(t => t.id === activeTab)?.label ?? 'Assistant';
   const primary = theme?.primary || '#7aa2f7';
   const muted = theme?.muted || '#565f89';
@@ -91,7 +93,7 @@ export function Footer({ status, mode, effort, model, project, duration, totalTo
             ) : null}
             <>
               {' '}<Text color={muted}>|</Text>{' '}
-              <Text color={ctxColor}>{`ctx ${formatCtxSize(inputTokens)}/${formatCtxSize(contextWindowSize)} (${contextFillPct}%)`}</Text>
+              <Text color={ctxColor}>{`ctx ${formatCtxSize(contextUsedTokens ?? inputTokens)}/${formatCtxSize(contextWindowSize)} (${String(contextFillPct)}%)`}</Text>
             </>
             {contextWarning ? (
               <>

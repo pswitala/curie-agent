@@ -12,6 +12,9 @@ import type {
 
 type CancelableIterable<T> = { iterable: AsyncIterable<T>; cancel(): void };
 
+/** Default output cap for `check()` — sized for one-word harm verdicts. */
+const CHECK_MAX_TOKENS = 2048;
+
 function effortToReasoning(effort?: ReasoningEffort) {
   switch (effort) {
     case 'low':    return { effort: 'low' };
@@ -40,6 +43,19 @@ const FALLBACK_MODELS = [
   'qwen/qwen-2.5-72b',
 ];
 
+export interface OpenRouterModelInfo {
+  contextLength?: number;
+  pricePromptPerM?: number;
+  priceCompletionPerM?: number;
+}
+
+/** OpenRouter reports pricing as a per-token decimal string; we store per-million. */
+function perMillion(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n * 1_000_000 : undefined;
+}
+
 export class OpenRouterProvider implements Provider {
   readonly name = 'openrouter';
   readonly models: string[];
@@ -49,6 +65,7 @@ export class OpenRouterProvider implements Provider {
   private _baseUrl: string;
   private _providerOrder: string[] | undefined;
   private _allModels: string[] | null = null;
+  private _modelInfo = new Map<string, OpenRouterModelInfo>();
 
   constructor(apiKey?: string, baseUrl?: string, providerOrder?: string[]) {
     const resolvedKey = (apiKey && apiKey.length > 0)
@@ -75,11 +92,26 @@ export class OpenRouterProvider implements Provider {
   private async _fetchModels(): Promise<string[]> {
     if (this._allModels) return this._allModels;
     try {
-      const resp = await fetch(`${this._baseUrl}/api/models`, {
+      // _baseUrl already ends in /api/v1 — the path here is just /models.
+      const resp = await fetch(`${this._baseUrl}/models`, {
         signal: AbortSignal.timeout(5000),
       });
-      const data = await resp.json() as { data?: Array<{ id: string }> };
+      const data = await resp.json() as {
+        data?: Array<{
+          id: string;
+          context_length?: number;
+          pricing?: { prompt?: string; completion?: string };
+        }>;
+      };
       if (data.data?.length) {
+        for (const m of data.data) {
+          if (!m.id) continue;
+          this._modelInfo.set(m.id, {
+            contextLength: m.context_length,
+            pricePromptPerM: perMillion(m.pricing?.prompt),
+            priceCompletionPerM: perMillion(m.pricing?.completion),
+          });
+        }
         this._allModels = data.data.map(m => m.id).filter(Boolean);
         return this._allModels;
       }
@@ -92,6 +124,15 @@ export class OpenRouterProvider implements Provider {
 
   async getModels(): Promise<string[]> {
     return this._fetchModels();
+  }
+
+  /**
+   * Context window and per-million pricing for a model, from the OpenRouter
+   * models API. Returns undefined until `getModels()` has populated the cache,
+   * or if the model is not in the response.
+   */
+  getModelInfo(id: string): OpenRouterModelInfo | undefined {
+    return this._modelInfo.get(id);
   }
 
   stream(args: ProviderStreamArgs): CancelableIterable<ProviderEvent> {
@@ -238,6 +279,8 @@ export class OpenRouterProvider implements Provider {
     model?: string;
     system?: string;
     signal?: AbortSignal;
+    /** Callers that need long output (compaction summaries) must raise this. */
+    maxTokens?: number;
   }): Promise<string> {
     const model = args?.model || this.defaultModel;
     const messages: OpenAI.ChatCompletionMessageParam[] = [
@@ -249,7 +292,7 @@ export class OpenRouterProvider implements Provider {
     const response = await this.client.chat.completions.create({
       model,
       messages,
-      max_tokens: 2048,
+      max_tokens: args?.maxTokens ?? CHECK_MAX_TOKENS,
       temperature: 0,
     });
     return response.choices[0]?.message?.content?.trim() ?? '';

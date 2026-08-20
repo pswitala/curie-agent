@@ -52,6 +52,7 @@ export class WsHandler {
         'tool-result', 'approval-request', 'approval-decision', 'usage',
         'error', 'session-start', 'session-stop', 'hook', 'status',
         'session-resumed', 'context-warning', 'thinking-delta',
+        'compaction', 'context-report',
       ];
       // New event types not yet in core Event type — subscribe as unknown
       const newEventTypes: Array<string> = [

@@ -15,13 +15,15 @@ export interface SpawnAgentToolConfig {
   tools: Tool[];
 }
 
+const MAX_TEXT = 50_000;
+
 export function createSpawnAgentTool(config: SpawnAgentToolConfig): Tool {
   const { subagentExecutor, provider, cwd, settings, model, tools } = config;
 
   return {
     definition: {
       name: 'spawn_agent',
-      description: 'Spawn a subagent to work on a task in parallel. The subagent runs with its own TurnLoop and streams output back to the parent session. Returns the agent ID for tracking.',
+      description: 'Spawn a subagent to work on a task. The subagent runs with its own TurnLoop and streams output back to the parent session. Blocks until the subagent finishes and returns its final answer, so delegating research here keeps the intermediate tool results out of this session\'s context.',
       inputSchema: JSON.stringify({
         type: 'object',
         required: ['prompt'],
@@ -89,12 +91,25 @@ export function createSpawnAgentTool(config: SpawnAgentToolConfig): Tool {
           type: 'subagent',
         });
 
+        // Await completion so the parent model actually receives the answer —
+        // without this, delegating work to a subagent returns nothing usable.
+        const final = (await subagentExecutor.waitFor(handle.agentId)) ?? handle;
+
+        let text = final.text;
+        if (text.length > MAX_TEXT) {
+          text =
+            text.slice(0, MAX_TEXT) +
+            `\n...[truncated at ${String(MAX_TEXT / 1000)}k chars of ${String(text.length)} — the full output is in subagent session ${final.sessionId}]`;
+        }
+
         return {
           output: {
-            agentId: handle.agentId,
-            prompt: handle.prompt,
-            status: handle.status,
-            sessionId: handle.sessionId,
+            agentId: final.agentId,
+            sessionId: final.sessionId,
+            status: final.status,
+            text,
+            toolCalls: final.toolCalls,
+            errors: final.errors,
           },
         };
       } catch (err) {

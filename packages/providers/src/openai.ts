@@ -31,6 +31,10 @@ function effortToReasoningObj(effort?: ReasoningEffort): { effort: string } | un
   return undefined;
 }
 
+/** Default output caps for `check()` — sized for one-word harm verdicts. */
+const CHECK_MAX_TOKENS = 2048;
+const CHECK_RESPONSES_MAX_TOKENS = 256;
+
 const REASONING_MODEL_RE = /^(o1|o3|o4|gpt-5)[-\d:.]*(mini|medium|high|pro)?(-\d+)?$/i;
 
 function isReasoningModel(model: string): boolean {
@@ -220,6 +224,8 @@ export class OpenAIProvider implements Provider {
     model?: string;
     system?: string;
     signal?: AbortSignal;
+    /** Callers that need long output (compaction summaries) must raise this. */
+    maxTokens?: number;
   }): Promise<string> {
     const model = args?.model || this.defaultModel;
     if (isReasoningModel(model)) {
@@ -232,6 +238,7 @@ export class OpenAIProvider implements Provider {
     model?: string;
     system?: string;
     signal?: AbortSignal;
+    maxTokens?: number;
   }): Promise<string> {
     const model = args?.model || this.defaultModel;
     const messages: OpenAI.ChatCompletionMessageParam[] = [
@@ -243,7 +250,7 @@ export class OpenAIProvider implements Provider {
     const response = await this.client.chat.completions.create({
       model,
       messages,
-      max_tokens: 2048,
+      max_tokens: args?.maxTokens ?? CHECK_MAX_TOKENS,
       temperature: 0,
     });
     return response.choices[0]?.message?.content?.trim() ?? '';
@@ -253,13 +260,14 @@ export class OpenAIProvider implements Provider {
     model?: string;
     system?: string;
     signal?: AbortSignal;
+    maxTokens?: number;
   }): Promise<string> {
     const model = args?.model || this.defaultModel;
     const response = await this.client.responses.create({
       model,
       input: [{ role: 'user', content: prompt }],
       ...(args?.system ? { instructions: args.system } : {}),
-      max_output_tokens: 256,
+      max_output_tokens: args?.maxTokens ?? CHECK_RESPONSES_MAX_TOKENS,
       temperature: 0,
       truncation: 'auto',
     } as any);

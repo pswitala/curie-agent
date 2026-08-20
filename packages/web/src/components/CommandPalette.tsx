@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { SLASH_COMMANDS } from '@curie-agent/protocol';
 
 interface Props {
   open: boolean;
@@ -6,41 +7,19 @@ interface Props {
   onPick: (cmd: string) => void;
 }
 
-const CMDS: [string, string][] = [
-  ['/status', 'Show version, model, provider, tokens, CWD'],
-  ['/help', 'List all available commands'],
-  ['/model [name]', 'Switch model · opus / sonnet / haiku / gpt4o'],
-  ['/mode <mode>', 'Set approval mode · plan|edit|auto|yolo'],
-  ['/theme [name]', 'Change color theme'],
-  ['/debug [on|off]', 'Toggle debug logging'],
-  ['/effort [level]', 'Set reasoning effort · low|medium|high|max'],
-  ['/context', 'Show context window usage grid'],
-  ['/context compact', 'Compact the context window'],
-  ['/context auto', 'Configure auto-compaction'],
-  ['/memory status', 'View memory file sizes'],
-  ['/memory add', 'Capture a memory'],
-  ['/wiki', 'Open the wiki knowledge base'],
-  ['/wiki list', 'List all wiki pages by category'],
-  ['/wiki search <query>', 'Search wiki pages'],
-  ['/wiki lint', 'Run wiki health check'],
-  ['/heartbeat now', 'Trigger heartbeat immediately'],
-  ['/heartbeat enable', 'Enable heartbeat schedule'],
-  ['/remind <msg at time>', 'Create a reminder'],
-  ['/cron list', 'List all reminders'],
-  ['/channels list', 'Show Telegram channels'],
-  ['/mcp list', 'Show MCP servers'],
-  ['/mcp add', 'Add an MCP server'],
-  ['/tools [n]', 'View/set tool call limit per turn'],
-  ['/websearch [n]', 'Set web search limit per turn'],
-  ['/snapshots', 'List git snapshots'],
-  ['/revert', 'Revert to a snapshot'],
-  ['/stats', 'View usage stats'],
-  ['/agent <prompt>', 'Spawn a subagent'],
-  ['/task create', 'Create a scheduled task'],
-  ['/provider <name>', 'Switch AI provider'],
-  ['/init', 'Run interactive setup wizard'],
-  ['/exit', 'Exit curie-agent'],
-];
+/**
+ * Generated from the shared registry rather than hand-maintained.
+ *
+ * The previous hardcoded list had drifted: it omitted `/system`, `/skill`,
+ * `/todo` and `/cd`, and advertised client-only commands the web has no
+ * handler for — those were forwarded to the daemon, which answered
+ * "handled by the interface, not the daemon".
+ */
+const CLIENT_HANDLED_IN_WEB = new Set(['wiki']);
+
+const CMDS: [string, string][] = SLASH_COMMANDS
+  .filter((c) => c.handler === 'daemon' || CLIENT_HANDLED_IN_WEB.has(c.name))
+  .map((c): [string, string] => [c.usage || `/${c.name}`, c.description]);
 
 export default function CommandPalette({ open, onClose, onPick }: Props) {
   const [query, setQuery] = useState('');

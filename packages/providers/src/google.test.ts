@@ -111,6 +111,27 @@ describe('GoogleGeminiProvider', () => {
     });
   });
 
+  describe('buildRequestBody - maxOutputTokens', () => {
+    const p = new GoogleGeminiProvider('key');
+    const buildRequestBody = (p as any).buildRequestBody.bind(p);
+
+    it('sets maxOutputTokens from maxTokens', () => {
+      const body = buildRequestBody('gemini-2.0-flash', [], { maxTokens: 8192 });
+      expect((body.generationConfig as any).maxOutputTokens).toBe(8192);
+    });
+
+    it('sets maxOutputTokens alongside thinkingConfig', () => {
+      const body = buildRequestBody('gemini-2.5-flash', [], { thinking: true, maxTokens: 4096 });
+      expect((body.generationConfig as any).maxOutputTokens).toBe(4096);
+      expect((body.generationConfig as any).thinkingConfig).toBeDefined();
+    });
+
+    it('omits maxOutputTokens when maxTokens is not set', () => {
+      const body = buildRequestBody('gemini-2.0-flash', [], { thinking: true });
+      expect((body.generationConfig as any).maxOutputTokens).toBeUndefined();
+    });
+  });
+
   describe('apiEndpoint', () => {
     const p = new GoogleGeminiProvider('key');
     const apiEndpoint = (p as any).apiEndpoint.bind(p);

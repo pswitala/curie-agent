@@ -34,6 +34,9 @@ function effortToAdaptiveEffort(effort?: ReasoningEffort): 'low' | 'medium' | 'h
   }
 }
 
+/** Default output cap for `check()` — sized for one-word harm verdicts. */
+const CHECK_MAX_TOKENS = 2048;
+
 const ADAPTIVE_MODELS = new Set([
   'claude-opus-4-7',
   'claude-sonnet-4-6',
@@ -208,9 +211,8 @@ export class AnthropicProvider implements Provider {
           }
         }
 
-        if (event.type === 'message_delta' && event.usage) {
-          yield toUsageEvent(event.usage);
-        }
+        // Usage is emitted exactly once per turn, from finalMessage() below.
+        // Emitting it here too made every consumer that sums usage double-count.
       }
 
       if (abortCtrl.signal.aborted) {
@@ -264,11 +266,13 @@ export class AnthropicProvider implements Provider {
     model?: string;
     system?: string;
     signal?: AbortSignal;
+    /** Callers that need long output (compaction summaries) must raise this. */
+    maxTokens?: number;
   }): Promise<string> {
     const model = args?.model || this.defaultModel;
     const response = await this.client.messages.create({
       model,
-      max_tokens: 2048,
+      max_tokens: args?.maxTokens ?? CHECK_MAX_TOKENS,
       system: args?.system,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0,

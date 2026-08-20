@@ -77,7 +77,11 @@ export interface Provider {
   defaultModel: string;
   stream(args: ProviderStreamArgs): { iterable: AsyncIterable<ProviderEvent>; cancel(): void };
   /** Non-streaming call — used for quick evaluations (e.g. harm-check). */
-  check(prompt: string, args?: { model?: string; system?: string; signal?: AbortSignal }): Promise<string>;
+  /**
+   * Non-streaming call. `maxTokens` defaults to a harm-check-sized cap; callers
+   * that need long output (compaction summaries) must raise it explicitly.
+   */
+  check(prompt: string, args?: { model?: string; system?: string; signal?: AbortSignal; maxTokens?: number }): Promise<string>;
   /** Non-streaming call with full tool-use support — used for heartbeat and other batch scenarios. */
   complete(args: ProviderCompleteArgs): Promise<ProviderCompleteResult>;
 }
