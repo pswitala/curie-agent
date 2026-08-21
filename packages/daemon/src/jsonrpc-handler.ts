@@ -350,9 +350,11 @@ export class JsonRpcHandler {
 
         case Method.CONFIG_GET: {
           const key = this.getStringParam(params, 'key');
-          if (!key) return this.paramError('key');
           const settings = this.settingsManager.get();
-          result = this.getNestedValue(settings, key);
+          // '*' or omitted → the whole tree, in one consistent snapshot. Reading
+          // ~23 top-level keys one at a time can tear if another client writes
+          // mid-fetch, yielding a snapshot that never existed on disk.
+          result = !key || key === '*' ? settings : this.getNestedValue(settings, key);
           break;
         }
 
@@ -383,13 +385,7 @@ export class JsonRpcHandler {
           } else {
             this.settingsManager.update({ [key]: value } as never);
           }
-          this.sharedEventBus?.emit({
-            type: 'config-changed',
-            id: Math.random().toString(36).substring(7),
-            timestamp: Date.now(),
-            key,
-            value,
-          } as any);
+          this.emitConfigChanged(key, value);
 
           if (key.startsWith('heartbeat') && this.daemonApp) {
             const updatedSettings = this.settingsManager.get();
@@ -403,6 +399,18 @@ export class JsonRpcHandler {
               });
             } else if (updatedSettings.heartbeat?.schedule === 'off') {
               this.daemonApp.taskManager.cancelAllHeartbeats();
+            }
+          }
+
+          // Keep the derived top-level `model` in sync with the active provider.
+          // SettingsManager.load() recomputes it from providers[current_provider].model,
+          // so a stale top-level value silently reverts on the next daemon start.
+          if (key === 'current_provider' || /^providers\.[^.]+\.model$/.test(key)) {
+            const synced = this.settingsManager.get();
+            const active = synced.providers[synced.current_provider];
+            if (active && synced.model !== active.model) {
+              this.settingsManager.update({ model: active.model });
+              this.emitConfigChanged('model', active.model);
             }
           }
 
@@ -1013,6 +1021,22 @@ export class JsonRpcHandler {
     return { jsonrpc: '2.0', id: 0, error: { code: -32602, message: `Missing required parameter: ${key}` } };
   }
 
+  /**
+   * Broadcast a settings change so every connected client re-reads config.
+   * 'config-changed' is already in ws-handler's newEventTypes, so this reaches
+   * the browser. Every settings write must emit — a write that doesn't leaves
+   * the web dashboard showing a stale value until the user reloads.
+   */
+  private emitConfigChanged(key: string, value: unknown): void {
+    this.sharedEventBus?.emit({
+      type: 'config-changed',
+      id: Math.random().toString(36).substring(7),
+      timestamp: Date.now(),
+      key,
+      value,
+    } as any);
+  }
+
   /** Get a nested value from an object using dot notation (e.g. "providers.anthropic.model"). */
   private getNestedValue(obj: unknown, path: string): unknown {
     const parts = path.split('.');
@@ -1200,13 +1224,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
           } else {
             settings.theme = theme;
             this.settingsManager.update(settings);
-            this.sharedEventBus?.emit({
-              type: 'config-changed',
-              id: Math.random().toString(36).substring(7),
-              timestamp: Date.now(),
-              key: 'theme',
-              value: theme,
-            } as any);
+            this.emitConfigChanged('theme', theme);
             emitDelta(`Successfully switched theme to: **${theme}**`);
           }
           break;
@@ -1222,6 +1240,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
           } else {
             settings.mode = args.toLowerCase() as any;
             this.settingsManager.update(settings);
+            this.emitConfigChanged('mode', settings.mode);
             emitDelta(`Successfully switched approval mode to: **${args.toLowerCase()}**`);
           }
           break;
@@ -1237,6 +1256,7 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
           } else {
             settings.effort = args.toLowerCase() as any;
             this.settingsManager.update(settings);
+            this.emitConfigChanged('effort', settings.effort);
             emitDelta(`Successfully switched reasoning effort to: **${args.toLowerCase()}**`);
           }
           break;

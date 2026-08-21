@@ -73,6 +73,11 @@ export class JsonRpcClient {
     return this.request('config.set', { key, value });
   }
 
+  /** The whole settings tree in one consistent snapshot. */
+  async configAll(): Promise<unknown> {
+    return this.request('config.get', { key: '*' });
+  }
+
   async providerList(): Promise<unknown> {
     return this.request('provider.list');
   }

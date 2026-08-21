@@ -7,6 +7,7 @@ import ProjectsView from './components/ProjectsView.js';
 import SubagentsView from './components/SubagentsView.js';
 import KanbanView from './components/KanbanView.js';
 import WikiView from './components/WikiView.js';
+import SettingsView from './components/SettingsView.js';
 import CommandPalette from './components/CommandPalette.js';
 import SetupWizard from './components/SetupWizard.js';
 import UpdateNotification from './UpdateNotification.js';
@@ -321,7 +322,7 @@ function AppContent() {
             {activeView === 'agents' && <SubagentsView rpc={rpc} onOpenSession={handleOpenSessionInChat} className="absolute inset-0" />}
             {activeView === 'kanban' && <KanbanView rpc={rpc} className="absolute inset-0" />}
             {activeView === 'wiki' && <WikiView rpc={rpc} className="absolute inset-0" />}
-            {activeView === 'settings' && <div className="absolute inset-0 flex items-center justify-center text-muted text-xs">Settings view — coming soon</div>}
+            {activeView === 'settings' && <SettingsView rpc={rpc} className="absolute inset-0" />}
           </div>
         </main>
 
