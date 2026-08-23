@@ -544,45 +544,12 @@
    Wiki Knowledge Graph
    ============================== */
 
-@keyframes wikiNodePulse {
-  0%   { transform: scale(0.9); opacity: 0.6; }
-  60%  { transform: scale(1.55); opacity: 0; }
-  100% { transform: scale(1.55); opacity: 0; }
-}
+/* The graph is a WebGL canvas (react-force-graph-3d); node glow comes from an
+   UnrealBloomPass, so the old CSS pulse rings and react-flow overrides are gone.
+   wikiSpin is still used by the graph's loading state. */
 
 @keyframes wikiSpin {
   to { transform: rotate(360deg); }
-}
-
-/* Strip react-flow default white-box node styling */
-.react-flow__node-wikiNode {
-  background: transparent !important;
-  border: none !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  padding: 0 !important;
-}
-
-/* Controls: dark themed */
-.react-flow__controls {
-  box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important;
-}
-.react-flow__controls-button {
-  background: var(--s2) !important;
-  border-color: var(--b1) !important;
-  fill: var(--muted) !important;
-  transition: background 0.15s, fill 0.15s !important;
-  width: 26px !important;
-  height: 26px !important;
-}
-.react-flow__controls-button:hover {
-  background: var(--s3) !important;
-  fill: var(--gold) !important;
-}
-
-/* MiniMap mask tint */
-.react-flow__minimap-mask {
-  fill: color-mix(in srgb, var(--s1) 70%, transparent) !important;
 }
 
 /* ==============================

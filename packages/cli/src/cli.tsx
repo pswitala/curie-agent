@@ -1002,9 +1002,11 @@ function App({ daemonUrl, token, model: initialModel, approvalMode: initialMode,
     });
 
     ws.on('cron-task-fired', (event: WsEvent) => {
+      // 'auto' is the legacy spelling of 'agent'.
+      const isAgentTask = event.taskType === 'agent' || event.taskType === 'auto';
       const msg = {
-        role: event.taskType === 'auto' ? 'task' as const : 'system' as const,
-        title: event.taskType === 'auto' ? String(event.message || '') : undefined,
+        role: isAgentTask ? 'task' as const : 'system' as const,
+        title: isAgentTask ? String(event.message || '') : undefined,
         content: String(event.message || ''),
       };
       if (busyRef.current) {

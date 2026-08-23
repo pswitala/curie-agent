@@ -52,13 +52,49 @@ describe('parseReminderTime', () => {
     expect(result.message).toBe('take medicine');
   });
 
-  it('defaults to 1 hour when no time pattern matches', () => {
-    const base = Date.now();
-    const result = parseReminderTime('check the codebase');
+  it('returns null when no time pattern matches instead of guessing +1h', () => {
+    // Silently scheduling an hour out produced reminders at times the user
+    // never asked for. Callers surface a usage message on null.
+    expect(parseReminderTime('check the codebase')).toBeNull();
+    expect(parseReminderTime('submit the report')).toBeNull();
+  });
+
+  it('never returns a time in the past', () => {
+    const now = new Date();
+    // A time-of-day that has already passed today rolls into tomorrow rather
+    // than firing the instant the reminder is created.
+    const past = new Date(now.getTime() - 3 * 3_600_000);
+    const hhmm = `${String(past.getHours()).padStart(2, '0')}:${String(past.getMinutes()).padStart(2, '0')}`;
+
+    for (const input of [`at ${hhmm} take pills`, `today at ${hhmm} stand up`]) {
+      const result = parseReminderTime(input);
+      expect(result, input).not.toBeNull();
+      expect(result!.scheduledAt, input).toBeGreaterThan(now.getTime());
+    }
+  });
+
+  it('does not treat a digit mid-sentence as the hour', () => {
+    // Previously "tomorrow buy 3 apples" parsed as 03:00 with the message
+    // truncated to "apples".
+    expect(parseReminderTime('tomorrow buy 3 apples')).toBeNull();
+
+    const kept = parseReminderTime('tomorrow at 9:00 call Anna about 5 invoices');
+    expect(kept).not.toBeNull();
+    expect(kept!.message).toBe('call Anna about 5 invoices');
+  });
+
+  it('applies a time-of-day to an explicit day offset', () => {
+    const result = parseReminderTime('in 3 days at 9am call mom');
     expect(result).not.toBeNull();
-    expect(result.message).toBe('check the codebase');
-    expect(result.scheduledAt).toBeGreaterThanOrEqual(base + 3_400_000);
-    expect(result.scheduledAt).toBeLessThanOrEqual(base + 3_800_000);
+    const when = new Date(result!.scheduledAt);
+    expect(when.getHours()).toBe(9);
+    expect(when.getMinutes()).toBe(0);
+    expect(result!.message).toBe('call mom');
+  });
+
+  it('rejects out-of-range clock times', () => {
+    expect(parseReminderTime('at 99 broken')).toBeNull();
+    expect(parseReminderTime('at 10:99 broken')).toBeNull();
   });
 
   it('returns null for empty input', () => {

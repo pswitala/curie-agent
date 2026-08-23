@@ -14,15 +14,7 @@ import { listSkills, discoverAllSkills } from '@curie-agent/tools';
 import { executeCd } from './slash-cd.js';
 import type { ProviderFactory } from './server.js';
 import type { DaemonApp } from './daemon-app.js';
-
-/** Real package version — previously hardcoded and years out of date. */
-const VERSION: string = (() => {
-  try {
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const pkg = JSON.parse(readFileSync(join(here, '..', '..', 'package.json'), 'utf-8')) as { version?: string };
-    return pkg.version ?? '0.0.0';
-  } catch { return '0.0.0'; }
-})();
+import { VERSION } from './version.js';
 
 export interface JsonRpcRequest {
   jsonrpc: '2.0';
@@ -906,14 +898,19 @@ export class JsonRpcHandler {
           if (typeof p.status === 'string') {
             this.daemonApp.taskManager.updateTaskStatus(taskId, p.status as any);
           }
-          if (typeof p.priority === 'string') task.priority = p.priority as any;
-          if (typeof p.title === 'string') task.title = p.title;
-          if (typeof p.description === 'string') task.description = p.description;
-          if (Array.isArray(p.tags)) task.tags = p.tags;
-          if (typeof p.mode === 'string') task.mode = p.mode as any;
-          if (typeof p.scope === 'string') task.scope = p.scope as any;
-          if (typeof p.scheduled_at === 'number') task.scheduled_at = p.scheduled_at;
-          this.daemonApp.taskManager.save();
+          // Patch through updateTask() rather than mutating the object in place —
+          // an in-place edit followed by save() writes a stale array.
+          const patch: Record<string, unknown> = {};
+          if (typeof p.priority === 'string') patch.priority = p.priority;
+          if (typeof p.title === 'string') patch.title = p.title;
+          if (typeof p.description === 'string') patch.description = p.description;
+          if (Array.isArray(p.tags)) patch.tags = p.tags;
+          if (typeof p.mode === 'string') patch.mode = p.mode;
+          if (typeof p.scope === 'string') patch.scope = p.scope;
+          if (typeof p.scheduled_at === 'number') patch.scheduled_at = p.scheduled_at;
+          if (Object.keys(patch).length > 0) {
+            this.daemonApp.taskManager.updateTask(task.id, patch as any);
+          }
           this.sharedEventBus?.emit({ type: 'todo-changed', id: crypto.randomUUID(), timestamp: Date.now(), action: 'updated', taskId } as any);
           result = { ok: true, task: this.daemonApp.taskManager.findTask(taskId) };
           break;
@@ -1559,7 +1556,8 @@ Usage: \`/model window <tokens>\` (e.g., \`/model window 120000\`).`);
             emitDelta(`Failed to parse reminder time. Please format like: \`in 2 hours call developer\` or \`tomorrow at 9:00 am meeting\`.`);
             break;
           }
-          const task = this.daemonApp.taskManager.create({ title: parsed.message, mode: 'notify', scope: 'personal', scheduled_at: parsed.scheduledAt });
+          this.daemonApp.taskManager.load();
+          this.daemonApp.taskManager.create({ title: parsed.message, mode: 'notify', scope: 'personal', scheduled_at: parsed.scheduledAt });
           emitDelta(`Reminder scheduled! **"${parsed.message}"** at ${new Date(parsed.scheduledAt).toLocaleString()}`);
           break;
         }

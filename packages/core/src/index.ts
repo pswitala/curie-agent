@@ -9,10 +9,10 @@ export type { TurnLoopConfig, TurnLoopResult, ReasoningEffort, Message, Assistan
 export { SettingsManager } from './settings.js';
 export type { CurieSettings } from './settings.js';
 export { DEFAULT_SETTINGS } from './settings.js';
-export { TaskManager } from './task-manager.js';
+export { TaskManager, getTaskManager, resetTaskManagers } from './task-manager.js';
 export type { UnifiedTask, TasksFile, ScheduleType, TaskMode, TaskStatus, TaskPriority, TaskScope } from './unified-task.js';
 export { scheduleLabel, createTaskDefaults, generateTaskId, taskTimestamp } from './unified-task.js';
-export { migrateTasks } from './task-migration.js';
+export { migrateTasks, repairTaskShapes } from './task-migration.js';
 export { readTaskSummary } from './task-summary.js';
 
 

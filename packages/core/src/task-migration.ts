@@ -1,14 +1,17 @@
 /**
- * Migration utility: reads old todo.json and cron.json, writes tasks.json.
- * Runs once — if tasks.json already exists, migration is skipped.
+ * Migration utilities.
+ *
+ * - `migrateTasks()` — one-shot merge of legacy todo.json + cron.json into tasks.json.
+ * - `repairTaskShapes()` — idempotent in-place fix-up of tasks written by older
+ *   versions, run on every startup.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import type { TaskMode, TaskPriority, TaskScope, UnifiedTask, TasksFile } from './unified-task.js';
-import { generateTaskId, taskTimestamp } from './unified-task.js';
+import { taskTimestamp } from './unified-task.js';
 
 // ---------------------------------------------------------------------------
 // Type definitions for legacy files
@@ -124,8 +127,10 @@ export function migrateTasks(oldTodoPath?: string, oldCronPath?: string, newTask
   const newFile: TasksFile = { $schema: 'tasks.schema.json', version: 1, tasks: [] };
   let order = 0;
 
-  // Migrate todo.json → human tasks
-  const todoPaths = [oldTodoPath, join(homedir(), '.curie-agent', 'todo.json')].filter(Boolean) as string[];
+  // Migrate todo.json → human tasks.
+  // An explicit path replaces the home default rather than adding to it —
+  // otherwise every caller (including tests) also pulls in the user's personal store.
+  const todoPaths = oldTodoPath ? [oldTodoPath] : [join(homedir(), '.curie-agent', 'todo.json')];
   for (const filePath of todoPaths) {
     const legacy = readLegacyTodo(filePath);
     if (!legacy) continue;
@@ -151,8 +156,8 @@ export function migrateTasks(oldTodoPath?: string, oldCronPath?: string, newTask
     }
   }
 
-  // Migrate cron.json → auto/notify tasks
-  const cronPaths = [oldCronPath, join(homedir(), '.curie-agent', 'cron.json')].filter(Boolean) as string[];
+  // Migrate cron.json → agent/notify tasks
+  const cronPaths = oldCronPath ? [oldCronPath] : [join(homedir(), '.curie-agent', 'cron.json')];
   for (const filePath of cronPaths) {
     const legacy = readLegacyCron(filePath);
     if (!legacy) continue;
@@ -185,4 +190,123 @@ export function migrateTasks(oldTodoPath?: string, oldCronPath?: string, newTask
 
   writeFileSync(target, JSON.stringify(newFile, null, 2), 'utf-8');
   return newFile;
+}
+
+// ---------------------------------------------------------------------------
+// Shape repair (idempotent, runs on every startup)
+// ---------------------------------------------------------------------------
+
+/** Legacy mode names → current TaskMode. */
+const MODE_ALIASES: Record<string, TaskMode> = {
+  auto: 'agent',
+  manual: 'human',
+};
+
+export interface RepairReport {
+  /** Tasks whose `mode` was renamed. */
+  modesRenamed: number;
+  /** Scheduled non-human tasks lifted out of an unfireable status. */
+  statusesFixed: number;
+  /** Missing/invalid scalar fields given defaults. */
+  fieldsFilled: number;
+  /** Modes we did not recognise and deliberately left alone. */
+  unknownModes: string[];
+}
+
+const VALID_STATUSES: UnifiedTask['status'][] = [
+  'backlog', 'todo', 'in_progress', 'done', 'canceled', 'pending', 'executing', 'completed', 'failed',
+];
+const VALID_PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'critical'];
+
+/**
+ * Repair tasks written by older versions, in place.
+ *
+ * Two shapes exist in real stores and neither can ever fire:
+ *  - `mode: 'auto'` — renamed to `'agent'`. `normalizeTask()` in the Todo tool
+ *    coerces unrecognised modes to `'human'`, which silently demoted scheduled
+ *    tasks into inert todo-list items.
+ *  - a scheduled `agent`/`notify` task sitting on `status: 'todo'` — the
+ *    scheduler only ever looks at `'pending'`.
+ *
+ * Unknown modes are reported, not rewritten — a silent coercion is what caused
+ * the original data loss.
+ */
+export function repairTaskShapes(tasksPath?: string): RepairReport | null {
+  const target = tasksPath ?? join(homedir(), '.curie-agent', 'tasks.json');
+  if (!existsSync(target)) return null;
+
+  let file: TasksFile;
+  try {
+    const parsed = JSON.parse(readFileSync(target, 'utf-8')) as unknown;
+    if (typeof parsed !== 'object' || parsed === null || !Array.isArray((parsed as TasksFile).tasks)) return null;
+    file = parsed as TasksFile;
+  } catch {
+    return null; // corrupt — leave it for a human to look at
+  }
+
+  const report: RepairReport = { modesRenamed: 0, statusesFixed: 0, fieldsFilled: 0, unknownModes: [] };
+  const knownModes: TaskMode[] = ['human', 'agent', 'notify'];
+
+  file.tasks.forEach((task, index) => {
+    const raw = task as unknown as Record<string, unknown>;
+
+    // --- mode ---------------------------------------------------------
+    const rawMode = typeof raw.mode === 'string' ? raw.mode : '';
+    const alias = MODE_ALIASES[rawMode];
+    if (alias) {
+      task.mode = alias;
+      report.modesRenamed++;
+    } else if (rawMode === '') {
+      // Absent mode predates the unified model — those were all todo items.
+      task.mode = 'human';
+      report.fieldsFilled++;
+    } else if (!knownModes.includes(rawMode as TaskMode)) {
+      if (!report.unknownModes.includes(rawMode)) report.unknownModes.push(rawMode);
+      return; // don't touch a task we don't understand
+    }
+
+    // --- required scalars ---------------------------------------------
+    if (!VALID_STATUSES.includes(task.status)) {
+      task.status = task.mode === 'human' ? 'todo' : 'pending';
+      report.fieldsFilled++;
+    }
+    if (!VALID_PRIORITIES.includes(task.priority)) {
+      task.priority = 'medium';
+      report.fieldsFilled++;
+    }
+    if (!Array.isArray(task.tags)) {
+      task.tags = [];
+      report.fieldsFilled++;
+    }
+    if (typeof task.order !== 'number') {
+      task.order = index;
+      report.fieldsFilled++;
+    }
+    if (typeof task.created_at !== 'string' || !task.created_at) {
+      task.created_at = taskTimestamp();
+      report.fieldsFilled++;
+    }
+    if (raw.completed_at === null) {
+      delete raw.completed_at;
+      report.fieldsFilled++;
+    }
+    if (raw.frequency === undefined) {
+      task.frequency = null;
+      report.fieldsFilled++;
+    }
+
+    // --- fireability --------------------------------------------------
+    // A scheduled agent/notify task must be 'pending' or the checker skips it forever.
+    if (task.mode !== 'human' && task.scheduled_at && (task.status === 'todo' || task.status === 'backlog')) {
+      task.status = 'pending';
+      report.statusesFixed++;
+    }
+  });
+
+  if (report.modesRenamed === 0 && report.statusesFixed === 0 && report.fieldsFilled === 0) return report;
+
+  const tmpPath = `${target}.tmp`;
+  writeFileSync(tmpPath, JSON.stringify(file, null, 2), 'utf-8');
+  renameSync(tmpPath, target);
+  return report;
 }

@@ -1,12 +1,11 @@
-import { z } from 'zod';
 import type { Tool } from '@curie-agent/core';
 import { SubagentExecutor } from '@curie-agent/core';
 import type { ProviderStream, ReasoningEffort } from '@curie-agent/core';
 import type { CurieSettings } from '@curie-agent/core';
 import type { ApprovalMode } from '@curie-agent/core';
 
-export interface SpawnAgentToolConfig {
-  subagentExecutor: SubagentExecutor;
+/** The mutable context a spawn resolves against, re-read on every call. */
+export interface SpawnAgentContext {
   provider: ProviderStream;
   cwd: string;
   settings: CurieSettings;
@@ -15,10 +14,20 @@ export interface SpawnAgentToolConfig {
   tools: Tool[];
 }
 
+export interface SpawnAgentToolConfig {
+  subagentExecutor: SubagentExecutor;
+  /**
+   * Resolved per call rather than captured once, so a subagent inherits the
+   * provider, model, and settings that are current at spawn time — not
+   * whatever was configured when the daemon booted.
+   */
+  resolve: () => SpawnAgentContext;
+}
+
 const MAX_TEXT = 50_000;
 
 export function createSpawnAgentTool(config: SpawnAgentToolConfig): Tool {
-  const { subagentExecutor, provider, cwd, settings, model, tools } = config;
+  const { subagentExecutor, resolve } = config;
 
   return {
     definition: {
@@ -72,6 +81,8 @@ export function createSpawnAgentTool(config: SpawnAgentToolConfig): Tool {
       const providerName = input.provider as string | undefined;
 
       try {
+        const { provider, cwd, settings, model, tools } = resolve();
+
         // If a specific provider is requested, create a settings override
         const spawnSettings = providerName
           ? { ...settings, current_provider: providerName } as typeof settings

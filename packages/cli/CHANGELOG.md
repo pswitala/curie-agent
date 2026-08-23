@@ -1,5 +1,45 @@
 # @curie-agent/cli
 
+## 0.4.3
+
+### Patch Changes
+
+- Add a working Settings page to the web dashboard.
+
+  The dashboard's Settings tab was a "coming soon" placeholder, so every setting in
+  `~/.curie-settings.json` was reachable only through TUI slash commands or by hand-editing
+  the file. It is now a full editor: 9 sections and 43 fields, with a draft/diff model where
+  Save writes only the paths you changed and Revert restores the fetched values.
+  - Typed controls throughout — selects for enums, bounded number inputs, and toggles that
+    distinguish real booleans (`statusline`, `debug`) from `'on'|'off'` strings (the safety
+    guards, `auto_compact.enabled`, `heartbeat.schedule`).
+  - API keys and tokens render as password fields with a reveal toggle. Because saves are
+    diff-based, an untouched secret is never re-written.
+  - Validation covers what constrained inputs cannot express: the auto-compaction ordering
+    invariant (`warn < suggest < force`), heartbeat time formats (`H:MM`, `day@H:MM`,
+    `D@H:MM`), and unparseable `mcp_servers` JSON. Save stays disabled while anything is
+    invalid.
+  - `safety.path_allowlist` and `system_prompt_files` are edited as one-per-line lists and
+    always written as arrays, migrating the legacy comma-separated string form.
+  - Fields needing a daemon restart are badged. `web_ip` is read-only and `daemon_token` is
+    omitted, since editing either from a browser tab can lock you out of the daemon.
+
+- Fix the derived top-level `model` reverting on daemon restart.
+
+  `SettingsManager.load()` recomputes `model` from `providers[current_provider].model`, so a
+  bare `config.set('model', ...)` appeared to work and then silently reverted on the next
+  start. `config.set` now mirrors the active provider's model into the top-level field, fixing
+  every caller rather than just the new settings page.
+
+- Fix `/mode` and `/effort` not broadcasting their change.
+
+  Both wrote settings without emitting `config-changed`, so other connected clients kept
+  showing a stale value until reloaded. All settings writes now go through one emit helper.
+
+- Add a bulk settings read. `config.get` accepts `key: '*'` (or no key) and returns the whole
+  settings tree in one consistent snapshot, replacing ~23 per-key round trips that could tear
+  if another client wrote mid-fetch. Existing literal-key calls are unaffected.
+
 ## 0.4.2
 
 ### Patch Changes

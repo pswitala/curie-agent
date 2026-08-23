@@ -40,6 +40,23 @@ export function expandPath(p: string): string {
   return p;
 }
 
+/**
+ * Append the local UTC offset to an ISO datetime that lacks one, so a bare
+ * "2026-08-22T09:00:00" is read as local wall-clock time rather than UTC.
+ * Already-qualified strings (trailing Z or ±HH:MM) are returned untouched.
+ */
+export function ensureTimezoneOffset(isoDateTime: string): string {
+  const trimmed = isoDateTime.trim();
+  if (/[Zz]$|[+-]\d{2}(:?\d{2})?$/.test(trimmed)) return trimmed;
+
+  const offsetMinutes = -new Date().getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const absMinutes = Math.abs(offsetMinutes);
+  const hours = String(Math.floor(absMinutes / 60)).padStart(2, '0');
+  const minutes = String(absMinutes % 60).padStart(2, '0');
+  return `${trimmed}${sign}${hours}:${minutes}`;
+}
+
 let _globalCwd = '';
 
 /** Set the global cwd used by all tools when not provided at call time. */

@@ -5,8 +5,10 @@ import type {
   EventBus, Event, SessionStore, SettingsManager,
   CurieSettings, ProviderStream, Tool,
 } from '@curie-agent/core';
-import { TaskManager, TelegramGateway, HeartbeatExecutor, HeartbeatDelivery, SubagentExecutor, migrateTasks } from '@curie-agent/core';
+import { TaskManager, TelegramGateway, HeartbeatExecutor, HeartbeatDelivery, SubagentExecutor, migrateTasks, repairTaskShapes, getTaskManager } from '@curie-agent/core';
 import type { ScheduleType, UnifiedTask, SubagentHandle } from '@curie-agent/core';
+import { createSpawnAgentTool } from '@curie-agent/tools';
+import { VERSION } from './version.js';
 import type { ProviderFactory } from './server.js';
 import { ApprovalTracker } from './approval-tracker.js';
 import { ChannelManager } from './channel-manager.js';
@@ -26,6 +28,16 @@ export interface McpConnectionStatus {
 
 /** Callback type for Telegram message delivery. */
 export type SendMessageFn = (chatId: string, text: string) => Promise<void>;
+
+/**
+ * `taskType` stamped on subagent metadata for scheduled agent-mode tasks.
+ * Must match the value the completion listeners test for and the
+ * `cron-task-fired` event schema in @curie-agent/protocol.
+ */
+export const SCHEDULED_TASK_TYPE = 'agent';
+
+/** Longest result summary forwarded to a chat channel. */
+const RESULT_SUMMARY_LIMIT = 1500;
 
 /**
  * Central orchestrator for the daemon. Wires together:
@@ -62,12 +74,37 @@ export class DaemonApp {
     private systemPrompt?: string,
   ) {
     this.approvalTracker = new ApprovalTracker(eventBus);
+    // Shared with the Todo/CreateReminder/CreateScheduledTask tools — separate
+    // instances would hold separate copies of the array and clobber each other.
+    this.taskManager = getTaskManager();
+    this.subagentExecutor = new SubagentExecutor(eventBus, sessionStore);
+
+    // spawn_agent needs the executor, so it is appended here — after the
+    // executor exists, but before anything captures the tool list.
+    if (createProvider) {
+      this.tools = [
+        ...tools,
+        createSpawnAgentTool({
+          subagentExecutor: this.subagentExecutor,
+          resolve: () => {
+            const current = settingsManager.get();
+            return {
+              provider: createProvider(current),
+              cwd: join(homedir(), '.curie-agent'),
+              settings: current,
+              model: current.providers[current.current_provider]?.model || current.model,
+              // Subagents get the base tool set; no nested spawning.
+              tools,
+            };
+          },
+        }),
+      ];
+    }
+
     this.channelManager = new ChannelManager(
       eventBus, sessionStore, settingsManager,
-      createProvider, tools, this.approvalTracker, this.systemPrompt,
+      createProvider, this.tools, this.approvalTracker, this.systemPrompt,
     );
- this.taskManager = new TaskManager();
-    this.subagentExecutor = new SubagentExecutor(eventBus, sessionStore);
   }
 
   /** Start all subsystems. */
@@ -93,6 +130,18 @@ export class DaemonApp {
 
     // Run migration: merge legacy todo.json + cron.json → tasks.json (runs once)
     try { migrateTasks(); } catch (err) { console.error('[daemon] Migration error:', err); }
+
+    // Repair shapes written by older versions (mode 'auto' → 'agent', scheduled
+    // tasks stuck on an unfireable status). Idempotent; runs every startup.
+    try {
+      const repair = repairTaskShapes();
+      if (repair && (repair.modesRenamed > 0 || repair.statusesFixed > 0 || repair.fieldsFilled > 0)) {
+        console.log(`[daemon] Task repair: ${String(repair.modesRenamed)} mode(s) renamed, ${String(repair.statusesFixed)} status(es) fixed, ${String(repair.fieldsFilled)} field(s) filled`);
+      }
+      if (repair?.unknownModes.length) {
+        console.warn(`[daemon] Tasks with unrecognised mode left untouched: ${repair.unknownModes.join(', ')}`);
+      }
+    } catch (err) { console.error('[daemon] Task repair error:', err); }
 
     // Ensure heartbeat is correctly scheduled if enabled
     this.taskManager.load();
@@ -131,26 +180,23 @@ export class DaemonApp {
     // Start cron checker
     this.startCronChecker();
 
-    // Subscribe to subagent lifecycle events for auto-mode task status updates
+    // Subscribe to subagent lifecycle events for agent-mode task status updates
     this.unsubscribes.push(
       this.eventBus.subscribe('agent-done' as any, (event: Event) => {
         const meta = (event as any).metadata as Record<string, unknown> | undefined;
-        if (meta?.taskId && meta?.taskType === 'auto') {
+        if (meta?.taskId && meta?.taskType === SCHEDULED_TASK_TYPE) {
           const taskId = meta.taskId as string;
           this.taskManager.load();
           const task = this.taskManager.findTask(taskId);
           if (task) {
-            // Clear the map entries
-            this.taskIdAgentMap.delete(taskId);
-            const agentId = this.agentIdTaskMap.get(taskId);
-            if (agentId) this.agentIdTaskMap.delete(agentId);
-            // Update task status; store result text if available
+            this.forgetTaskAgent(taskId);
             const text = (event as any).text as string | undefined;
             this.taskManager.updateTaskStatus(taskId, 'completed');
-            if (task.metadata) {
-              (task.metadata as Record<string, unknown>).resultText = text;
-              this.taskManager.save();
-            }
+            this.taskManager.updateTask(taskId, {
+              result: text,
+              metadata: { ...(task.metadata ?? {}), resultText: text },
+            });
+            this.reportScheduledTask(task, 'completed', text);
           }
         }
       }),
@@ -159,13 +205,14 @@ export class DaemonApp {
     this.unsubscribes.push(
       this.eventBus.subscribe('agent-error' as any, (event: Event) => {
         const meta = (event as any).metadata as Record<string, unknown> | undefined;
-        if (meta?.taskId && meta?.taskType === 'auto') {
+        if (meta?.taskId && meta?.taskType === SCHEDULED_TASK_TYPE) {
           const taskId = meta.taskId as string;
           this.taskManager.load();
+          const task = this.taskManager.findTask(taskId);
+          const message = (event as any).message as string | undefined;
           this.taskManager.updateTaskStatus(taskId, 'failed');
-          this.taskIdAgentMap.delete(taskId);
-          const agentId = this.agentIdTaskMap.get(taskId);
-          if (agentId) this.agentIdTaskMap.delete(agentId);
+          this.forgetTaskAgent(taskId);
+          if (task) this.reportScheduledTask(task, 'failed', message);
         }
       }),
     );
@@ -174,7 +221,7 @@ export class DaemonApp {
     this.eventBus.emit({
       type: 'daemon-ready',
       id: crypto.randomUUID(),
-      version: '0.2.4',
+      version: VERSION,
       timestamp: Date.now(),
     } as unknown as Event);
   }
@@ -320,17 +367,51 @@ export class DaemonApp {
     }
   }
 
+  /** Drop both directions of the task ↔ agent linkage. */
+  private forgetTaskAgent(taskId: string): void {
+    const agentId = this.taskIdAgentMap.get(taskId);
+    this.taskIdAgentMap.delete(taskId);
+    if (agentId) this.agentIdTaskMap.delete(agentId);
+  }
+
+  /**
+   * Announce the outcome of a scheduled agent task. Without this an agent-mode
+   * task finishes in total silence — only `notify` tasks ever spoke to the user.
+   */
+  private reportScheduledTask(task: { id: string; title: string }, outcome: 'completed' | 'failed', detail?: string): void {
+    const summary = (detail ?? '').trim().slice(0, RESULT_SUMMARY_LIMIT);
+    const icon = outcome === 'completed' ? '✅' : '❌';
+    const heading = outcome === 'completed' ? 'Scheduled task done' : 'Scheduled task failed';
+    const body = summary ? `\n\n${summary}` : '';
+
+    this.eventBus.emit({
+      type: 'cron-task-fired',
+      id: crypto.randomUUID(),
+      taskId: task.id,
+      taskType: SCHEDULED_TASK_TYPE,
+      message: `${heading}: ${task.title}`,
+      timestamp: Date.now(),
+    } as unknown as Event);
+
+    const settings = this.settingsManager.get();
+    const chatId = settings.channels?.chat_id || settings.channels?.user_id;
+    if (chatId) {
+      this.sendTelegram(chatId, `${icon} **${heading}:** ${task.title}${body}`).catch((err: unknown) => {
+        console.error('[DaemonApp] failed to deliver scheduled task result:', err);
+      });
+    }
+  }
+
   /** Start the cron checker (heartbeat + scheduled tasks + reminders). */
   private startCronChecker(intervalMs = 60_000): void {
     this.checkerTimer = setInterval(async () => {
       this.taskManager.load();
 
-      const now = Date.now();
-      const pendingTasks = this.taskManager.list({ status: 'pending' });
+      // getNextTasks() already filters to pending + due, and skips anything
+      // this process has in flight.
+      const dueTasks = this.taskManager.getNextTasks();
 
-      for (const task of pendingTasks) {
-        if (!task.scheduled_at || task.scheduled_at > now) continue;
-
+      for (const task of dueTasks) {
         if (this.taskManager.isHeartbeat(task)) {
           const oldScheduledAt = task.scheduled_at;
           const firedScheduleType = task.frequency?.type;
@@ -399,7 +480,7 @@ export class DaemonApp {
 
       this.taskManager.updateTaskStatus(task.id, 'executing');
 
-      const metadata = { taskId: task.id, taskType: 'agent' };
+      const metadata = { taskId: task.id, taskType: SCHEDULED_TASK_TYPE };
 
       // Parse optional spawn overrides from task metadata (set via WebUI schedule form)
       const spawnOverrides = task.metadata as Record<string, unknown> | undefined;
@@ -424,8 +505,13 @@ export class DaemonApp {
       this.taskIdAgentMap.set(task.id, handle.agentId);
       this.agentIdTaskMap.set(handle.agentId, task.id);
     } catch (err) {
-      this.taskManager.updateTaskStatus(task.id, 'canceled');
-      console.error('[auto task] spawn failed:', err);
+      // A spawn failure is a failure, not a cancellation — and it must be
+      // reported, or the task disappears from view with no explanation.
+      const msg = err instanceof Error ? err.message : String(err);
+      this.taskManager.updateTaskStatus(task.id, 'failed');
+      this.forgetTaskAgent(task.id);
+      this.reportScheduledTask(task, 'failed', msg);
+      console.error('[scheduled task] spawn failed:', err);
     }
   }
 

@@ -9,7 +9,7 @@ export { JsonRpcHandler } from './jsonrpc-handler.js';
 export type { JsonRpcRequest, JsonRpcResponse, JsonRpcError } from './jsonrpc-handler.js';
 export { WsHandler } from './ws-handler.js';
 export type { WsClientInfo } from './ws-handler.js';
-export { DaemonApp } from './daemon-app.js';
+export { DaemonApp, SCHEDULED_TASK_TYPE } from './daemon-app.js';
 export type { McpServerConfig, McpConnectionStatus, SendMessageFn } from './daemon-app.js';
 export { ApprovalTracker } from './approval-tracker.js';
 export { ChannelManager } from './channel-manager.js';

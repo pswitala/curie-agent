@@ -47,7 +47,8 @@
       "@curie-agent/mcp": "workspace:*",
       "@curie-agent/wiki": "workspace:*",
       "@curie-agent/tui": "workspace:*",
-      "@curie-agent/cli": "workspace:*"
+      "@curie-agent/cli": "workspace:*",
+      "three": "0.185.1"
     },
     "onlyBuiltDependencies": [
       "better-sqlite3",

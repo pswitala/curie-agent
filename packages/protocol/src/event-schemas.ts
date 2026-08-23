@@ -158,7 +158,9 @@ export const CronTaskFiredEvent = z.object({
   type: z.literal('cron-task-fired'),
   id: z.string(),
   taskId: z.string(),
-  taskType: z.enum(['notify', 'auto']),
+  // 'auto' is the legacy name for 'agent'; accepted on read so older stored
+  // events still validate.
+  taskType: z.enum(['notify', 'agent', 'auto']),
   message: z.string(),
   timestamp: z.number(),
 });

@@ -1,13 +1,11 @@
 /**
  * CreateReminder tool — schedules a notification at a specific time.
- * Migrated from CronManager to TaskManager (mode='notify').
+ * Writes through the process-shared TaskManager (mode='notify').
  */
 
 import { z } from 'zod';
-import { createTool, type ToolContext } from './tool.js';
-import { TaskManager } from '@curie-agent/core';
-
-const taskManager = new TaskManager();
+import { createTool, ensureTimezoneOffset, type ToolContext } from './tool.js';
+import { getTaskManager } from '@curie-agent/core';
 
 const CreateReminderSchema = z.object({
   message: z.string().describe('What to remind the user about'),
@@ -18,20 +16,8 @@ export const reminderTool = createTool(
   'CreateReminder',
   'Creates a reminder notification that will fire at the specified time.',
   CreateReminderSchema,
-  async (input, ctx: ToolContext) => {
-    let dateStr = input.scheduled_at.trim();
-    const hasTimezone = /[Zz]|[+-]\d{2}(:?\d{2})?$/.test(dateStr);
-    if (!hasTimezone) {
-      const date = new Date();
-      const offsetMinutes = -date.getTimezoneOffset();
-      const sign = offsetMinutes >= 0 ? '+' : '-';
-      const absMinutes = Math.abs(offsetMinutes);
-      const hours = String(Math.floor(absMinutes / 60)).padStart(2, '0');
-      const mins = String(absMinutes % 60).padStart(2, '0');
-      dateStr = `${dateStr}${sign}${hours}:${mins}`;
-    }
-
-    const scheduledAt = new Date(dateStr).getTime();
+  async (input, _ctx: ToolContext) => {
+    const scheduledAt = new Date(ensureTimezoneOffset(input.scheduled_at)).getTime();
     if (isNaN(scheduledAt)) {
       return {
         output: null,
@@ -39,8 +25,7 @@ export const reminderTool = createTool(
       };
     }
 
-    taskManager.load();
-    const task = taskManager.create({
+    const task = getTaskManager().create({
       title: input.message,
       mode: 'notify',
       scope: 'personal',

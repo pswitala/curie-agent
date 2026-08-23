@@ -21,12 +21,13 @@ function readTodo(projPath: string) {
   return JSON.parse(raw);
 }
 
+// New project stores are created as tasks.json; an existing todo.json is still honoured.
 function projectPath() {
-  return path.join(tmpDir, 'todo.json');
+  return path.join(tmpDir, 'tasks.json');
 }
 
 describe('todoTool', () => {
-  it('creates a new todo.json on first add (project scope)', async () => {
+  it('creates a new tasks.json on first add (project scope)', async () => {
     const result = await todoTool.execute(
       { action: 'add', scope: 'project', title: 'Test task' },
       {}, tmpDir, 'test-session',

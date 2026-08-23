@@ -2,6 +2,12 @@
  * Zero-dependency natural language time parser for reminders.
  * Parses patterns like "in 30 minutes", "tomorrow at 7am", "today at 19:00",
  * "next monday at 9am", etc.
+ *
+ * Two rules the callers depend on:
+ *  - A parsed time is never in the past. A reminder that fires the instant it
+ *    is created is worse than no reminder.
+ *  - An unrecognised input returns null rather than guessing. Silently
+ *    defaulting produces reminders at times the user never asked for.
  */
 
 interface ParsedReminder {
@@ -14,55 +20,39 @@ const WEEKDAYS = [
   'thursday', 'friday', 'saturday',
 ];
 
-/**
- * Parse a time string like "7:00 am", "19:00", "7am", "7:30PM".
- * Returns hours and minutes, or null if unparseable.
- */
-function parseTimeOfDay(timeStr: string): { hours: number; minutes: number } | null {
-  const match = timeStr.match(
-    /(\d{1,2}):?(\d{2})?\s*([ap]m)?/i,
-  );
-  if (!match) return null;
-
-  let hours = parseInt(match[1] ?? '0', 10);
-  const minutes = match[2] ? parseInt(match[2], 10) : 0;
-  const ampm = match[3];
-
-  if (ampm) {
-    const isPM = ampm.toLowerCase().startsWith('p');
-    if (isPM && hours < 12) hours += 12;
-    if (!isPM && hours === 12) hours = 0;
-  }
-
-  return { hours, minutes };
+interface TimeOfDay {
+  hours: number;
+  minutes: number;
 }
 
 /**
- * Extract a time-of-day from the beginning of a string, returning the time
- * and the remaining message text. e.g. "7:00 am make breakfast" →
- * { time: {hours:7, minutes:0}, message: "make breakfast" }
+ * Pull a time-of-day off the *start* of a string, returning it plus the
+ * remaining message text. Anchored deliberately: an unanchored match lets a
+ * digit anywhere in the sentence become the hour, so "tomorrow buy 3 apples"
+ * silently became "apples" at 03:00.
  */
-function extractTimeAndMessage(str: string): { time: { hours: number; minutes: number }; message: string } | null {
-  const match = str.match(/(\d{1,2}):?(\d{2})?\s*([ap]m)?\s*(.*)/i);
+function extractLeadingTime(str: string): { time: TimeOfDay; message: string } | null {
+  const match = /^(\d{1,2})(?::(\d{2}))?\s*(?:([ap])\.?m\.?)?\b\s*(.*)$/i.exec(str);
   if (!match) return null;
 
-  let hours = parseInt(match[1] ?? '0', 10);
+  let hours = parseInt(match[1] ?? '', 10);
   const minutes = match[2] ? parseInt(match[2], 10) : 0;
-  const ampm = match[3];
+  const meridiem = match[3];
   const message = (match[4] ?? '').trim();
 
-  if (ampm) {
-    const isPM = ampm.toLowerCase().startsWith('p');
+  if (meridiem) {
+    const isPM = meridiem.toLowerCase() === 'p';
     if (isPM && hours < 12) hours += 12;
     if (!isPM && hours === 12) hours = 0;
   }
+
+  if (!Number.isInteger(hours) || hours < 0 || hours > 23) return null;
+  if (!Number.isInteger(minutes) || minutes < 0 || minutes > 59) return null;
 
   return { time: { hours, minutes }, message };
 }
 
-/**
- * Apply a time-of-day to a base date, returning a new Date.
- */
+/** Apply a time-of-day to a base date, returning a new Date. */
 function applyTime(date: Date, hours: number, minutes: number): Date {
   const result = new Date(date);
   result.setHours(hours, minutes, 0, 0);
@@ -70,16 +60,16 @@ function applyTime(date: Date, hours: number, minutes: number): Date {
 }
 
 /**
- * Get the next occurrence of a weekday at a given time, or today if
- * the weekday already passed this week (returns next week).
+ * Get the next occurrence of a weekday at a given time. Always forward —
+ * "next friday" on a Friday means the Friday after this one.
  */
-function nextWeekday(dayName: string, baseDate: Date, time: { hours: number; minutes: number }): Date {
+function nextWeekday(dayName: string, baseDate: Date, time: TimeOfDay): Date | null {
   const targetDay = WEEKDAYS.indexOf(dayName.toLowerCase());
-  if (targetDay === -1) return baseDate;
+  if (targetDay === -1) return null;
 
   const today = baseDate.getDay();
   let diff = targetDay - today;
-  if (diff <= 0) diff += 7; // always go to next occurrence
+  if (diff <= 0) diff += 7;
 
   const result = new Date(baseDate);
   result.setDate(result.getDate() + diff);
@@ -91,99 +81,78 @@ export function parseReminderTime(input: string): ParsedReminder | null {
   if (!trimmed) return null;
 
   const now = new Date();
-  let remaining = trimmed;
-  let targetTime: Date | null = null;
 
-  // Pattern 1: "in X minutes"
-  const inMinMatch = remaining.match(/^in\s+(\d+)\s+minutes?/i);
+  // --- Relative offsets: an exact instant, no time-of-day involved --------
+  const inMinMatch = /^in\s+(\d+)\s+min(?:ute)?s?\b\s*(.*)$/i.exec(trimmed);
   if (inMinMatch) {
-    const mins = parseInt(inMinMatch[1]!, 10);
-    const msg = remaining.slice(inMinMatch[0].length).trim();
-    targetTime = new Date(Date.now() + mins * 60_000);
-    remaining = msg;
+    const message = (inMinMatch[2] ?? '').trim();
+    if (!message) return null;
+    return { message, scheduledAt: now.getTime() + parseInt(inMinMatch[1] ?? '0', 10) * 60_000 };
   }
 
-  // Pattern 2: "in X hours"
-  const inHourMatch = remaining.match(/^in\s+(\d+)\s+hours?/i);
+  const inHourMatch = /^in\s+(\d+)\s+(?:hours?|hrs?)\b\s*(.*)$/i.exec(trimmed);
   if (inHourMatch) {
-    const hrs = parseInt(inHourMatch[1]!, 10);
-    const msg = remaining.slice(inHourMatch[0].length).trim();
-    targetTime = new Date(Date.now() + hrs * 3_600_000);
-    remaining = msg;
+    const message = (inHourMatch[2] ?? '').trim();
+    if (!message) return null;
+    return { message, scheduledAt: now.getTime() + parseInt(inHourMatch[1] ?? '0', 10) * 3_600_000 };
   }
 
-  // Pattern 3: "in X days"
-  const inDayMatch = remaining.match(/^in\s+(\d+)\s+days?/i);
+  // --- A calendar day, optionally followed by a time-of-day --------------
+  const baseDate = new Date(now);
+  let rest: string;
+  /** Whether a past time-of-day may roll into tomorrow. */
+  let allowRollForward = false;
+  /** Time-of-day to use when the input names a day but no clock time. */
+  let defaultTime: TimeOfDay | null = null;
+  let weekday: string | null = null;
+
+  const inDayMatch = /^in\s+(\d+)\s+days?\b\s*(?:at\s+)?(.*)$/i.exec(trimmed);
+  const tomorrowMatch = /^tomorrow\b\s*(?:at\s+)?(.*)$/i.exec(trimmed);
+  const todayMatch = /^(?:today|tonight)\b\s*(?:at\s+)?(.*)$/i.exec(trimmed);
+  const nextDayMatch = /^next\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b\s*(?:at\s+)?(.*)$/i.exec(trimmed);
+  const atMatch = /^at\s+(.*)$/i.exec(trimmed);
+
   if (inDayMatch) {
-    const days = parseInt(inDayMatch[1]!, 10);
-    const msg = remaining.slice(inDayMatch[0].length).trim();
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + days);
-    tomorrow.setHours(0, 0, 0, 0);
-    targetTime = tomorrow;
-    remaining = msg;
-  }
-
-  // Pattern 4: "tomorrow at <time>"
-  const tomorrowMatch = remaining.match(/^tomorrow(?:\s+at\s+)?(.+)$/i);
-  if (tomorrowMatch) {
-    const rest = (tomorrowMatch[1] ?? '').trim();
-    const parsed = extractTimeAndMessage(rest);
-    if (parsed) {
-      const tomorrow = new Date(now);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      targetTime = applyTime(tomorrow, parsed.time.hours, parsed.time.minutes);
-      remaining = parsed.message;
-    }
-  }
-
-  // Pattern 5: "today at <time>"
-  const todayMatch = remaining.match(/^today(?:\s+at\s+)?(.+)$/i);
-  if (todayMatch) {
-    const rest = (todayMatch[1] ?? '').trim();
-    const parsed = extractTimeAndMessage(rest);
-    if (parsed) {
-      targetTime = applyTime(now, parsed.time.hours, parsed.time.minutes);
-      remaining = parsed.message;
-    }
-  }
-
-  // Pattern 6: "next <weekday> at <time>"
-  const nextDayMatch = remaining.match(
-    /^next\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+(?:at\s+)?(.+)$/i,
-  );
-  if (nextDayMatch) {
-    const dayName = (nextDayMatch[1] ?? '').trim();
-    const rest = (nextDayMatch[2] ?? '').trim();
-    const parsed = extractTimeAndMessage(rest);
-    if (parsed) {
-      targetTime = nextWeekday(dayName, now, parsed.time);
-      remaining = parsed.message;
-    }
-  }
-
-  // Pattern 7: "at <time>" (standalone — defaults to today)
-  const atMatch = remaining.match(/^at\s+(.+)$/i);
-  if (atMatch) {
-    const rest = (atMatch[1] ?? '').trim();
-    const parsed = extractTimeAndMessage(rest);
-    if (parsed) {
-      targetTime = applyTime(now, parsed.time.hours, parsed.time.minutes);
-      remaining = parsed.message;
-    }
-  }
-
-  // If no time was parsed, default to "in 1 hour"
-  if (!targetTime) {
-    targetTime = new Date(Date.now() + 3_600_000);
-  }
-
-  // Extract message: the part after time keywords
-  const message = remaining.trim();
-
-  if (!message) {
+    baseDate.setDate(baseDate.getDate() + parseInt(inDayMatch[1] ?? '0', 10));
+    rest = inDayMatch[2] ?? '';
+    defaultTime = { hours: 0, minutes: 0 };
+  } else if (tomorrowMatch) {
+    baseDate.setDate(baseDate.getDate() + 1);
+    rest = tomorrowMatch[1] ?? '';
+  } else if (todayMatch) {
+    rest = todayMatch[1] ?? '';
+    // "today at 6:00" typed at 10:00 can't mean the past — take the next 06:00.
+    allowRollForward = true;
+  } else if (nextDayMatch) {
+    weekday = nextDayMatch[1] ?? '';
+    rest = nextDayMatch[2] ?? '';
+  } else if (atMatch) {
+    rest = atMatch[1] ?? '';
+    allowRollForward = true;
+  } else {
+    // No recognisable time reference — don't invent one.
     return null;
   }
 
-  return { message, scheduledAt: targetTime.getTime() };
+  const extracted = extractLeadingTime(rest.trim());
+  const time = extracted?.time ?? defaultTime;
+  const message = (extracted ? extracted.message : rest).trim();
+
+  if (!time || !message) return null;
+
+  let target = weekday
+    ? nextWeekday(weekday, baseDate, time)
+    : applyTime(baseDate, time.hours, time.minutes);
+  if (!target) return null;
+
+  if (allowRollForward && target.getTime() <= now.getTime()) {
+    target = new Date(target);
+    target.setDate(target.getDate() + 1);
+  }
+
+  // A pinned future day (tomorrow / in N days / next <weekday>) that still
+  // lands in the past means the input was contradictory.
+  if (target.getTime() <= now.getTime()) return null;
+
+  return { message, scheduledAt: target.getTime() };
 }

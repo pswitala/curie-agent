@@ -1,5 +1,11 @@
 # @curie-agent/mcp
 
+## 0.4.3
+
+### Patch Changes
+
+- Version bump for the 0.4.3 release. No functional changes in this package.
+
 ## 0.4.2
 
 ### Patch Changes

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseSlashCommand, SLASH_COMMANDS, findSlashCommand, allSlashCommandNames, renderSlashCommandHelp } from './slash-commands.js';
@@ -103,9 +103,15 @@ describe('registry to implementation', () => {
     expect(missing).toEqual([]);
   });
 
-  it('no longer hardcodes a stale version in the daemon', () => {
-    expect(daemonSource).not.toContain("version: '0.2.4'");
-    expect(daemonSource).not.toContain('0.2.4');
+  it('no daemon file hardcodes a version literal', () => {
+    // This previously checked jsonrpc-handler.ts only, so the same stale
+    // literal survived in daemon-app.ts, server.ts and ws-handler.ts and
+    // shipped a 0.2.4 version string in a 0.4.x release.
+    const daemonSrc = join(packagesDir, 'daemon', 'src');
+    const offenders = readdirSync(daemonSrc)
+      .filter(f => f.endsWith('.ts') && !f.endsWith('.test.ts') && f !== 'version.ts')
+      .filter(f => /version:\s*['"]\d+\.\d+\.\d+['"]/.test(readFileSync(join(daemonSrc, f), 'utf-8')));
+    expect(offenders).toEqual([]);
   });
 
   it('has no duplicate case labels in the CLI dispatch switch', () => {

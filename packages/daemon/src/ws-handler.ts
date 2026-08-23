@@ -2,6 +2,7 @@ import type { Server } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { EventBus, Event } from '@curie-agent/core';
 import { validateTokenWs } from './auth.js';
+import { VERSION } from './version.js';
 
 export interface WsClientInfo {
   ws: WebSocket;
@@ -117,7 +118,7 @@ export class WsHandler {
             this.eventBus.emit({
               type: 'daemon-ready',
               id: crypto.randomUUID(),
-              version: '0.2.4',
+              version: VERSION,
               timestamp: Date.now(),
             } as unknown as Event);
           }

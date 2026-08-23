@@ -1,7 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { useApi } from '../lib/api-context.js';
 import type { JsonRpcClient } from '../lib/jsonrpc-client.js';
-import WikiGraphView from './WikiGraphView.js';
+
+// three.js is ~150-180 KB gzipped. The Graph panel already defers its data fetch
+// to the first click; defer the code the same way so it never lands in the
+// initial dashboard bundle.
+const WikiGraphView = lazy(() => import('./WikiGraphView.js'));
 
 interface PageRecord {
   slug: string;
@@ -213,11 +217,17 @@ export default function WikiView({ rpc, className }: Props) {
       {/* Body — graph panel is full-bleed, others scroll */}
       {panel === 'graph' && (
         <div className="flex-1 min-h-0">
-          <WikiGraphView
-            graphData={graphData}
-            loading={graphLoading}
-            onNodeClick={openPage}
-          />
+          <Suspense fallback={
+            <div className="flex items-center justify-center h-full text-[11px]" style={{ color: 'var(--muted)' }}>
+              Loading graph renderer…
+            </div>
+          }>
+            <WikiGraphView
+              graphData={graphData}
+              loading={graphLoading}
+              onNodeClick={openPage}
+            />
+          </Suspense>
         </div>
       )}
       <div className={`flex-1 min-h-0 overflow-y-auto px-4 py-3 scrollbar-thin${panel === 'graph' ? ' hidden' : ''}`}>

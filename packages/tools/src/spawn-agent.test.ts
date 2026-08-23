@@ -30,15 +30,20 @@ function setup(finalText = 'the answer') {
     errors: [],
   });
   const tools = [fakeTool('Read'), fakeTool('SendMessage')];
-  const tool = createSpawnAgentTool({
-    subagentExecutor: { spawn, waitFor } as never,
+  // The context is resolved per call so a subagent inherits whatever provider,
+  // model and settings are current at spawn time.
+  const resolve = vi.fn(() => ({
     provider: { name: 'anthropic', stream: vi.fn() } as never,
     cwd: '/tmp',
     settings: DEFAULT_SETTINGS,
     model: 'claude-sonnet-4-6',
     tools,
+  }));
+  const tool = createSpawnAgentTool({
+    subagentExecutor: { spawn, waitFor } as never,
+    resolve,
   });
-  return { tool, spawn, waitFor, tools };
+  return { tool, spawn, waitFor, tools, resolve };
 }
 
 describe('createSpawnAgentTool', () => {
@@ -122,5 +127,14 @@ describe('createSpawnAgentTool', () => {
     expect(result.output).toBeNull();
     expect(result.error).toContain('prompt');
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('resolves the spawn context on every call, not once at construction', async () => {
+    const { tool, resolve } = setup();
+
+    await tool.execute({ prompt: 'first' }, DEFAULT_SETTINGS);
+    await tool.execute({ prompt: 'second' }, DEFAULT_SETTINGS);
+
+    expect(resolve).toHaveBeenCalledTimes(2);
   });
 });

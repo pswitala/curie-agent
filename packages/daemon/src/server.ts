@@ -9,6 +9,7 @@ import { WsHandler } from './ws-handler.js';
 import { validateTokenHttp, rejectUnauthorized, setCorsHeaders, handleCorsPreflight, ensureToken } from './auth.js';
 import { serveStaticFile, serveWebUI } from './static-files.js';
 import { DaemonApp, type McpServerConfig, type SendMessageFn } from './daemon-app.js';
+import { VERSION } from './version.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -191,7 +192,7 @@ export class DaemonServer {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         status: 'ok',
-        version: '0.2.4',
+        version: VERSION,
         clients: this.getClientCount(),
       }));
       return;

@@ -28,6 +28,7 @@ curie-agent unifies the best ideas from **Claude Code**, **OpenAI Codex CLI**, *
 - **Safe by default** — Codex-style approval tiers (`plan`, `edit`, `auto`, `yolo`) with path guard, command guard, harm-check tool digest, and git snapshots
 - **Thinking streaming** — Real-time thinking-delta events with `Ctrl+O` toggle in TUI
 - **Context management** — Automatic and manual compaction with configurable warn / auto / forced thresholds
+- **Durable scheduling** — One task store for todos, reminders, and autonomous agent tasks. Nothing is ever auto-deleted, writes are atomic, and every writer shares one instance
 - **Inline charts** — `Chart` tool renders line, area, bar, stacked-bar, and scatter plots in the web chat pane
 - **Extensible** — MCP client, skills runtime, subagents, slash commands
 - **Memory** — Persistent markdown memory files (wiki engine with SQLite + vector search on the way)
@@ -52,12 +53,13 @@ curie-agent --version | --help
 
 ### Slash commands
 
-28 commands, defined in `@curie-agent/tui`.
+30 commands, defined in `@curie-agent/protocol` (`slash-commands.ts`) — a single registry that both the CLI and the daemon import, so `/help` can never drift from what is actually implemented.
 
 | Command | Description |
 |---------|-------------|
 | `/status` | Show version, model, and account info |
 | `/help` | Show all available commands |
+| `/system` | Show OS, platform, Node version, and PathGuard status |
 | `/init` | Run the setup wizard |
 | `/exit` | Exit curie-agent |
 | `/provider <anthropic\|openai\|google\|local\|ollama\|openrouter>` | Switch AI provider |
@@ -68,22 +70,51 @@ curie-agent --version | --help
 | `/debug [on\|off]` | Toggle debug logging |
 | `/statusline [on\|off]` | Toggle status line display |
 | `/memory [status\|add]` | View memory file sizes or capture a memory |
-| `/todo <list\|add\|complete\|remove>` | Manage tasks in `todo.json` |
+| `/todo <list\|add\|complete\|cancel\|start\|remove>` | Manage tasks in `tasks.json` (accepts 8-char ID prefixes) |
 | `/stats` | Daily usage, sessions, streaks |
 | `/context [auto\|messages\|compact [detailed\|brief]]` | Context window grid, compaction, auto-compaction config |
 | `/wiki [list\|search <query>\|lint\|status]` | Open the wiki tab or run a wiki operation |
-| `/remind <message at time>` | Create a reminder |
-| `/cron <list\|delete\|clear>` | Manage reminders |
-| `/task <create\|list\|delete>` | Schedule an agent task |
+| `/remind <message at time>` | Create a reminder (natural-language time parsing) |
+| `/cron <list\|delete <id>\|clear>` | Manage reminders |
+| `/task <create\|list\|delete>` | Schedule an autonomous agent task |
 | `/heartbeat <status\|enable\|disable\|intraday\|daily\|weekly\|monthly\|dreaming\|now>` | Manage heartbeat cycle |
-| `/agent <prompt>` | Launch external AI agent (spawns `claude` CLI subprocess) |
+| `/agent <prompt>` | Spawn an in-process subagent (streams to the Agents tab) |
 | `/tools [tools_per_call [websearch_per_call]]` | View/set tool call limits per turn |
 | `/websearch [count]` | View/set web search+fetch limit per turn |
-| `/mcp <list\|add\|remove\|reload>` | Manage MCP server connections |
+| `/mcp <list\|reload>` | Manage MCP server connections |
 | `/skill [name]` | List or show available skills |
-| `/channels <list\|set-bot-token\|set-user-id\|set-chat-id\|disconnect>` | Manage Telegram channel config |
+| `/channels <list\|switch\|set-bot-token\|set-user-id\|set-chat-id\|disconnect>` | Manage Telegram channel config |
+| `/cd <path>` | Change working directory with safety checks |
 | `/snapshots` | List recent git snapshots for recovery |
 | `/revert [index]` | Revert to a git snapshot |
+
+## Tasks and scheduling
+
+Todos, reminders, and autonomous agent tasks are one model — `UnifiedTask` in
+`~/.curie-agent/tasks.json` (or `<cwd>/tasks.json` for project scope), discriminated by `mode`:
+
+| `mode` | What it is | Who runs it | Created by |
+|--------|-----------|-------------|-----------|
+| `human` | A todo-list item | You | `/todo add`, the `Todo` tool, the web Kanban board |
+| `notify` | A reminder notification | Scheduler → event + Telegram | `/remind`, the `CreateReminder` tool |
+| `agent` | An instruction the LLM executes unattended | Scheduler → subagent | `/task create`, the `CreateScheduledTask` tool |
+| `agent` + `frequency` | A recurring heartbeat | Scheduler → `HeartbeatExecutor` | `/heartbeat` |
+
+A 60-second checker in the daemon fires anything `pending` whose `scheduled_at` has passed.
+Agent tasks run in their own session with their own turn loop, then report the outcome back over
+Telegram and as a `cron-task-fired` event. Recurring schedules use `intraday` (`7:55,9:55,…`),
+`daily` (`7:15`), `weekly` (`friday@21:00`), `monthly` (`1@6:50`), and `dreaming` (`23:01`) forms.
+
+Design guarantees, all covered by tests in `packages/core/src/task-manager.test.ts`:
+
+- **Nothing is deleted automatically.** Only `/todo remove`, `/cron delete`, and `/cron clear` drop a task.
+- **One writer per process.** `getTaskManager()` returns a shared instance per store path; every
+  mutation reloads the file if another process touched it, then writes via temp-file + rename.
+- **No past-dated reminders.** The time parser rolls a time that has already passed forward, and
+  returns an error rather than guessing when it can't read the input.
+- **Legacy stores are repaired, not reinterpreted.** `repairTaskShapes()` renames known legacy
+  modes and backfills missing fields on startup; anything it doesn't recognise is reported and
+  left alone.
 
 ## Quick start
 
@@ -108,14 +139,14 @@ curie-agent is built as a **pnpm + Turborepo** monorepo of 11 packages.
 
 | Package | Description |
 |---------|-------------|
-| `@curie-agent/core` | Event bus, session store, permission engine, turn loop, SettingsManager, CronManager, HeartbeatExecutor/Delivery, TelegramGateway, ChannelRegistry/Router, TaskManager (unified-task with human/agent/notify modes), safety guards, TokenMonitor, SubagentExecutor, context-window management, identity templates |
+| `@curie-agent/core` | Event bus, session store, permission engine, turn loop, SettingsManager, HeartbeatExecutor/Delivery, TelegramGateway, ChannelRegistry/Router, TaskManager (unified-task store with human/agent/notify modes, process-shared via `getTaskManager()`, atomic writes, no auto-deletion), safety guards, TokenMonitor, SubagentExecutor, context-window management, identity templates |
 | `@curie-agent/wiki` | Wiki engine: WikiManager (paths, index, log, graph, search, lint), Wiki tool (11 ops), WIKI.md + skill templates, WikiConfig settings |
 | `@curie-agent/protocol` | Shared zod schemas for events, JSON-RPC methods, tool definitions |
 | `@curie-agent/providers` | Provider interface with Anthropic, OpenAI, Google Gemini, Ollama, OpenRouter adapters |
 | `@curie-agent/render` | Rich-style TUI primitives (Panel, Table, Markdown, SyntaxBlock, Progress, Traceback, 8 themes) |
-| `@curie-agent/tools` | 15 registered tools: Read, Edit, Write, Glob, Grep, Bash, CreateReminder, CreateScheduledTask, WebSearch, WebFetch, Skill, Todo, Wiki, Chart, SendMessage — plus `spawn_agent` via `createSpawnAgentTool` factory |
-| `@curie-agent/mcp` | MCP client (stdio transport, tool discovery); server mode not yet implemented |
-| `@curie-agent/tui` | Ink TUI components: ChatSurface, StatusLine, TabBar (6 tabs), Mascot, 28 slash commands, init wizard, thinking streaming (Ctrl+O) |
+| `@curie-agent/tools` | 15 statically registered tools: Read, Edit, Write, Glob, Grep, Bash, CreateReminder, CreateScheduledTask, WebSearch, WebFetch, Skill, Todo, Wiki, Chart, SendMessage — plus `spawn_agent`, wired in by the daemon via `createSpawnAgentTool` (it needs the SubagentExecutor) |
+| `@curie-agent/mcp` | MCP client (stdio, SSE, and streamable-HTTP transports, tool discovery); server mode not yet implemented |
+| `@curie-agent/tui` | Ink TUI components: ChatSurface, StatusLine, TabBar (6 tabs), Mascot, slash-command parser (registry lives in `protocol`), init wizard, thinking streaming (Ctrl+O) |
 | `@curie-agent/cli` | CLI entrypoint (`curie-agent` binary), daemon+web default launch, `curie-agent tui` subcommand, wiki/session/daemon verbs, multi-provider setup |
 | `@curie-agent/daemon` | JSON-RPC server (41 methods: session CRUD, config, tools, approvals, cron, heartbeat, MCP, identity, subagents, wiki, todo, orchestra stubs), WebSocket handler, bearer-token auth, channel management, automatic compaction |
 | `@curie-agent/web` | React + Vite + Tailwind dashboard: ChatView, SubagentsView, AgentsView, ChannelsView, StatsView, ProjectsView, WikiView, WikiGraphView, KanbanView, SetupWizard, CommandPalette, chart components, JSON-RPC + WebSocket client, PWA support |
@@ -129,16 +160,18 @@ pnpm turbo build
 ## Architecture
 
 ```
-  Web (React dashboard) / TUI (Ink, 6 tabs, 28 slash commands, thinking streaming)
+  Web (React dashboard) / TUI (Ink, 6 tabs, 30 slash commands, thinking streaming)
   ↓
   Daemon (JSON-RPC + WebSocket, 41 methods, bearer-token auth, port 3457)
+  │ └─ Scheduler (60s tick) → reminders · agent tasks · heartbeats
   ↓
-  Agent Core — turn loop, permission engine, safety guards, SubagentExecutor (spawn_agent)
+  Agent Core — turn loop, permission engine, safety guards, TaskManager,
+               SubagentExecutor (spawn_agent)
   ↓
   Providers (Anthropic · OpenAI · Gemini · Ollama · OpenRouter)
   ↓
   Tools (Read · Edit · Write · Glob · Grep · Bash · WebSearch · WebFetch · CreateReminder
-         · CreateScheduledTask · Skill · Todo · Wiki · Chart)
+         · CreateScheduledTask · Skill · Todo · Wiki · Chart · SendMessage · spawn_agent)
 ```
 
 *Orchestra features (pane grid, broadcast, diff view, YAML playbooks) are stubs returning `not-implemented`; planned for Phase 5.*
@@ -149,7 +182,9 @@ pnpm turbo build
 
 **Phase 1** — Provider layer (Anthropic streaming), built-in tools (Read, Edit, Write, Glob, Grep, Bash), permission engine with approval prompts, Ink TUI with status line + scrollback, theming, mascot banner, CLI entrypoint, session save/resume, session management.
 
-**Phase 1.a** — 28 slash commands, TUI with 6 tabs (assistant, channels, stats, projects, agents, wiki), `/init` interactive setup wizard, effort/mode/approval pickers, MCP client (stdio), Telegram Gateway, Channel Registry/Router, CronManager, HeartbeatExecutor/Delivery, SettingsManager (persisted to `~/.curie-settings.json`, with legacy flat→nested migration), thinking streaming (Ctrl+O toggle), pricing tiering (`/model pricing`, cumulative cost tracking), `/task` command (TaskManager), unified task system (human/agent/notify modes with backward-compatible CronManager migration).
+**Phase 1.a** — 30 slash commands, TUI with 6 tabs (assistant, channels, stats, projects, agents, wiki), `/init` interactive setup wizard, effort/mode/approval pickers, MCP client (stdio / SSE / streamable-HTTP), Telegram Gateway, Channel Registry/Router, HeartbeatExecutor/Delivery, SettingsManager (persisted to `~/.curie-settings.json`, with legacy flat→nested migration), thinking streaming (Ctrl+O toggle), pricing tiering (`/model pricing`, cumulative cost tracking), `/task` command, unified task system (human/agent/notify modes, migrated from the earlier separate `todo.json` + `cron.json` stores).
+
+**Scheduling hardening** — The task store is now single-writer per process (`getTaskManager()`) with reload-before-mutate and atomic temp-file + rename writes, so the daemon, tools, and RPC handlers can no longer overwrite each other's changes. Automatic pruning is gone: an open todo is never deleted by age. `repairTaskShapes()` migrates legacy `mode:'auto'` tasks and lifts scheduled tasks out of statuses the scheduler could never see. Agent tasks now settle on `completed`/`failed` and report their result to Telegram instead of finishing silently. See `plans/fancy-watching-plum.md` for the full audit and rationale.
 
 **Phase 2** — OpenAI, Google Gemini, Ollama, OpenRouter provider adapters (with OpenRouter sticky `provider_order` routing and per-provider `max_output_tokens`). Safety: path guard, command guard, harm-check tool digest, git snapshots, approval tiers enforcement. TokenMonitor (context fill %, pricing tier alerts), tiered pricing format with cost estimation.
 
@@ -177,7 +212,7 @@ pnpm turbo build
 - **Web**: React 19 + Vite + Tailwind
 - **Storage**: markdown-on-disk + JSONL sessions today; better-sqlite3 + sqlite-vec planned (not yet a dependency)
 - **Schema/IPC**: zod + JSON-RPC 2.0 + WebSocket
-- **Tests**: vitest (50 test files across 11 packages)
+- **Tests**: vitest (61 test files, 1011 tests across 11 packages)
 
 ## License
 
