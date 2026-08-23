@@ -4,7 +4,7 @@ import ForceGraph3D, {
   type NodeObject,
   type LinkObject,
 } from 'react-force-graph-3d';
-import { Vector2 } from 'three';
+import { Group, Object3D, Vector2 } from 'three';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import SpriteText from 'three-spritetext';
 
@@ -21,6 +21,7 @@ import {
 import { buildPalette, categoryColor } from './wiki-graph-palette.js';
 import { bloomParamsFor } from './wiki-graph-bloom.js';
 import { cameraFitFor, viewDirection } from './wiki-graph-camera.js';
+import { createHaloSprite, createHaloTextures, haloSizeFor } from './wiki-graph-halo.js';
 
 // ---------- types ----------
 
@@ -67,13 +68,22 @@ function endpointId(value: unknown): string {
   return '';
 }
 
-function disposeSprites(cache: Map<string, SpriteText>): void {
-  for (const sprite of cache.values()) {
-    // Each SpriteText bakes its text into a CanvasTexture — that's the thing
-    // that actually leaks. Geometry is deliberately left alone: three.Sprite
-    // shares one module-level BufferGeometry across every instance.
-    sprite.material.map?.dispose();
-    sprite.material.dispose();
+function disposeNodeObjects(cache: Map<string, Object3D>): void {
+  for (const root of cache.values()) {
+    root.traverse((child) => {
+      // A SpriteText owns a per-node CanvasTexture — that's what actually leaks,
+      // so its map goes too. Halo sprites share one texture per *colour*, owned
+      // by the halo cache, so only their material is dropped here. Geometry is
+      // left alone either way: three.Sprite shares one module-level
+      // BufferGeometry across every instance.
+      if (child instanceof SpriteText) {
+        child.material.map?.dispose();
+        child.material.dispose();
+        return;
+      }
+      const holder = child as { material?: { dispose: () => void } };
+      holder.material?.dispose();
+    });
   }
   cache.clear();
 }
@@ -119,8 +129,9 @@ export default function WikiGraphView({ graphData, loading, onNodeClick }: Props
   const rendererRef = useRef<{ forceContextLoss: () => void; dispose: () => void } | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const bloomRef = useRef<UnrealBloomPass | null>(null);
-  const spriteCache = useRef(new Map<string, SpriteText>());
-  const spriteStyleRef = useRef('');
+  const nodeObjectCache = useRef(new Map<string, Object3D>());
+  const nodeObjectStyleRef = useRef('');
+  const haloTextures = useRef(createHaloTextures());
   const flyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fitted = useRef(false);
 
@@ -185,23 +196,26 @@ export default function WikiGraphView({ graphData, loading, onNodeClick }: Props
   const isEmpty = model.nodes.length === 0;
   const ready = !loading && !isEmpty && size.w > 0 && size.h > 0;
 
-  // ---- labels ----
+  // ---- node decorations (label + halo) ----
 
   const dense = model.nodes.length > DENSE_NODE_COUNT;
-  const spriteStyle = `${colors['--text2']}|${colors['--s1']}|${dense ? 'd' : 'f'}`;
+  // Halo glow stands in for bloom on light themes, where bloom physically cannot
+  // glow nodes that are darker than the backdrop. See wiki-graph-halo.ts.
+  const haloOn = light;
+  const nodeObjectStyle = `${colors['--text2']}|${colors['--s1']}|${dense ? 'd' : 'f'}|${haloOn ? 'h' : '-'}|${showLabels ? 'l' : '-'}`;
 
   /**
-   * Stable across hover changes — that is the whole point. Sprite identity is
-   * keyed only on `spriteStyle`, so a theme switch rebuilds labels (they bake
-   * colour into a texture) while hovering never does. Breaking this callback's
+   * Stable across hover changes — that is the whole point. Identity is keyed only
+   * on `nodeObjectStyle`, so a theme switch rebuilds decorations (they bake
+   * colour into textures) while hovering never does. Breaking this callback's
    * identity per hover would rebuild every node's Object3D and allocate a fresh
    * texture per node on every mouse move.
    */
-  const labelFor = useCallback((node: FgNode) => {
-    const cache = spriteCache.current;
-    if (spriteStyleRef.current !== spriteStyle) {
-      disposeSprites(cache);
-      spriteStyleRef.current = spriteStyle;
+  const nodeObjectFor = useCallback((node: FgNode) => {
+    const cache = nodeObjectCache.current;
+    if (nodeObjectStyleRef.current !== nodeObjectStyle) {
+      disposeNodeObjects(cache);
+      nodeObjectStyleRef.current = nodeObjectStyle;
     }
 
     const id = String(node.id ?? '');
@@ -209,23 +223,39 @@ export default function WikiGraphView({ graphData, loading, onNodeClick }: Props
     if (cached) return cached;
 
     const degree = typeof node.degree === 'number' ? node.degree : 0;
-    if (dense && degree < 2) return undefined as unknown as SpriteText;
+    const wantLabel = showLabels && !(dense && degree < 2);
 
-    const sprite = new SpriteText(String(node.title ?? id));
-    sprite.textHeight = 2.6;
-    sprite.color = colors['--text2'];
-    // Outline rather than a filled chip: a chip would occlude nodes behind it,
-    // and this reads on both light and dark backgrounds.
-    sprite.backgroundColor = false;
-    sprite.strokeWidth = 0.6;
-    sprite.strokeColor = colors['--s1'];
-    sprite.fontFace = 'JetBrains Mono, monospace';
-    sprite.fontWeight = '500';
-    sprite.center.y = 1.9; // sit below the sphere, as the 2D view did
+    const group = new Group();
 
-    cache.set(id, sprite);
-    return sprite;
-  }, [spriteStyle, dense, colors]);
+    if (haloOn) {
+      const category = typeof node.category === 'string' ? node.category : 'other';
+      const color = categoryColor(category, palette, colors);
+      const texture = haloTextures.current.get(color);
+      if (texture) {
+        const val = typeof node.val === 'number' ? node.val : 1;
+        // Bigger hubs get a proportionally bigger aura, matching sphere growth.
+        group.add(createHaloSprite(texture, haloSizeFor(val), 0.7));
+      }
+    }
+
+    if (wantLabel) {
+      const sprite = new SpriteText(String(node.title ?? id));
+      sprite.textHeight = 2.6;
+      sprite.color = colors['--text2'];
+      // Outline rather than a filled chip: a chip would occlude nodes behind it,
+      // and this reads on both light and dark backgrounds.
+      sprite.backgroundColor = false;
+      sprite.strokeWidth = 0.6;
+      sprite.strokeColor = colors['--s1'];
+      sprite.fontFace = 'JetBrains Mono, monospace';
+      sprite.fontWeight = '500';
+      sprite.center.y = 1.9; // sit below the sphere, as the 2D view did
+      group.add(sprite);
+    }
+
+    cache.set(id, group);
+    return group;
+  }, [nodeObjectStyle, dense, haloOn, showLabels, palette, colors]);
 
   // ---- colour accessors ----
 
@@ -390,10 +420,12 @@ export default function WikiGraphView({ graphData, loading, onNodeClick }: Props
   // ---- teardown ----
 
   useEffect(() => {
-    const sprites = spriteCache.current;
+    const objects = nodeObjectCache.current;
+    const halos = haloTextures.current;
     return () => {
       if (flyTimer.current) clearTimeout(flyTimer.current);
-      disposeSprites(sprites);
+      disposeNodeObjects(objects);
+      halos.dispose();
       try {
         // Quiet the scene first. Leaving it live produced a "Cannot read
         // properties of undefined (reading 'x')" from the library's own
@@ -442,7 +474,7 @@ export default function WikiGraphView({ graphData, loading, onNodeClick }: Props
           // land. Safe for colour, unlike the geometry props below.
           nodeColor={(node: FgNode) => nodeColorFor(node)}
           nodeThreeObjectExtend
-          nodeThreeObject={showLabels ? labelFor : undefined}
+          nodeThreeObject={nodeObjectFor}
           linkColor={(link: FgLink) => linkColorFor(link)}
           // Constant width, and no directional particles: both are per-link
           // geometry, so driving them from hover rebuilt link objects on every

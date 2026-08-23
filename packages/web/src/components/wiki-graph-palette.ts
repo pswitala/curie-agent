@@ -1,12 +1,16 @@
 import { mixHex, type ThemeColors, type ThemeVar } from '../lib/theme-colors.js';
 
 /**
- * Maps wiki categories onto the active theme's semantic colours.
+ * Maps wiki categories onto theme colours: red / green / blue for the three real
+ * categories, a neutral for everything else.
  *
- * The semantic set only carries three real hues (`--red`, `--green`, `--gold`)
- * plus neutrals, so the four known categories get pinned slots and anything
- * beyond them falls back to progressively less saturated neutrals. `--yellow`
- * sits last in the overflow ladder because it is byte-identical to `--gold` in
+ * Blue comes from `--chart-1` rather than the semantic set, which has no blue at
+ * all — only `--red`, `--green`, `--gold`/`--yellow` and neutrals. `--chart-1` is
+ * still theme-driven (and contrast-validated, with a light-theme override), so
+ * this keeps the "align to the chosen theme" property a literal hex would break.
+ *
+ * Overflow categories fall back to progressively less saturated neutrals.
+ * `--yellow` sits last in that ladder because it is byte-identical to `--gold` in
  * seven of the nine themes.
  */
 
@@ -14,12 +18,12 @@ import { mixHex, type ThemeColors, type ThemeVar } from '../lib/theme-colors.js'
 export const PINNED: Record<string, ThemeVar> = {
   concepts: '--red',
   entities: '--green',
-  summaries: '--gold',
+  summaries: '--chart-1',
   other: '--b3',
 };
 
 export const OVERFLOW_SLOTS: readonly ThemeVar[] = [
-  '--wood-light', '--text2', '--muted', '--muted2', '--yellow',
+  '--gold', '--wood-light', '--text2', '--muted', '--muted2', '--yellow',
 ];
 
 /**

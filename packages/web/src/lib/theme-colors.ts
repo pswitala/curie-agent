@@ -12,6 +12,10 @@ export const THEME_VARS = [
   '--b1', '--b2', '--b3',
   '--fg', '--text2', '--muted', '--muted2',
   '--green', '--yellow', '--red', '--gold', '--cream', '--wood-light',
+  // The semantic set has no blue. --chart-1 is the palette's blue slot and, like
+  // the rest of --chart-*, is contrast-validated per theme and carries a
+  // light-theme override — so it themes correctly where a literal hex would not.
+  '--chart-1',
 ] as const;
 
 export type ThemeVar = (typeof THEME_VARS)[number];
@@ -40,6 +44,7 @@ export const FALLBACK_THEME: ThemeColors = {
   '--gold': '#d4a54a',
   '--cream': '#f5e6d0',
   '--wood-light': '#5c4530',
+  '--chart-1': '#3987e5',
 };
 
 /**

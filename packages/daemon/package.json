@@ -1,6 +1,6 @@
 {
   "name": "@curie-agent/daemon",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "publish": true,
   "type": "module",
   "files": [

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { FALLBACK_THEME } from '../lib/theme-colors.js';
+import { FALLBACK_THEME, hexToRgb } from '../lib/theme-colors.js';
 import { buildPalette, categoryColor, PINNED, OVERFLOW_SLOTS } from './wiki-graph-palette.js';
 
 const colors = FALLBACK_THEME;
@@ -9,8 +9,21 @@ describe('buildPalette', () => {
     const palette = buildPalette(['concepts', 'entities', 'summaries', 'other'], colors);
     expect(palette.get('concepts')).toBe(colors['--red']);
     expect(palette.get('entities')).toBe(colors['--green']);
-    expect(palette.get('summaries')).toBe(colors['--gold']);
+    expect(palette.get('summaries')).toBe(colors['--chart-1']);
     expect(palette.get('other')).toBe(colors['--b3']);
+  });
+
+  it('assigns red, green and blue to the three real categories', () => {
+    const dominant = (hex: string): 'r' | 'g' | 'b' => {
+      const [r, g, b] = hexToRgb(hex);
+      if (r >= g && r >= b) return 'r';
+      if (g >= b) return 'g';
+      return 'b';
+    };
+    const palette = buildPalette(['concepts', 'entities', 'summaries'], colors);
+    expect(dominant(palette.get('concepts')!)).toBe('r');
+    expect(dominant(palette.get('entities')!)).toBe('g');
+    expect(dominant(palette.get('summaries')!)).toBe('b');
   });
 
   it('pins case-insensitively', () => {
