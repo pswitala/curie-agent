@@ -33,7 +33,10 @@ export function createSpawnAgentTool(config: SpawnAgentToolConfig): Tool {
     definition: {
       name: 'spawn_agent',
       description: 'Spawn a subagent to work on a task. The subagent runs with its own TurnLoop and streams output back to the parent session. Blocks until the subagent finishes and returns its final answer, so delegating research here keeps the intermediate tool results out of this session\'s context.',
-      inputSchema: JSON.stringify({
+      // Must stay a plain object, not a JSON string: it is passed straight through
+      // as `function.parameters`, and strict upstreams (DeepInfra/vLLM) reject a
+      // string there with HTTP 422.
+      inputSchema: {
         type: 'object',
         required: ['prompt'],
         properties: {
@@ -66,7 +69,7 @@ export function createSpawnAgentTool(config: SpawnAgentToolConfig): Tool {
             description: 'Provider to use for this subagent (default: inherits from parent)',
           },
         },
-      }),
+      },
     },
     async execute(input: Record<string, unknown>) {
       const prompt = input.prompt as string;

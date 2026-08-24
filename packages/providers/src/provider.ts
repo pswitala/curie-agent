@@ -8,6 +8,29 @@ export interface ToolDefinition {
   };
 }
 
+/**
+ * Coerce a tool's `inputSchema` into the object shape that OpenAI-compatible
+ * `function.parameters` requires. The type says object, but MCP servers hand us
+ * whatever they like and a schema can arrive as a JSON string; shipping that
+ * verbatim earns an HTTP 422 from strict upstreams (DeepInfra/vLLM) while lax
+ * ones silently accept it, which makes the failure look provider-specific.
+ */
+export function normalizeToolSchema(schema: unknown): Record<string, unknown> {
+  if (typeof schema === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(schema);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch { /* fall through to the empty-object default */ }
+    return { type: 'object', properties: {} };
+  }
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+    return { type: 'object', properties: {} };
+  }
+  return schema as Record<string, unknown>;
+}
+
 export type ProviderEvent =
   | { type: 'text-delta'; text: string }
   | { type: 'thinking-delta'; text: string }

@@ -8,6 +8,7 @@ import type {
   ProviderMessage,
   ToolDefinition,
 } from './provider.js';
+import { normalizeToolSchema } from './provider.js';
 import { streamOpenAICompatible } from './openai-compatible-stream.js';
 
 /** Default output cap for `check()` — sized for one-word harm verdicts. */
@@ -298,7 +299,7 @@ export class OllamaProvider implements Provider {
       function: {
         name: t.name,
         description: t.description,
-        parameters: t.inputSchema as Record<string, unknown>,
+        parameters: normalizeToolSchema(t.inputSchema),
       },
     }));
   }

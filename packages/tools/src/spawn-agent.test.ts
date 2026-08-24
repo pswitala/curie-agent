@@ -47,6 +47,18 @@ function setup(finalText = 'the answer') {
 }
 
 describe('createSpawnAgentTool', () => {
+  // The schema is passed straight through as OpenAI `function.parameters`.
+  // It was previously JSON.stringify'd, which strict upstreams (DeepInfra/vLLM)
+  // reject with HTTP 422 while lax ones silently accept — making the failure
+  // look provider-specific.
+  it('exposes inputSchema as an object, not a JSON string', () => {
+    const { tool } = setup();
+    const schema = tool.definition.inputSchema as unknown;
+    expect(typeof schema).toBe('object');
+    expect(schema).toMatchObject({ type: 'object', required: ['prompt'] });
+    expect((schema as { properties: Record<string, unknown> }).properties).toHaveProperty('prompt');
+  });
+
   it('forwards the parent tools to the subagent', async () => {
     const { tool, spawn, tools } = setup();
 

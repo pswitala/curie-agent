@@ -25,6 +25,7 @@ import type { ChannelTabEntry } from '@curie-agent/tui';
 import type { EffortLevel } from '@curie-agent/tui';
 import type { ModeLevel } from '@curie-agent/tui';
 import { AnthropicProvider, OpenAIProvider, OllamaProvider, GoogleGeminiProvider, OpenRouterProvider } from '@curie-agent/providers';
+import type { OpenRouterRouting } from '@curie-agent/providers';
 import { allTools, discoverAllSkills, formatSkillsForPrompt } from '@curie-agent/tools';
 import { createMcpTools } from '@curie-agent/mcp';
 import type { MCPConfig } from '@curie-agent/mcp';
@@ -203,6 +204,20 @@ function parseMcpConfigs(raw: string | Record<string, unknown> | undefined): MCP
   }
 }
 
+/**
+ * OpenRouter provider-routing preferences from settings. Shared by both
+ * construction sites so the daemon fallback provider routes identically to the
+ * primary one.
+ */
+function openRouterRouting(settings: CurieSettings): OpenRouterRouting {
+  const or = settings.providers?.openrouter;
+  return {
+    order: Array.isArray(or?.provider_order) ? or.provider_order : undefined,
+    allowFallbacks: typeof or?.allow_fallbacks === 'boolean' ? or.allow_fallbacks : undefined,
+    requireParameters: typeof or?.require_parameters === 'boolean' ? or.require_parameters : undefined,
+  };
+}
+
 /** Create a provider instance from settings. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function createProvider(settings: CurieSettings): any | null {
@@ -233,11 +248,8 @@ function createProvider(settings: CurieSettings): any | null {
       || process.env.OPENROUTER_API_KEY || '';
     const url = (typeof settings.providers?.openrouter?.url === 'string' ? settings.providers.openrouter.url.trim() : '')
       || process.env.OPENROUTER_URL || 'https://openrouter.ai/api/v1';
-    const providerOrder = Array.isArray(settings.providers?.openrouter?.provider_order)
-      ? settings.providers.openrouter.provider_order
-      : undefined;
     if (!key) return null;
-    const p = new OpenRouterProvider(key, url, providerOrder);
+    const p = new OpenRouterProvider(key, url, openRouterRouting(settings));
     return { name: 'openrouter', stream: p.stream.bind(p), check: p.check.bind(p), complete: p.complete.bind(p) };
   }
 
@@ -373,10 +385,7 @@ async function handleDaemonCommand(subcommand: string): Promise<{ keepRunning: b
         if (!provider) {
           const orKey = (typeof s.providers?.openrouter?.api_key === 'string' ? s.providers.openrouter.api_key.trim() : '') || '';
           const orUrl = (typeof s.providers?.openrouter?.url === 'string' ? s.providers.openrouter.url.trim() : '') || 'https://openrouter.ai/api/v1';
-          const orProviderOrder = Array.isArray(s.providers?.openrouter?.provider_order)
-            ? s.providers.openrouter.provider_order
-            : undefined;
-          const p = new OpenRouterProvider(orKey || 'none', orUrl, orProviderOrder);
+          const p = new OpenRouterProvider(orKey || 'none', orUrl, openRouterRouting(s));
           return { name: 'openrouter', stream: p.stream.bind(p), check: p.check.bind(p) };
         }
         return provider;

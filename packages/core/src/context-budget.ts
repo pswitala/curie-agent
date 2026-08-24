@@ -93,7 +93,7 @@ export function toolDefinitionChars(tools: readonly ToolDefinitionLike[]): numbe
   let chars = 0;
   for (const t of tools) {
     chars += t.name.length + t.description.length;
-    chars += typeof t.inputSchema === 'string' ? t.inputSchema.length : JSON.stringify(t.inputSchema).length;
+    chars += JSON.stringify(t.inputSchema).length;
   }
   return chars;
 }

@@ -9,6 +9,7 @@ import type {
   ReasoningEffort,
   ToolDefinition,
 } from './provider.js';
+import { normalizeToolSchema } from './provider.js';
 
 type CancelableIterable<T> = { iterable: AsyncIterable<T>; cancel(): void };
 
@@ -24,6 +25,24 @@ function effortToReasoning(effort?: ReasoningEffort) {
     case 'auto':
     default:       return undefined;
   }
+}
+
+/** OpenRouter provider-routing preferences. See https://openrouter.ai/docs/provider-routing */
+export interface OpenRouterRouting {
+  /** Upstream slugs to try, in order (e.g. ['deepinfra', 'novita']). */
+  order?: string[];
+  /** When false, the request fails instead of silently falling through to another upstream. */
+  allowFallbacks?: boolean;
+  /** When true, skip upstreams that don't support every parameter in the request. */
+  requireParameters?: boolean;
+  /** Hard allowlist of upstream slugs. */
+  only?: string[];
+}
+
+/** Normalize the legacy `string[]` order argument into the routing object. */
+function toRouting(routing?: string[] | OpenRouterRouting): OpenRouterRouting {
+  if (!routing) return {};
+  return Array.isArray(routing) ? { order: routing } : routing;
 }
 
 const FALLBACK_MODELS = [
@@ -47,6 +66,8 @@ export interface OpenRouterModelInfo {
   contextLength?: number;
   pricePromptPerM?: number;
   priceCompletionPerM?: number;
+  /** `top_provider.max_completion_tokens` — the largest `max_tokens` a route will accept. */
+  maxCompletionTokens?: number;
 }
 
 /** OpenRouter reports pricing as a per-token decimal string; we store per-million. */
@@ -63,11 +84,11 @@ export class OpenRouterProvider implements Provider {
 
   private client: OpenAI;
   private _baseUrl: string;
-  private _providerOrder: string[] | undefined;
+  private _routing: OpenRouterRouting;
   private _allModels: string[] | null = null;
   private _modelInfo = new Map<string, OpenRouterModelInfo>();
 
-  constructor(apiKey?: string, baseUrl?: string, providerOrder?: string[]) {
+  constructor(apiKey?: string, baseUrl?: string, routing?: string[] | OpenRouterRouting) {
     const resolvedKey = (apiKey && apiKey.length > 0)
       ? apiKey
       : process.env.OPENROUTER_API_KEY;
@@ -77,7 +98,7 @@ export class OpenRouterProvider implements Provider {
       );
     }
     this._baseUrl = baseUrl || 'https://openrouter.ai/api/v1';
-    this._providerOrder = providerOrder;
+    this._routing = toRouting(routing);
     this.client = new OpenAI({
       apiKey: resolvedKey,
       baseURL: this._baseUrl,
@@ -101,15 +122,18 @@ export class OpenRouterProvider implements Provider {
           id: string;
           context_length?: number;
           pricing?: { prompt?: string; completion?: string };
+          top_provider?: { max_completion_tokens?: number | null };
         }>;
       };
       if (data.data?.length) {
         for (const m of data.data) {
           if (!m.id) continue;
+          const cap = m.top_provider?.max_completion_tokens;
           this._modelInfo.set(m.id, {
             contextLength: m.context_length,
             pricePromptPerM: perMillion(m.pricing?.prompt),
             priceCompletionPerM: perMillion(m.pricing?.completion),
+            maxCompletionTokens: typeof cap === 'number' && cap > 0 ? cap : undefined,
           });
         }
         this._allModels = data.data.map(m => m.id).filter(Boolean);
@@ -135,6 +159,58 @@ export class OpenRouterProvider implements Provider {
     return this._modelInfo.get(id);
   }
 
+  /**
+   * The `provider` routing block, or `{}` when no preferences are configured.
+   * Shared by stream/complete/check so a harm-check isn't free-routed to an
+   * upstream the user deliberately ordered away from.
+   */
+  private providerBlock(): { provider?: Record<string, unknown> } {
+    const r = this._routing;
+    const block: Record<string, unknown> = {};
+    if (r.order && r.order.length > 0) block.order = r.order;
+    if (r.only && r.only.length > 0) block.only = r.only;
+    if (r.allowFallbacks !== undefined) block.allow_fallbacks = r.allowFallbacks;
+    if (r.requireParameters !== undefined) block.require_parameters = r.requireParameters;
+    return Object.keys(block).length > 0 ? { provider: block } : {};
+  }
+
+  /**
+   * Clamp the requested output cap to what the route will actually accept.
+   * `max_output_tokens` is user-configurable and can easily exceed a given
+   * model's completion limit, which strict upstreams reject with HTTP 422
+   * rather than clamping silently. Best-effort: if the models cache is cold or
+   * the model is unknown, pass the caller's value through unchanged.
+   */
+  private clampMaxTokens(model: string, requested: number): number {
+    const cap = this._modelInfo.get(model)?.maxCompletionTokens;
+    return cap ? Math.min(requested, cap) : requested;
+  }
+
+  /** Flatten an SDK error into a message that keeps the upstream's 422 detail. */
+  private static describeError(err: unknown): string {
+    const e = err as {
+      status?: number;
+      message?: string;
+      error?: { message?: string; metadata?: { raw?: unknown; provider_name?: unknown } };
+      response?: { status?: number };
+    };
+    const status = e.status ?? e.response?.status;
+    const parts: string[] = [];
+    if (status) parts.push(`HTTP ${String(status)}`);
+    const upstream = e.error?.metadata?.provider_name;
+    if (typeof upstream === 'string' && upstream) parts.push(`upstream=${upstream}`);
+    const detail = e.error?.message ?? e.message ?? String(err);
+    parts.push(detail);
+    // OpenRouter nests the upstream's own validation body here — for a 422 this is
+    // the only place the offending field name appears.
+    const raw = e.error?.metadata?.raw;
+    if (raw !== undefined && raw !== null) {
+      const rawStr = typeof raw === 'string' ? raw : JSON.stringify(raw);
+      if (rawStr && !detail.includes(rawStr)) parts.push(`raw=${rawStr.slice(0, 1000)}`);
+    }
+    return parts.join(': ');
+  }
+
   stream(args: ProviderStreamArgs): CancelableIterable<ProviderEvent> {
     const self = this;
     const model = args.model || this.defaultModel;
@@ -158,86 +234,122 @@ export class OpenRouterProvider implements Provider {
       stream: true,
       ...(tools ? { tools } : {}),
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
-      max_tokens: args.maxTokens ?? 65536,
+      max_tokens: this.clampMaxTokens(model, args.maxTokens ?? 65536),
       ...(reasoning ? { reasoning } : {}),
-      ...(this._providerOrder && this._providerOrder.length > 0 ? { provider: { order: this._providerOrder } } : {}),
+      ...this.providerBlock(),
       ...(args.sessionId ? { session_id: args.sessionId } : {}),
       // Sticky routing (session_id) pins the conversation to one upstream instance;
-      // cache_control lets OpenRouter auto-insert cache breakpoints on that pinned request.
+      // cache_control lets OpenRouter auto-insert cache breakpoints on that pinned
+      // request. Verified accepted by strict upstreams (DeepInfra) as of 2026-08.
       cache_control: { type: 'ephemeral' },
       stream_options: { include_usage: true },
     };
 
+    if (process.env.DEBUG_PROVIDER) {
+      // Logs the request body only — never headers, so the API key can't leak.
+      // `messages` is dropped: it's the bulk of the payload and the interesting
+      // part for a 4xx is the parameter set.
+      const rest: Record<string, unknown> = { ...streamParams };
+      delete rest.messages;
+      console.log(`[openrouter/stream] params=${JSON.stringify(rest).slice(0, 2000)}`);
+      console.log(`[openrouter/stream] messages=${String(allMessages.length)}, tools=${String(tools?.length ?? 0)}`);
+    }
+
     let sdkStream: AsyncIterable<OpenAI.ChatCompletionChunk> | null = null;
 
     async function* generator(): AsyncIterable<ProviderEvent> {
-      sdkStream = await self.client.chat.completions.create(streamParams) as AsyncIterable<OpenAI.ChatCompletionChunk>;
-
-      if (!sdkStream) return;
+      try {
+        sdkStream = await self.client.chat.completions.create(streamParams) as AsyncIterable<OpenAI.ChatCompletionChunk>;
+      } catch (sdkErr) {
+        // The request was rejected before any SSE arrived — a 4xx from OpenRouter
+        // or from the upstream it routed to. Surface it as an error event instead
+        // of throwing out of the generator, so the turn loop can report the body.
+        if (args.signal?.aborted) {
+          yield { type: 'stop', reason: 'aborted' };
+          return;
+        }
+        const detail = OpenRouterProvider.describeError(sdkErr);
+        if (process.env.DEBUG_PROVIDER) console.log(`[openrouter/stream] request failed: ${detail}`);
+        yield { type: 'stop', reason: 'error', errorDetail: detail };
+        return;
+      }
 
       const pendingTools = new Map<number, { id: string; name: string; inputStr: string }>();
       const thinkingBlocks = new Map<number, { thinking: string; signature: string }>();
       let lastUsage: OpenAI.CompletionUsage | null = null;
 
-      for await (const chunk of sdkStream) {
+      try {
+        for await (const chunk of sdkStream) {
+          if (args.signal?.aborted) {
+            break;
+          }
+
+          if (chunk.usage) {
+            lastUsage = chunk.usage;
+          }
+
+          const choice = chunk.choices?.[0];
+          if (!choice) continue;
+
+          // OpenRouter reasoning_details (not in OpenAI SDK types, cast to any).
+          const rawDelta = choice.delta as Record<string, unknown> | undefined;
+          const reasoningDetails = rawDelta?.reasoning_details as Array<{
+            type: string;
+            text?: string;
+            signature?: string | null;
+            index?: number;
+          }> | undefined;
+
+          if (reasoningDetails?.length) {
+            for (const rd of reasoningDetails) {
+              if (rd.type !== 'reasoning.text') continue;
+              const idx = rd.index ?? 0;
+              if (!thinkingBlocks.has(idx)) {
+                thinkingBlocks.set(idx, { thinking: '', signature: '' });
+              }
+              const tb = thinkingBlocks.get(idx)!;
+              if (rd.text) {
+                tb.thinking += rd.text;
+                yield { type: 'thinking-delta', text: rd.text };
+              }
+              if (rd.signature) tb.signature = rd.signature;
+            }
+          } else {
+            // No more reasoning_details — flush any pending thinking blocks.
+            for (const [, tb] of thinkingBlocks) {
+              yield { type: 'thinking-block', thinking: tb.thinking, signature: tb.signature };
+            }
+            thinkingBlocks.clear();
+          }
+
+          if (choice.delta?.content) {
+            yield { type: 'text-delta', text: choice.delta.content };
+          }
+
+          if (choice.delta?.tool_calls) {
+            for (const tc of choice.delta.tool_calls) {
+              const idx = tc.index ?? 0;
+              if (tc.id) {
+                pendingTools.set(idx, { id: tc.id, name: tc.function?.name ?? '', inputStr: '' });
+              }
+              const pending = pendingTools.get(idx);
+              if (pending) {
+                pending.inputStr += tc.function?.arguments ?? '';
+              }
+            }
+          }
+        }
+      } catch (streamErr) {
+        // Mid-stream failure (connection reset, SSE parse error, upstream error
+        // frame). Mirrors streamOpenAICompatible's handling.
         if (args.signal?.aborted) {
-          break;
+          yield { type: 'stop', reason: 'aborted' };
+          return;
         }
-
-        if (chunk.usage) {
-          lastUsage = chunk.usage;
-        }
-
-        const choice = chunk.choices?.[0];
-        if (!choice) continue;
-
-        // OpenRouter reasoning_details (not in OpenAI SDK types, cast to any).
-        const rawDelta = choice.delta as Record<string, unknown> | undefined;
-        const reasoningDetails = rawDelta?.reasoning_details as Array<{
-          type: string;
-          text?: string;
-          signature?: string | null;
-          index?: number;
-        }> | undefined;
-
-        if (reasoningDetails?.length) {
-          for (const rd of reasoningDetails) {
-            if (rd.type !== 'reasoning.text') continue;
-            const idx = rd.index ?? 0;
-            if (!thinkingBlocks.has(idx)) {
-              thinkingBlocks.set(idx, { thinking: '', signature: '' });
-            }
-            const tb = thinkingBlocks.get(idx)!;
-            if (rd.text) {
-              tb.thinking += rd.text;
-              yield { type: 'thinking-delta', text: rd.text };
-            }
-            if (rd.signature) tb.signature = rd.signature;
-          }
-        } else {
-          // No more reasoning_details — flush any pending thinking blocks.
-          for (const [, tb] of thinkingBlocks) {
-            yield { type: 'thinking-block', thinking: tb.thinking, signature: tb.signature };
-          }
-          thinkingBlocks.clear();
-        }
-
-        if (choice.delta?.content) {
-          yield { type: 'text-delta', text: choice.delta.content };
-        }
-
-        if (choice.delta?.tool_calls) {
-          for (const tc of choice.delta.tool_calls) {
-            const idx = tc.index ?? 0;
-            if (tc.id) {
-              pendingTools.set(idx, { id: tc.id, name: tc.function?.name ?? '', inputStr: '' });
-            }
-            const pending = pendingTools.get(idx);
-            if (pending) {
-              pending.inputStr += tc.function?.arguments ?? '';
-            }
-          }
-        }
+        const detail = OpenRouterProvider.describeError(streamErr);
+        if (process.env.DEBUG_PROVIDER) console.log(`[openrouter/stream] stream failed: ${detail}`);
+        yield { type: 'stop', reason: 'error', errorDetail: detail };
+        return;
       }
 
       for (const [, pending] of pendingTools) {
@@ -289,12 +401,16 @@ export class OpenRouterProvider implements Provider {
     if (args?.system) {
       messages.unshift({ role: 'system' as const, content: args.system });
     }
+    // Routing preferences apply here too — without them a harm-check or a
+    // compaction summary is free-routed to any upstream, including ones the
+    // user deliberately ordered away from.
     const response = await this.client.chat.completions.create({
       model,
       messages,
-      max_tokens: args?.maxTokens ?? CHECK_MAX_TOKENS,
+      max_tokens: this.clampMaxTokens(model, args?.maxTokens ?? CHECK_MAX_TOKENS),
       temperature: 0,
-    });
+      ...this.providerBlock(),
+    } as OpenAI.ChatCompletionCreateParamsNonStreaming);
     return response.choices[0]?.message?.content?.trim() ?? '';
   }
 
@@ -315,11 +431,12 @@ export class OpenRouterProvider implements Provider {
       stream: false,
       ...(tools ? { tools } : {}),
       ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
-      max_tokens: args.maxTokens ?? 16384,
+      max_tokens: this.clampMaxTokens(model, args.maxTokens ?? 16384),
       ...(reasoning ? { reasoning } : {}),
-      ...(this._providerOrder && this._providerOrder.length > 0 ? { provider: { order: this._providerOrder } } : {}),
+      ...this.providerBlock(),
       ...(args.sessionId ? { session_id: args.sessionId } : {}),
       cache_control: { type: 'ephemeral' },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const choice = response.choices[0];
@@ -420,7 +537,7 @@ export class OpenRouterProvider implements Provider {
       function: {
         name: t.name,
         description: t.description,
-        parameters: t.inputSchema as Record<string, unknown>,
+        parameters: normalizeToolSchema(t.inputSchema),
       },
     }));
   }

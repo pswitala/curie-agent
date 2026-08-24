@@ -53,9 +53,9 @@ describe('toolDefinitionChars', () => {
     expect(chars).toBeGreaterThan(50);
   });
 
-  it('accepts a pre-stringified schema', () => {
-    const asString = toolDefinitionChars([{ name: 'A', description: 'B', inputSchema: '{"x":1}' }]);
-    expect(asString).toBe(1 + 1 + '{"x":1}'.length);
+  it('counts an object schema by its serialized length', () => {
+    const chars = toolDefinitionChars([{ name: 'A', description: 'B', inputSchema: { x: 1 } }]);
+    expect(chars).toBe(1 + 1 + '{"x":1}'.length);
   });
 
   it('is zero for no tools', () => {

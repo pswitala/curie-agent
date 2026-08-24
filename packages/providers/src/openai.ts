@@ -10,6 +10,7 @@ import type {
   ReasoningEffort,
   ToolDefinition,
 } from './provider.js';
+import { normalizeToolSchema } from './provider.js';
 import { streamOpenAICompatible } from './openai-compatible-stream.js';
 
 type CancelableIterable<T> = { iterable: AsyncIterable<T>; cancel(): void };
@@ -445,7 +446,7 @@ export class OpenAIProvider implements Provider {
       function: {
         name: t.name,
         description: t.description,
-        parameters: t.inputSchema as Record<string, unknown>,
+        parameters: normalizeToolSchema(t.inputSchema),
       },
     }));
   }
@@ -509,7 +510,7 @@ export class OpenAIProvider implements Provider {
       type: 'function',
       name: t.name,
       description: t.description,
-      parameters: t.inputSchema,
+      parameters: normalizeToolSchema(t.inputSchema),
       strict: null,
     }));
   }

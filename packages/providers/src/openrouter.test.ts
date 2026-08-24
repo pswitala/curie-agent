@@ -69,6 +69,8 @@ describe('OpenRouterProvider', () => {
       expect(callArgs.session_id).toBeUndefined();
     });
 
+    // Verified against a strict upstream (DeepInfra) — these non-standard keys are
+    // accepted, so they stay unconditional.
     it('always includes cache_control on the stream() request, regardless of model', async () => {
       mockCreate.mockResolvedValue(makeAsyncIterableStream([]));
       const p = new OpenRouterProvider('key');
@@ -176,6 +178,156 @@ describe('OpenRouterProvider', () => {
       const models = await p.getModels();
       expect(models).toContain('anthropic/claude-sonnet-4-6');
       expect(p.getModelInfo('anthropic/claude-sonnet-4-6')).toBeUndefined();
+    });
+
+    it('captures top_provider.max_completion_tokens', async () => {
+      stubModelsFetch({
+        data: [{ id: 'deepseek/deepseek-v4-flash-0731', top_provider: { max_completion_tokens: 32768 } }],
+      });
+      const p = new OpenRouterProvider('key');
+      await p.getModels();
+      expect(p.getModelInfo('deepseek/deepseek-v4-flash-0731')?.maxCompletionTokens).toBe(32768);
+    });
+
+    it('treats a null max_completion_tokens as unknown', async () => {
+      stubModelsFetch({ data: [{ id: 'a/b', top_provider: { max_completion_tokens: null } }] });
+      const p = new OpenRouterProvider('key');
+      await p.getModels();
+      expect(p.getModelInfo('a/b')?.maxCompletionTokens).toBeUndefined();
+    });
+  });
+
+  describe('tool schemas', () => {
+    it('sends function.parameters as an object even when the schema arrives as a JSON string', async () => {
+      mockCreate.mockResolvedValue(makeAsyncIterableStream([]));
+      const p = new OpenRouterProvider('key');
+      await collectStream(p, {
+        messages: [{ role: 'user', content: 'hi' }],
+        // spawn_agent used to ship its schema pre-stringified; MCP servers can
+        // still hand us anything. A string here is a 422 on strict upstreams.
+        tools: [{
+          name: 'spawn_agent',
+          description: 'd',
+          inputSchema: JSON.stringify({ type: 'object', properties: { prompt: { type: 'string' } } }),
+        }],
+      });
+      const params = mockCreate.mock.calls[0]?.[0].tools[0].function.parameters;
+      expect(typeof params).toBe('object');
+      expect(params).toEqual({ type: 'object', properties: { prompt: { type: 'string' } } });
+    });
+
+    it('substitutes an empty object for an unparseable schema', async () => {
+      mockCreate.mockResolvedValue(makeAsyncIterableStream([]));
+      const p = new OpenRouterProvider('key');
+      await collectStream(p, {
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [{ name: 't', description: 'd', inputSchema: 'not json' }],
+      });
+      expect(mockCreate.mock.calls[0]?.[0].tools[0].function.parameters)
+        .toEqual({ type: 'object', properties: {} });
+    });
+  });
+
+  describe('provider routing', () => {
+    it('sends provider.order from the legacy string[] argument', async () => {
+      mockCreate.mockResolvedValue(makeAsyncIterableStream([]));
+      const p = new OpenRouterProvider('key', undefined, ['deepinfra', 'novita']);
+      await collectStream(p, { messages: [{ role: 'user', content: 'hi' }] });
+      expect(mockCreate.mock.calls[0]?.[0].provider).toEqual({ order: ['deepinfra', 'novita'] });
+    });
+
+    it('sends allow_fallbacks and require_parameters when configured', async () => {
+      mockCreate.mockResolvedValue(makeAsyncIterableStream([]));
+      const p = new OpenRouterProvider('key', undefined, {
+        order: ['deepinfra'],
+        allowFallbacks: false,
+        requireParameters: true,
+      });
+      await collectStream(p, { messages: [{ role: 'user', content: 'hi' }] });
+      expect(mockCreate.mock.calls[0]?.[0].provider).toEqual({
+        order: ['deepinfra'],
+        allow_fallbacks: false,
+        require_parameters: true,
+      });
+    });
+
+    it('omits the provider block entirely when nothing is configured', async () => {
+      mockCreate.mockResolvedValue(makeAsyncIterableStream([]));
+      const p = new OpenRouterProvider('key');
+      await collectStream(p, { messages: [{ role: 'user', content: 'hi' }] });
+      expect(mockCreate.mock.calls[0]?.[0].provider).toBeUndefined();
+    });
+
+    it('applies routing to check() too, so harm-checks are not free-routed', async () => {
+      mockCreate.mockResolvedValue({ choices: [{ message: { content: 'ok' } }] });
+      const p = new OpenRouterProvider('key', undefined, { order: ['novita'], allowFallbacks: false });
+      await p.check('safe?');
+      expect(mockCreate.mock.calls[0]?.[0].provider)
+        .toEqual({ order: ['novita'], allow_fallbacks: false });
+    });
+  });
+
+  describe('max_tokens clamping', () => {
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it('clamps the requested cap to the model max_completion_tokens', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        json: async () => ({ data: [{ id: 'deepseek/v4', top_provider: { max_completion_tokens: 32768 } }] }),
+      }));
+      const p = new OpenRouterProvider('key');
+      await p.getModels();
+      mockCreate.mockResolvedValue(makeAsyncIterableStream([]));
+      await collectStream(p, { messages: [{ role: 'user', content: 'hi' }], model: 'deepseek/v4', maxTokens: 131072 });
+      expect(mockCreate.mock.calls[0]?.[0].max_tokens).toBe(32768);
+    });
+
+    it('passes the requested cap through when the model cap is unknown', async () => {
+      mockCreate.mockResolvedValue(makeAsyncIterableStream([]));
+      const p = new OpenRouterProvider('key');
+      await collectStream(p, { messages: [{ role: 'user', content: 'hi' }], model: 'unknown/model', maxTokens: 4096 });
+      expect(mockCreate.mock.calls[0]?.[0].max_tokens).toBe(4096);
+    });
+  });
+
+  describe('reasoning effort', () => {
+    it("omits reasoning for effort 'auto'", async () => {
+      mockCreate.mockResolvedValue(makeAsyncIterableStream([]));
+      const p = new OpenRouterProvider('key');
+      await collectStream(p, { messages: [{ role: 'user', content: 'hi' }], effort: 'auto' });
+      expect(mockCreate.mock.calls[0]?.[0].reasoning).toBeUndefined();
+    });
+  });
+
+  describe('error handling', () => {
+    it('yields a stop/error event carrying the status and upstream 422 body', async () => {
+      const err = Object.assign(new Error('Provider returned error'), {
+        status: 422,
+        error: {
+          message: 'Provider returned error',
+          metadata: { provider_name: 'DeepInfra', raw: '{"detail":"max_tokens too large"}' },
+        },
+      });
+      mockCreate.mockRejectedValue(err);
+      const p = new OpenRouterProvider('key');
+      const events = await collectStream(p, { messages: [{ role: 'user', content: 'hi' }] });
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('stop');
+      expect(events[0].reason).toBe('error');
+      expect(events[0].errorDetail).toContain('HTTP 422');
+      expect(events[0].errorDetail).toContain('DeepInfra');
+      expect(events[0].errorDetail).toContain('max_tokens too large');
+    });
+
+    it('reports a mid-stream failure as stop/error instead of throwing', async () => {
+      mockCreate.mockResolvedValue({
+        [Symbol.asyncIterator]() {
+          return { next: async () => { throw Object.assign(new Error('boom'), { status: 500 }); } };
+        },
+      });
+      const p = new OpenRouterProvider('key');
+      const events = await collectStream(p, { messages: [{ role: 'user', content: 'hi' }] });
+      expect(events.at(-1)).toMatchObject({ type: 'stop', reason: 'error' });
+      expect(events.at(-1).errorDetail).toContain('HTTP 500');
     });
   });
 });

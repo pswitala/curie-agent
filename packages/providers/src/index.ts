@@ -1,4 +1,4 @@
-export { createRegistry } from './provider.js';
+export { createRegistry, normalizeToolSchema } from './provider.js';
 export type {
   Provider,
   ProviderEvent,
@@ -13,3 +13,4 @@ export { OpenAIProvider } from './openai.js';
 export { OllamaProvider } from './ollama.js';
 export { GoogleGeminiProvider } from './google.js';
 export { OpenRouterProvider } from './openrouter.js';
+export type { OpenRouterRouting, OpenRouterModelInfo } from './openrouter.js';

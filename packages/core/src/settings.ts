@@ -11,8 +11,17 @@ export interface ProviderConfig {
   model_cost: string;
   model_context_window: number;
   max_output_tokens?: number;
+  /** OpenRouter only: upstream slugs to try, in order (e.g. ['deepinfra', 'novita']). */
   provider_order?: string[];
-  [key: string]: string | number | string[] | undefined;
+  /**
+   * OpenRouter only. When false, a request that the ordered upstreams reject
+   * fails outright instead of silently falling through to another provider —
+   * which otherwise hides per-upstream errors behind a slower successful retry.
+   */
+  allow_fallbacks?: boolean;
+  /** OpenRouter only: skip upstreams that don't support every parameter sent. */
+  require_parameters?: boolean;
+  [key: string]: string | number | boolean | string[] | undefined;
 }
 
 export interface ProviderMap {
@@ -563,7 +572,7 @@ export function parseNestedSettings(parsed: Record<string, unknown>): CurieSetti
   const providers: ProviderMap = { ...DEFAULT_SETTINGS.providers };
   const provKeys: (keyof ProviderMap)[] = ['anthropic', 'openai', 'openrouter', 'google', 'ollama', 'local'];
 
-  const rawProviders = parsed.providers as Record<string, Record<string, string | number | undefined>> | undefined;
+  const rawProviders = parsed.providers as Record<string, Record<string, string | number | boolean | string[] | undefined>> | undefined;
   if (rawProviders) {
     for (const name of provKeys) {
       const raw = rawProviders[name];
@@ -576,6 +585,8 @@ export function parseNestedSettings(parsed: Record<string, unknown>): CurieSetti
           model_context_window: typeof raw.model_context_window === 'number' ? raw.model_context_window : (DEFAULT_SETTINGS.providers[name as string]!.model_context_window),
           max_output_tokens: typeof raw.max_output_tokens === 'number' ? raw.max_output_tokens : DEFAULT_SETTINGS.providers[name as string]!.max_output_tokens,
           provider_order: Array.isArray(raw.provider_order) ? raw.provider_order : undefined,
+          allow_fallbacks: typeof raw.allow_fallbacks === 'boolean' ? raw.allow_fallbacks : undefined,
+          require_parameters: typeof raw.require_parameters === 'boolean' ? raw.require_parameters : undefined,
         };
       }
     }
