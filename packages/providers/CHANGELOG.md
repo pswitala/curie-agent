@@ -1,5 +1,14 @@
 # @curie-agent/providers
 
+## 0.4.6
+
+### Patch Changes
+
+- Fix HTTP 422 from strict OpenRouter upstreams (DeepInfra): `mapTools` now runs tool schemas through the new `normalizeToolSchema()` helper, so a schema handed over as a JSON string (or any non-object, e.g. from an MCP server) is coerced to an object before it becomes `function.parameters`. Applied to the openrouter, openai and ollama adapters.
+- OpenRouter `stream()` no longer throws raw SDK errors: request and mid-stream failures are yielded as `stop`/`error` events whose `errorDetail` carries the HTTP status, the upstream provider name and the upstream body (`error.metadata.raw`) — previously the response body was never read. Adds `DEBUG_PROVIDER` request logging (body only, never headers).
+- OpenRouter `max_tokens` is clamped to the model's `top_provider.max_completion_tokens` when known.
+- New `OpenRouterRouting` option object (`order`, `allowFallbacks`, `requireParameters`, `only`); the legacy `string[]` order argument still works. Routing preferences now also apply to `check()`, which previously free-routed harm-checks and compaction summaries regardless of configured order.
+
 ## 0.4.3
 
 ### Patch Changes

@@ -137,6 +137,16 @@ export const TodoUpdateSchema = z.object({
 
 export const TodoRemoveSchema = z.object({ id: z.string() });
 
+// Markdown document reader (artifacts + memory)
+export const DocSourceSchema = z.enum(['artifacts', 'memory']);
+export const DocsListSchema = z.object({ source: DocSourceSchema.optional() });
+export const DocsReadSchema = z.object({ source: DocSourceSchema, path: z.string() });
+export const DocsSearchSchema = z.object({
+  source: DocSourceSchema,
+  query: z.string(),
+  limit: z.number().optional(),
+});
+
 export const Method = {
   SESSION_LIST: 'session.list',
   SESSION_GET: 'session.get',
@@ -188,4 +198,8 @@ export const Method = {
   SUBAGENT_CANCEL: 'subagent.cancel',
   SUBAGENT_STATS: 'subagent.stats',
   SUBAGENT_SEND: 'subagent.send',
+  // Markdown document reader (artifacts + memory)
+  DOCS_LIST: 'docs.list',
+  DOCS_READ: 'docs.read',
+  DOCS_SEARCH: 'docs.search',
 } as const;

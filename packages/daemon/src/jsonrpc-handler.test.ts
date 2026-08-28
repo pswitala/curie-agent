@@ -321,3 +321,51 @@ describe('config-changed emission', () => {
   });
 });
 
+
+describe('docs.* methods', () => {
+  let handler: JsonRpcHandler;
+
+  beforeEach(() => {
+    handler = new JsonRpcHandler(createMockSessionStore(), createMockSettingsManager());
+  });
+
+  const call = (method: string, params?: Record<string, unknown>) =>
+    handler.handle({ jsonrpc: '2.0', id: 1, method, params });
+
+  it('rejects an unknown source on docs.read', async () => {
+    const r: any = await call(Method.DOCS_READ, { source: 'wiki', path: 'x.md' });
+    expect(r.error?.code).toBe(-32602);
+  });
+
+  it('rejects an unknown source on docs.list', async () => {
+    const r: any = await call(Method.DOCS_LIST, { source: 'sessions' });
+    expect(r.error?.code).toBe(-32602);
+  });
+
+  it('rejects a missing path on docs.read', async () => {
+    const r: any = await call(Method.DOCS_READ, { source: 'memory' });
+    expect(r.error?.code).toBe(-32602);
+  });
+
+  it('rejects a missing query on docs.search', async () => {
+    const r: any = await call(Method.DOCS_SEARCH, { source: 'memory' });
+    expect(r.error?.code).toBe(-32602);
+  });
+
+  it('returns both sources when source is omitted', async () => {
+    const r: any = await call(Method.DOCS_LIST, {});
+    expect(r.error).toBeUndefined();
+    expect(r.result.sources.map((s: any) => s.source)).toEqual(['artifacts', 'memory']);
+  });
+
+  it('returns a result-level error for traversal rather than throwing', async () => {
+    const r: any = await call(Method.DOCS_READ, { source: 'memory', path: '../.curie-settings.json' });
+    expect(r.error).toBeUndefined();
+    expect(r.result.error).toBeTruthy();
+  });
+
+  it('refuses a path outside the memory include predicate', async () => {
+    const r: any = await call(Method.DOCS_READ, { source: 'memory', path: 'sessions/x.md' });
+    expect(r.result.error).toBeTruthy();
+  });
+});

@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { useApi } from '../lib/api-context.js';
+import MarkdownDoc, { DocViewModeToggle, useDocViewMode, type DocLinkTarget } from './MarkdownDoc.js';
 import type { JsonRpcClient } from '../lib/jsonrpc-client.js';
 
 // three.js is ~150-180 KB gzipped. The Graph panel already defers its data fetch
@@ -45,7 +46,9 @@ export default function WikiView({ rpc, className }: Props) {
   const [panel, setPanel] = useState<PanelView>('browse');
   const panelRef = useRef<PanelView>('browse');
   panelRef.current = panel;
-  const [_selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [history, setHistory] = useState<string[]>([]);
+  const [viewMode, setViewMode] = useDocViewMode();
   const [pageContent, setPageContent] = useState<string | null>(null);
   const [pageLoading, setPageLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -94,7 +97,7 @@ export default function WikiView({ rpc, className }: Props) {
     });
   }, [ws, fetchPages, fetchGraph]);
 
-  const openPage = useCallback(async (slug: string) => {
+  const loadPage = useCallback(async (slug: string) => {
     if (!rpc) return;
     setSelectedSlug(slug);
     setPanel('page');
@@ -109,6 +112,28 @@ export default function WikiView({ rpc, className }: Props) {
       setPageLoading(false);
     }
   }, [rpc]);
+
+  /** Entry point from the browse list, search results and graph — resets history. */
+  const openPage = useCallback((slug: string) => {
+    setHistory([]);
+    void loadPage(slug);
+  }, [loadPage]);
+
+  /** Both link kinds resolve to a wiki slug; `.md` only appears in relative hrefs. */
+  const followLink = useCallback((target: DocLinkTarget) => {
+    const slug = (target.kind === 'path' ? target.path : target.target).replace(/\.(md|markdown)$/i, '');
+    setHistory(h => (selectedSlug ? [...h, selectedSlug] : h));
+    void loadPage(slug);
+  }, [loadPage, selectedSlug]);
+
+  const goBack = useCallback(() => {
+    if (history.length === 0) return;
+    const prev = history[history.length - 1];
+    setHistory(h => h.slice(0, -1));
+    void loadPage(prev);
+  }, [history, loadPage]);
+
+  const knownPaths = useMemo(() => new Set(pages.map(p => `${p.slug}.md`)), [pages]);
 
   const runSearch = useCallback(async () => {
     if (!rpc || !searchQuery.trim()) return;
@@ -201,6 +226,7 @@ export default function WikiView({ rpc, className }: Props) {
             border: panel === 'graph' ? '1px solid var(--b2)' : '1px solid transparent',
           }}
         >Graph</button>
+        {panel === 'page' && <DocViewModeToggle mode={viewMode} onChange={setViewMode} />}
         <button
           onClick={() => fetchPages()}
           className="flex items-center justify-center w-7 h-7 rounded-lg transition-all duration-150 cursor-pointer"
@@ -288,23 +314,43 @@ export default function WikiView({ rpc, className }: Props) {
         {/* Page reader panel */}
         {panel === 'page' && (
           <div>
-            <button
-              onClick={() => setPanel('browse')}
-              className="flex items-center gap-1.5 text-[11px] mb-3 cursor-pointer transition-colors duration-100"
-              style={{ color: 'var(--muted)' }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <polyline points="15 18 9 12 15 6" />
-              </svg>
-              Back to index
-            </button>
+            <div className="flex items-center gap-3 mb-3">
+              <button
+                onClick={() => { setHistory([]); setPanel('browse'); }}
+                className="flex items-center gap-1.5 text-[11px] cursor-pointer transition-colors duration-100"
+                style={{ color: 'var(--muted)' }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+                Back to index
+              </button>
+              {history.length > 0 && (
+                <button
+                  onClick={goBack}
+                  className="text-[11px] cursor-pointer transition-colors duration-100"
+                  style={{ color: 'var(--gold)' }}
+                  title={`Back to ${history[history.length - 1]}`}
+                >
+                  ← {history[history.length - 1]}
+                </button>
+              )}
+              <div className="flex-1" />
+              {selectedSlug && (
+                <span className="text-[10px] font-mono truncate" style={{ color: 'var(--muted)' }}>{selectedSlug}</span>
+              )}
+            </div>
             {pageLoading && (
               <div className="flex items-center justify-center h-32 text-xs" style={{ color: 'var(--muted)' }}>Loading…</div>
             )}
             {!pageLoading && pageContent !== null && (
-              <pre className="text-[11px] leading-relaxed whitespace-pre-wrap font-mono p-3 rounded-lg overflow-auto" style={{ background: 'var(--s2)', color: 'var(--fg)', border: '1px solid var(--b1)' }}>
-                {pageContent}
-              </pre>
+              <MarkdownDoc
+                content={pageContent}
+                docPath={selectedSlug ? `${selectedSlug}.md` : undefined}
+                knownPaths={knownPaths}
+                mode={viewMode}
+                onNavigate={followLink}
+              />
             )}
           </div>
         )}

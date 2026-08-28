@@ -79,6 +79,10 @@ export {
   TodoCreateSchema,
   TodoUpdateSchema,
   TodoRemoveSchema,
+  DocSourceSchema,
+  DocsListSchema,
+  DocsReadSchema,
+  DocsSearchSchema,
 } from './methods.js';
 
 export {

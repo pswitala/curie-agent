@@ -1,5 +1,11 @@
 # @curie-agent/tools
 
+## 0.4.6
+
+### Patch Changes
+
+- Fix `spawn_agent` shipping its `inputSchema` as a `JSON.stringify` string. It reached providers as `function.parameters: "{...}"`, which strict upstream validators (DeepInfra/vLLM) reject with HTTP 422 while lax ones silently accept — making the failure look provider-specific.
+
 ## 0.4.3
 
 ### Patch Changes

@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
 //
-// jsdom, not the workspace default of node: renderMarkdown runs DOMPurify,
-// which needs a DOM. Under node every sanitize() call throws into the
-// escapeHtml fallback, so the sanitizer tests would pass without ever
-// exercising the sanitizer.
+// jsdom, not the workspace default of node: this module graph pulls in
+// lib/markdown.ts, which loads DOMPurify at import time. The sanitizer tests
+// themselves now live in lib/markdown.test.ts.
 import { describe, it, expect } from 'vitest';
-import { eventToMessage, findToolResult, buildMessages, renderMarkdown } from './ChatView.js';
+import { eventToMessage, findToolResult, buildMessages } from './ChatView.js';
 import type { WsEvent } from '../lib/ws-client.js';
 
 function chartToolCall(input: Record<string, unknown>, toolCallId = 'call_1'): WsEvent {
@@ -97,27 +96,5 @@ describe('eventToMessage — context-warning', () => {
       { type: 'context-warning', id: 'w1', message: 'Context 81% full.', timestamp: 1002 } as unknown as WsEvent,
     ]);
     expect(JSON.stringify(built)).not.toContain('Here is the answer.Context 81% full.');
-  });
-});
-
-describe('renderMarkdown sanitization', () => {
-  it('strips script tags', () => {
-    expect(renderMarkdown('<script>alert(1)</script>')).not.toContain('<script');
-  });
-
-  it('strips inline event handlers reachable via fetched page content', () => {
-    const out = renderMarkdown('<img src=x onerror=alert(1)>');
-    expect(out).not.toContain('onerror');
-  });
-
-  it('strips javascript: URLs', () => {
-    expect(renderMarkdown('[click](javascript:alert(1))')).not.toContain('javascript:');
-  });
-
-  it('still renders ordinary markdown', () => {
-    const out = renderMarkdown('## Title\n\n* one\n* two\n\n`code`');
-    expect(out).toContain('<h2');
-    expect(out).toContain('<li>');
-    expect(out).toContain('<code>');
   });
 });

@@ -248,4 +248,17 @@ export class JsonRpcClient {
   async wikiGraph(): Promise<unknown> {
     return this.request('wiki.graph');
   }
+
+  // Docs (artifacts + memory)
+  async docsList(source?: 'artifacts' | 'memory'): Promise<unknown> {
+    return this.request('docs.list', source ? { source } : {});
+  }
+
+  async docsRead(source: 'artifacts' | 'memory', path: string): Promise<unknown> {
+    return this.request('docs.read', { source, path });
+  }
+
+  async docsSearch(source: 'artifacts' | 'memory', query: string, limit?: number): Promise<unknown> {
+    return this.request('docs.search', { source, query, limit });
+  }
 }

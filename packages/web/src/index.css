@@ -701,3 +701,21 @@
   color: var(--text);
   font-size: 12px;
 }
+
+/* Internal document links. These carry data-doc and no href (the sanitizer
+   strips relative hrefs), so they need explicit link affordances. */
+.markdown-body .doc-link {
+  color: var(--gold);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+.markdown-body .doc-link:hover {
+  color: var(--cream);
+  text-decoration-style: solid;
+}
+.markdown-body .doc-link-broken {
+  color: var(--red);
+  opacity: 0.8;
+}

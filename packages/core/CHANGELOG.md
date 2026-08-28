@@ -1,5 +1,12 @@
 # @curie-agent/core
 
+## 0.4.6
+
+### Patch Changes
+
+- `ProviderConfig` gains `allow_fallbacks` and `require_parameters` (OpenRouter provider routing), both parsed from `~/.curie-settings.json`.
+- `toolDefinitionChars()` drops the string-schema workaround now that every tool schema is an object.
+
 ## 0.4.3
 
 ### Patch Changes

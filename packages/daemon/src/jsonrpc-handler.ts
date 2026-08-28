@@ -12,6 +12,7 @@ import {
 import type { SessionStore, SettingsManager, Event, ProviderStream, Tool, CurieSettings, CompactionResult } from '@curie-agent/core';
 import { listSkills, discoverAllSkills } from '@curie-agent/tools';
 import { executeCd } from './slash-cd.js';
+import { isDocSource, listDocs, readDoc, searchDocs, type DocSource } from './docs-store.js';
 import type { ProviderFactory } from './server.js';
 import type { DaemonApp } from './daemon-app.js';
 import { VERSION } from './version.js';
@@ -647,6 +648,40 @@ export class JsonRpcHandler {
           const wm = new WikiManager(this.settingsManager.get() as any);
           wm.ensureStructure();
           result = wm.graph();
+          break;
+        }
+
+        // Markdown document reader (artifacts + memory).
+        // All path validation lives in docs-store; these cases only guard the
+        // `source` discriminator, which must never be used to build a root.
+        case Method.DOCS_LIST: {
+          const p = params as Record<string, unknown> | undefined;
+          const src = p?.['source'];
+          if (src !== undefined && !isDocSource(src)) return this.paramError('source');
+          const sources: DocSource[] = src === undefined ? ['artifacts', 'memory'] : [src];
+          result = { sources: sources.map(s => listDocs(s)) };
+          break;
+        }
+
+        case Method.DOCS_READ: {
+          const p = params as Record<string, unknown>;
+          const src = p?.['source'];
+          if (!isDocSource(src)) return this.paramError('source');
+          const docPath = this.getStringParam(p, 'path');
+          if (!docPath) return this.paramError('path');
+          result = readDoc(src, docPath);
+          break;
+        }
+
+        case Method.DOCS_SEARCH: {
+          const p = params as Record<string, unknown>;
+          const src = p?.['source'];
+          if (!isDocSource(src)) return this.paramError('source');
+          const query = this.getStringParam(p, 'query');
+          if (!query) return this.paramError('query');
+          const rawLimit = p?.['limit'];
+          const limit = typeof rawLimit === 'number' && Number.isFinite(rawLimit) ? rawLimit : undefined;
+          result = { source: src, query, ...searchDocs(src, query, limit) };
           break;
         }
 

@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
 import { useApi } from '../lib/api-context.js';
 import { formatTime, formatToolArgs, stringifyInput } from '../lib/format.js';
+import { renderMarkdown } from '../lib/markdown.js';
 import ChatInput from './ChatInput.js';
 import ChartBlock from './charts/ChartBlock.js';
 import type { JsonRpcClient } from '../lib/jsonrpc-client.js';
@@ -255,48 +254,6 @@ export function findToolResult(events: WsEvent[], toolCallId: string): { output?
   const result = events.find((e) => e.type === 'tool-result' && (e as any).toolCallId === toolCallId) as any;
   if (!result) return undefined;
   return { output: result.output, error: result.error };
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
-}
-
-marked.setOptions({
-  gfm: true,
-  breaks: true,
-});
-
-/**
- * marked v18 has no sanitizer, and this output goes straight into
- * dangerouslySetInnerHTML. Model output and fetched web content both reach it,
- * so an unsanitized `<img src=x onerror=…>` in a scraped page would execute in
- * the dashboard. Nothing in the daemon emits raw HTML any more — `/context`
- * became a structured event — so the allowlist can stay strict.
- */
-function sanitize(html: string): string {
-  return DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: [
-      'p', 'br', 'hr', 'span', 'div',
-      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-      'strong', 'em', 'b', 'i', 'u', 's', 'del', 'ins', 'mark', 'sub', 'sup',
-      'ul', 'ol', 'li', 'dl', 'dt', 'dd',
-      'blockquote', 'code', 'pre', 'kbd', 'samp', 'var',
-      'a', 'img',
-      'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption',
-      'input', // GFM task-list checkboxes
-    ],
-    ALLOWED_ATTR: ['href', 'title', 'alt', 'src', 'class', 'lang', 'colspan', 'rowspan', 'start', 'type', 'checked', 'disabled'],
-    ALLOWED_URI_REGEXP: /^(?:https?|mailto):/i,
-    FORBID_ATTR: ['style', 'srcset', 'formaction', 'form'],
-  });
-}
-
-export function renderMarkdown(content: string): string {
-  try {
-    return sanitize(marked.parse(content) as string);
-  } catch {
-    return escapeHtml(content);
-  }
 }
 
 interface ToolCallEntry {

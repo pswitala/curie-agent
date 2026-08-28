@@ -1,5 +1,11 @@
 # @curie-agent/cli
 
+## 0.4.6
+
+### Patch Changes
+
+- OpenRouter provider construction now threads `allow_fallbacks` and `require_parameters` from settings, via a shared helper used by both the primary and daemon-fallback provider factories.
+
 ## 0.4.3
 
 ### Patch Changes
